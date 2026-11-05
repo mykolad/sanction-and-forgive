@@ -1,0 +1,46 @@
+# Version updates. The SDK (global.json) and the Docker tags aren't here: they float within .NET 10 on purpose, and
+# moving to a new major is a change of its own.
+version: 2
+
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # A release gets a week before we take it: a broken or malicious one is usually pulled by then.
+    # Security updates don't wait.
+    cooldown:
+      default-days: 7
+    groups:
+      # EF Core and its tool must stay on the same version.
+      entity-framework:
+        patterns:
+          - Microsoft.EntityFrameworkCore*
+          - dotnet-ef
+      tests:
+        patterns:
+          - coverlet.collector
+          - Microsoft.*.Testing
+          - Microsoft.NET.Test.Sdk
+          - xunit*
+    ignore:
+      # Their next major needs the next .NET.
+      - dependency-name: Microsoft.EntityFrameworkCore*
+        update-types: [version-update:semver-major]
+      - dependency-name: Microsoft.AspNetCore.*
+        update-types: [version-update:semver-major]
+      - dependency-name: dotnet-ef
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"

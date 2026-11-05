@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SanctionAndForgive.Api/SanctionAndForgive.Api.csproj" />
+    <Project Path="src/SanctionAndForgive.Cli/SanctionAndForgive.Cli.csproj" />
+    <Project Path="src/SanctionAndForgive.Data/SanctionAndForgive.Data.csproj" />
+    <Project Path="src/SanctionAndForgive.Lists/SanctionAndForgive.Lists.csproj" />
+    <Project Path="src/SanctionAndForgive.Matching/SanctionAndForgive.Matching.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SanctionAndForgive.SmokeTests/SanctionAndForgive.SmokeTests.csproj" />
+    <Project Path="tests/SanctionAndForgive.Tests/SanctionAndForgive.Tests.csproj" />
+  </Folder>
+</Solution>

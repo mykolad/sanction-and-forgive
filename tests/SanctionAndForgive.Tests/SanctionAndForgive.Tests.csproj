@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <Using Include="Xunit" />
+    <ProjectReference Include="..\..\src\SanctionAndForgive.Api\SanctionAndForgive.Api.csproj" />
+    <ProjectReference Include="..\..\src\SanctionAndForgive.Cli\SanctionAndForgive.Cli.csproj" />
+    <ProjectReference Include="..\..\src\SanctionAndForgive.Lists\SanctionAndForgive.Lists.csproj" />
+    <ProjectReference Include="..\..\src\SanctionAndForgive.Matching\SanctionAndForgive.Matching.csproj" />
+    <ProjectReference Include="..\..\src\SanctionAndForgive.Data\SanctionAndForgive.Data.csproj" />
+  </ItemGroup>
+
+</Project>

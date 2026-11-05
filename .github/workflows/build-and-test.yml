@@ -1,0 +1,60 @@
+name: Build and Test
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # The required check on master (ruleset "master: PR + checks").
+  build-and-test:
+    name: build-and-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Packages.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore SanctionAndForgive.slnx
+
+      - name: Build
+        run: dotnet build SanctionAndForgive.slnx -c Release --no-restore
+
+      # The build enforces most of .editorconfig, but a few style rules (an unneeded `this.`, import order) run only in
+      # the IDE and in dotnet format.
+      - name: Code style
+        run: dotnet format style SanctionAndForgive.slnx --verify-no-changes --severity warn --no-restore
+
+      # The smoke tests need a deployed app: the deploy workflow runs them.
+      - name: Test
+        run: dotnet test tests/SanctionAndForgive.Tests -c Release --no-build --logger trx --results-directory TestResults
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults/**/*.trx
+          retention-days: 14

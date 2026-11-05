@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SanctionAndForgive.Matching\SanctionAndForgive.Matching.csproj" />
+    <ProjectReference Include="..\SanctionAndForgive.Lists\SanctionAndForgive.Lists.csproj" />
+    <ProjectReference Include="..\SanctionAndForgive.Data\SanctionAndForgive.Data.csproj" />
+  </ItemGroup>
+
+</Project>
