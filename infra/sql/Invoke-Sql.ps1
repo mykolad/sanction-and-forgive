@@ -44,5 +44,12 @@ try {
     finally { $connection.Dispose() }
 }
 finally {
+    # A native command's exit code isn't an exception, even with ErrorActionPreference Stop. Warn rather than throw
+    # here, so a failure above keeps its own error, and fail the script below.
     az sql server firewall-rule delete -g $ResourceGroup -s $Server -n $rule -o none
+    $cleanupFailed = $LASTEXITCODE -ne 0
+    if ($cleanupFailed) {
+        Write-Warning "Could not remove the firewall rule '$rule' ($ip). Remove it by hand: az sql server firewall-rule delete -g $ResourceGroup -s $Server -n $rule"
+    }
 }
+if ($cleanupFailed) { exit 1 }
