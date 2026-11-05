@@ -11,13 +11,14 @@ param sqlAdminObjectId string
 @description('Login name shown for the SQL Entra admin. Kept out of the repo: SQL_ADMIN_LOGIN.')
 param sqlAdminLogin string
 
-@description('Where the storage alert is emailed. Kept out of the repo: ALERT_EMAIL.')
-param alertEmail string
-
 @description('Log Analytics daily ingestion cap in GB. Console logs only, so a small cap is plenty.')
 param logDailyCapGb string = '0.2'
 
 var name = 'sanction-and-forgive'
+
+// Alerts email whoever holds Owner directly on the subscription: Azure looks the address up, so none is stored here,
+// in the repository variables or in the deploy logs.
+var ownerRoleId = '8e3af657-a8ff-443c-a75c-2fe8c4bcb635'
 
 resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${name}-logs'
@@ -51,6 +52,17 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
       }
     ]
     zoneRedundant: false
+    // Azure's defaults, stated so what-if doesn't report them as removals.
+    peerAuthentication: {
+      mtls: {
+        enabled: false
+      }
+    }
+    peerTrafficConfiguration: {
+      encryption: {
+        enabled: false
+      }
+    }
   }
 }
 
@@ -110,10 +122,10 @@ resource alerts 'Microsoft.Insights/actionGroups@2023-01-01' = {
   properties: {
     groupShortName: 'sanctions'
     enabled: true
-    emailReceivers: [
+    armRoleReceivers: [
       {
-        name: 'owner'
-        emailAddress: alertEmail
+        name: 'subscription-owners'
+        roleId: ownerRoleId
         useCommonAlertSchema: true
       }
     ]

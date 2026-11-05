@@ -53,7 +53,6 @@ jobs:
         env:
           SQL_ADMIN_OBJECT_ID: 00000000-0000-0000-0000-000000000000
           SQL_ADMIN_LOGIN: ci
-          ALERT_EMAIL: ci@example.invalid
         run: |
           for file in infra/*.bicep infra/modules/*.bicep; do
             az bicep lint --file "$file"
