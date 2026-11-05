@@ -47,6 +47,22 @@ jobs:
       - name: Code style
         run: dotnet format style SanctionAndForgive.slnx --verify-no-changes --severity warn --no-restore
 
+      # Every Bicep file and parameter file compiles and passes the linter. The parameter file reads the owner's
+      # details from the environment (they stay out of the repository); placeholders are enough to compile it.
+      - name: Bicep
+        env:
+          SQL_ADMIN_OBJECT_ID: 00000000-0000-0000-0000-000000000000
+          SQL_ADMIN_LOGIN: ci
+          ALERT_EMAIL: ci@example.invalid
+        run: |
+          for file in infra/*.bicep infra/modules/*.bicep; do
+            az bicep lint --file "$file"
+            az bicep build --file "$file" --stdout > /dev/null
+          done
+          for file in infra/*.bicepparam; do
+            az bicep build-params --file "$file" --stdout > /dev/null
+          done
+
       # The smoke tests need a deployed app: the deploy workflow runs them.
       - name: Test
         run: dotnet test tests/SanctionAndForgive.Tests -c Release --no-build --logger trx --results-directory TestResults

@@ -77,8 +77,26 @@ Shared settings live at the root: `Directory.Build.props` (framework, nullable, 
 ## Build and Test (CI)
 
 `.github/workflows/build-and-test.yml` (**Build and Test**, job `build-and-test`, the required check on `master`) runs
-on every PR and push to `master`: build, code style, tests. To add with their phases: `az bicep build` on `infra/`, and
-the migrations check (`dotnet ef migrations has-pending-model-changes`).
+on every PR and push to `master`: build, code style, tests, and `az bicep lint` / `build` on every file in `infra/`.
+To add in Phase 2: the migrations check (`dotnet ef migrations has-pending-model-changes`).
+
+## Azure resources
+
+All in `sanction-and-forgive-rg` (Sweden Central), all from Bicep (`infra/README.md` lists each file and the
+bootstrap commands). Deployed so far: the bootstrap and the platform (Log Analytics, Container Apps environment
+`sanction-and-forgive-cae`, identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` with database
+`sanction-and-forgive-db`, Basic 5 DTU / 2 GB, Entra-only, the owner as admin). The Container App and import job come
+with `app.bicep` in Phase 4.
+
+- **Deploy identity** `sanction-and-forgive-github-cd`: Contributor on the resource group only, trusted from the
+  GitHub `production` environment only (master). The workflows log in with OIDC using the repository variables
+  `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`. No secrets in GitHub.
+- **Database users** (`infra/sql/grant-identities.sql`, run with `infra/sql/Invoke-Sql.ps1` as the owner):
+  `sanction-and-forgive-app` (read/write) and `sanction-and-forgive-github-cd` (ddladmin, read/write, for migrations).
+- **Nothing personal in the repo**: `platform.bicepparam` reads the admin's object ID and login and the alert email
+  from environment variables (repository variables in CI).
+- **Claude may deploy** `platform.bicep` (and later `app.bicep`) with the owner's `az login` after a clean what-if; the
+  owner runs `bootstrap.bicep`. Touch nothing outside `sanction-and-forgive-rg`.
 
 ## Pull requests and GitHub
 
