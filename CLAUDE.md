@@ -93,8 +93,8 @@ with `app.bicep` in Phase 4.
   `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`. No secrets in GitHub.
 - **Database users** (`infra/sql/grant-identities.sql`, run with `infra/sql/Invoke-Sql.ps1` as the owner):
   `sanction-and-forgive-app` (read/write) and `sanction-and-forgive-github-cd` (ddladmin, read/write, for migrations).
-- **Nothing personal in the repo**: `platform.bicepparam` reads the admin's object ID and login and the alert email
-  from environment variables (repository variables in CI).
+- **Nothing personal in the repo**: `platform.bicepparam` reads the admin's object ID and login from environment
+  variables (repository variables in CI). Alerts notify the subscription's Owner role: no email address anywhere.
 - **Claude may deploy** `platform.bicep` (and later `app.bicep`) with the owner's `az login` after a clean what-if; the
   owner runs `bootstrap.bicep`. Touch nothing outside `sanction-and-forgive-rg`.
 
