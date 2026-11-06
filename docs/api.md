@@ -56,8 +56,11 @@ Content-Type: application/x-ndjson
 (`Screening:StreamMaxSeconds`), whichever comes first: the Container Apps ingress ends any request at 240 seconds.
 The time limit counts reading too, so a slow upload stops at it like a long one. Then `end` says
 `"truncated":true` and `nextLine`, the first line it didn't read (or didn't finish reading); send the rest from that
-line in a new stream. A client that stops reading the answer is disconnected 20 seconds after the limit. A client should always check `end`: no `end` line means the connection broke, and the records after the
-last `result` or `error` weren't screened. **One stream at a time** across all clients (`Screening:ConcurrentStreams`):
+line in a new stream. A client that stops reading the answer is disconnected 20 seconds after the limit. A stream that has screened its maximum ends at once, even if the upload is still open, so `truncated` can be true
+with nothing left to send. A client should always check `end`: no `end` line means the connection broke. Then the
+records after the last `result` or `error` have an **unknown** status: one may have been screened (and audited)
+just before the break without its answer arriving. Send them again from the line after the last answer;
+a record screened twice has two audit lines under its reference, with the same result for the same list versions. **One stream at a time** across all clients (`Screening:ConcurrentStreams`):
 a second one gets 429 until the first ends, so a batch can't starve the website on the demo's single small replica.
 
 **Throughput.** Measured on 2026-11-06 on a desktop, against all 10 fetched lists, one stream at a time: about

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using SanctionAndForgive.Api.Screening;
 using SanctionAndForgive.Matching;
@@ -192,29 +193,52 @@ public sealed class StreamTests : IDisposable
     [Fact]
     public async Task AStalledUpload_StopsAtTheTimeLimit_WithAnEndLine()
     {
-        // Real Kestrel: the in-memory test server only hands the app a request once its body is complete.
         using var kestrel = new ApiFactory();
-        kestrel.UseKestrel(0);
-        kestrel.StartServer();
-        kestrel.Load(Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity)));
-        var server = kestrel.ClientOptions.BaseAddress;
 
-        // A raw HTTP/1.1 request with a chunked body: line 1, then half of line 2, then nothing more. (HttpClient
-        // won't hand over a response while its own upload is still open.)
+        // Line 1, then half of line 2, then nothing more; once record 1 is answered, the time runs out.
+        var lines = await OpenUploadAsync(kestrel, "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",",
+            onResult: () => kestrel.Clock.Advance(TimeSpan.FromSeconds(201)));
+
+        Assert.Equal(["header", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
+        Assert.True(lines[^1].GetProperty("truncated").GetBoolean());
+        Assert.Equal(2, lines[^1].GetProperty("nextLine").GetInt32());
+    }
+
+    [Fact]
+    public async Task ExactlyTheMaximum_WithTheUploadStillOpen_EndsAtOnce()
+    {
+        using var parent = new ApiFactory();
+        using var kestrel = parent.WithWebHostBuilder(builder => builder.UseSetting("Screening:StreamMaxRecords", "2"));
+
+        // Two records and the upload left open: the end line comes without waiting for a third or for the deadline.
+        var lines = await OpenUploadAsync(kestrel, "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",\"companyName\":\"Romashka\"}\n", onResult: () => { });
+
+        Assert.Equal(["header", "result", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
+        Assert.Equal(3, lines[^1].GetProperty("nextLine").GetInt32());
+    }
+
+    /// <summary>Posts <paramref name="body"/> to the stream on real Kestrel as a raw HTTP/1.1 chunked request and
+    /// leaves the upload open (HttpClient won't hand over a response while its own upload is still open, and the
+    /// in-memory test server only hands the app a request once its body is complete). Reads the answer as it comes,
+    /// decoding the chunks, until a complete end line has arrived; <paramref name="onResult"/> runs once, at the
+    /// first result.</summary>
+    private static async Task<List<JsonElement>> OpenUploadAsync(WebApplicationFactory<Program> server, string body, Action onResult)
+    {
+        server.UseKestrel(0);
+        server.StartServer();
+        server.Services.GetRequiredService<SanctionAndForgive.Api.Lists.ListCatalog>().Replace([Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity))]);
+        var address = server.ClientOptions.BaseAddress;
+
         using var tcp = new System.Net.Sockets.TcpClient();
-        await tcp.ConnectAsync(server.Host, server.Port);
+        await tcp.ConnectAsync(address.Host, address.Port);
         await using var connection = tcp.GetStream();
-        var body = "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",";
-        var bodyBytes = Encoding.UTF8.GetByteCount(body);
         await connection.WriteAsync(Encoding.UTF8.GetBytes(
-            $"POST /api/v1/screenings/stream HTTP/1.1\r\nHost: {server.Authority}\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n{bodyBytes:x}\r\n{body}\r\n"));
+            $"POST /api/v1/screenings/stream HTTP/1.1\r\nHost: {address.Authority}\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n{Encoding.UTF8.GetByteCount(body):x}\r\n{body}\r\n"));
         await connection.FlushAsync();
 
-        // Read the answer as it comes, decoding the chunked body, until a complete end line has arrived; once record 1
-        // is answered, the time runs out with line 2 half sent.
         var received = new List<byte>();
         var buffer = new byte[4096];
-        var advanced = false;
+        var resulted = false;
         List<JsonElement> lines = [];
         using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         while (lines.Count == 0 || lines[^1].GetProperty("type").GetString() != "end")
@@ -223,16 +247,14 @@ public sealed class StreamTests : IDisposable
             Assert.NotEqual(0, read);
             received.AddRange(buffer.AsSpan(0, read));
             lines = CompleteLines(DechunkedBody([.. received]));
-            if (!advanced && lines.Any(line => line.GetProperty("type").GetString() == "result"))
+            if (!resulted && lines.Any(line => line.GetProperty("type").GetString() == "result"))
             {
-                advanced = true;
-                kestrel.Clock.Advance(TimeSpan.FromSeconds(201));
+                resulted = true;
+                onResult();
             }
         }
 
-        Assert.Equal(["header", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
-        Assert.True(lines[^1].GetProperty("truncated").GetBoolean());
-        Assert.Equal(2, lines[^1].GetProperty("nextLine").GetInt32());
+        return lines;
     }
 
     /// <summary>The body of a chunked HTTP/1.1 response received so far: the complete chunks after the headers.</summary>

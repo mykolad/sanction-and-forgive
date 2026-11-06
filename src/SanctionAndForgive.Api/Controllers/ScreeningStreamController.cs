@@ -67,6 +67,14 @@ public sealed class ScreeningStreamController(ScreeningService screenings, IConf
         int? nextLine = null;
         while (true)
         {
+            // The quota is checked before waiting for another line: a client that sent exactly the maximum and keeps
+            // the upload open gets its end line now, not at the deadline. (There may be nothing after it.)
+            if (screened + errors >= maxRecords)
+            {
+                nextLine = line + 1;
+                break;
+            }
+
             (string Value, bool TooLong)? read;
             try
             {
@@ -95,12 +103,6 @@ public sealed class ScreeningStreamController(ScreeningService screenings, IConf
             if (text.Value.Length == 0 && !text.TooLong)
             {
                 continue;
-            }
-
-            if (screened + errors >= maxRecords)
-            {
-                nextLine = line;
-                break;
             }
 
             var (body, problem) = Parse(text);
