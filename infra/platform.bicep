@@ -14,6 +14,12 @@ param sqlAdminLogin string
 @description('Log Analytics daily ingestion cap in GB. Console logs only, so a small cap is plenty.')
 param logDailyCapGb string = '0.2'
 
+@description('Monthly cost budget for the resource group, in the billing currency. Notifies at 80% spent and 100% forecast.')
+param monthlyBudget int = 20
+
+@description('The budget\'s first month (the first day of a month). Fixed: a budget\'s start can\'t move later.')
+param budgetStartDate string = '2026-11-01'
+
 var name = 'sanction-and-forgive'
 
 // Alerts email whoever holds Owner directly on the subscription: Azure looks the address up, so none is stored here,
@@ -164,6 +170,96 @@ resource storageAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
         actionGroupId: alerts.id
       }
     ]
+  }
+}
+
+// A month's spend: catches a surprise, like a load test left with the rate limit off.
+resource budget 'Microsoft.Consumption/budgets@2023-11-01' = {
+  name: '${name}-monthly'
+  properties: {
+    category: 'Cost'
+    amount: monthlyBudget
+    timeGrain: 'Monthly'
+    timePeriod: {
+      startDate: budgetStartDate
+    }
+    notifications: {
+      actual80: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 80
+        thresholdType: 'Actual'
+        // No address in the repo: the Owner role and the action group (which emails the Owner role too).
+        contactEmails: []
+        contactRoles: [
+          'Owner'
+        ]
+        contactGroups: [
+          alerts.id
+        ]
+      }
+      forecast100: {
+        enabled: true
+        operator: 'GreaterThanOrEqualTo'
+        threshold: 100
+        thresholdType: 'Forecasted'
+        // No address in the repo: the Owner role and the action group (which emails the Owner role too).
+        contactEmails: []
+        contactRoles: [
+          'Owner'
+        ]
+        contactGroups: [
+          alerts.id
+        ]
+      }
+    }
+  }
+}
+
+// The daily import failed for a source (the CLI prints "FAILED" or a rejection), or the job execution itself failed.
+// A failed refresh keeps the old list, which then ages to Not checked: better to hear about it before a demo.
+// union isfuzzy, column_ifexists and an empty datatable leg: the log tables only appear once something has been logged.
+resource importFailed 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
+  name: '${name}-import-failed'
+  location: location
+  properties: {
+    description: 'The daily list import failed or rejected a source.'
+    severity: 2
+    enabled: true
+    scopes: [
+      logs.id
+    ]
+    evaluationFrequency: 'PT1H'
+    windowSize: 'PT1H'
+    criteria: {
+      allOf: [
+        {
+          query: '''
+union isfuzzy=true
+  (datatable(Log_s: string) []),
+  (ContainerAppConsoleLogs_CL
+    | where tostring(column_ifexists("ContainerGroupName_s", "")) startswith "${name}-import"
+    | where tostring(column_ifexists("Log_s", "")) has_any ("FAILED", "Rejected")),
+  (ContainerAppSystemLogs_CL
+    | where tostring(column_ifexists("JobName_s", "")) == "${name}-import"
+    | where tostring(column_ifexists("Reason_s", "")) has_any ("Failed", "BackoffLimitExceeded", "DeadlineExceeded"))
+'''
+          timeAggregation: 'Count'
+          operator: 'GreaterThan'
+          threshold: 0
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    autoMitigate: false
+    actions: {
+      actionGroups: [
+        alerts.id
+      ]
+    }
   }
 }
 

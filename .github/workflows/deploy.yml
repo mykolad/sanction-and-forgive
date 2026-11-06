@@ -1,0 +1,152 @@
+name: Deploy
+
+# After Build and Test passes on a push to master (or by hand): build the image once, then the platform (what-if
+# logged first), the migrations (the SQL firewall opened for this runner only while they run), the app with the new
+# image, and the smoke tests. No secrets: Azure login is OIDC through the production environment, the image goes to
+# ghcr.io with the job's own token, and SQL is Entra only.
+on:
+  workflow_run:
+    workflows: [Build and Test]
+    types: [completed]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  RESOURCE_GROUP: sanction-and-forgive-rg
+  SQL_SERVER: sanction-and-forgive-sql
+  IMAGE: ghcr.io/mykolad/sanction-and-forgive
+
+jobs:
+  build:
+    name: build
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      sha: ${{ steps.meta.outputs.sha }}
+      short: ${{ steps.meta.outputs.short }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - id: meta
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Version metadata is baked into the image (see Dockerfile): App__* settings and OCI labels.
+      - name: Build and push the image
+        run: |
+          docker build \
+            --build-arg VERSION=${{ steps.meta.outputs.short }} \
+            --build-arg REVISION=${{ steps.meta.outputs.sha }} \
+            --build-arg COMMIT_DATE="$(git show -s --format=%cI HEAD)" \
+            --build-arg SOURCE_URL="${{ github.server_url }}/${{ github.repository }}" \
+            -t "$IMAGE:${{ steps.meta.outputs.sha }}" .
+          docker push "$IMAGE:${{ steps.meta.outputs.sha }}"
+
+      - name: Build the migration bundle
+        run: |
+          dotnet tool restore
+          dotnet restore src/SanctionAndForgive.Api -r linux-x64
+          dotnet ef migrations bundle --project src/SanctionAndForgive.Data --startup-project src/SanctionAndForgive.Api \
+            --configuration Release --self-contained --target-runtime linux-x64 --output efbundle --force
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: efbundle
+          path: efbundle
+          retention-days: 7
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Platform (what-if, then deploy)
+        env:
+          SQL_ADMIN_OBJECT_ID: ${{ vars.SQL_ADMIN_OBJECT_ID }}
+          SQL_ADMIN_LOGIN: ${{ vars.SQL_ADMIN_LOGIN }}
+        run: |
+          az deployment group what-if -g "$RESOURCE_GROUP" -n platform --parameters infra/platform.bicepparam --exclude-change-types Ignore NoChange
+          az deployment group create -g "$RESOURCE_GROUP" -n platform --parameters infra/platform.bicepparam -o none
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: efbundle
+
+      - name: Open the SQL firewall for this runner
+        run: |
+          ip=$(curl -fsS https://api.ipify.org)
+          echo "::add-mask::$ip"
+          az sql server firewall-rule create -g "$RESOURCE_GROUP" -s "$SQL_SERVER" -n "github-${{ github.run_id }}" --start-ip-address "$ip" --end-ip-address "$ip" -o none
+
+      # As the deploy identity (az login above): Active Directory Default picks up the Azure CLI credential.
+      - name: Migrations
+        run: |
+          chmod +x efbundle
+          ./efbundle --connection "Server=tcp:$SQL_SERVER.database.windows.net,1433;Database=sanction-and-forgive-db;Authentication=Active Directory Default;Encrypt=True;Connect Timeout=60"
+
+      - name: Close the SQL firewall
+        if: always()
+        run: az sql server firewall-rule delete -g "$RESOURCE_GROUP" -s "$SQL_SERVER" -n "github-${{ github.run_id }}" -o none || true
+
+      - name: App
+        id: app
+        env:
+          IMAGE_TAG: ${{ needs.build.outputs.sha }}
+        run: |
+          az deployment group create -g "$RESOURCE_GROUP" -n app --parameters infra/app.bicepparam -o none
+          echo "url=$(az deployment group show -g "$RESOURCE_GROUP" -n app --query properties.outputs.url.value -o tsv)" >> "$GITHUB_OUTPUT"
+          echo "revision=$(az deployment group show -g "$RESOURCE_GROUP" -n app --query properties.outputs.latestRevision.value -o tsv)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Smoke tests
+        env:
+          SMOKE_BASE_URL: ${{ steps.app.outputs.url }}
+          SMOKE_EXPECTED_VERSION: ${{ needs.build.outputs.short }}
+          SMOKE_EXPECTED_REVISION: ${{ steps.app.outputs.revision }}
+        run: dotnet test tests/SanctionAndForgive.SmokeTests -c Release --logger "console;verbosity=normal"
+
+      - name: Summary
+        run: echo "Deployed ${{ needs.build.outputs.short }} to ${{ steps.app.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
