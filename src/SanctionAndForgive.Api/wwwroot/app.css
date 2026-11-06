@@ -190,6 +190,24 @@ td.list-name .as-of { display: block; font-weight: 400; color: var(--muted); fon
 .footer p { margin: 8px 0; }
 .fineprint { font-size: 0.85rem; }
 
+/* The list status page (/status). */
+.crumb { margin: 0 0 8px; font-size: 0.95rem; }
+.crumb a { color: var(--brand-ink); opacity: 0.9; }
+.panel h2 { margin: 0 0 6px; font-size: 1.35rem; }
+.section-note { color: var(--muted); margin: 0 0 14px; font-size: 0.95rem; }
+table.sources { border-collapse: collapse; border-spacing: 0; }
+table.sources th { padding: 8px 12px; border-bottom: 1.5px solid var(--border); }
+table.sources td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.sources tr:last-child td { border-bottom: none; }
+table.sources .num { text-align: right; font-variant-numeric: tabular-nums; }
+table.sources .list-title { font-weight: 650; }
+table.sources .sub { display: block; color: var(--muted); font-size: 0.85rem; }
+table.sources .links { white-space: nowrap; }
+.muted { color: var(--muted); }
+.state-badge { display: inline-block; font-weight: 700; border-radius: 8px; padding: 2px 10px; border: 1.5px solid; white-space: nowrap; }
+.state-badge.Current { background: var(--clear-bg); color: var(--clear-ink); border-color: var(--clear-edge); }
+.state-badge.NotChecked, .state-badge.NotImported { background: var(--gap-bg); color: var(--gap-ink); border-color: var(--gap-edge); border-style: dashed; }
+
 @media (max-width: 720px) {
   body { font-size: 16px; }
   .wrap { padding: 0 16px; }

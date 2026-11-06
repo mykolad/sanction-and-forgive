@@ -153,7 +153,7 @@ public sealed class ApiTests : IDisposable
     [Fact]
     public async Task ManualSource_AppearsAsARow_WithNoCodeChange()
     {
-        var manual = new SanctionAndForgive.Api.Lists.LoadedList("ee-mfa", "Estonia MFA national list", null, null, 7, Now.AddDays(-30), 1,
+        var manual = new SanctionAndForgive.Api.Lists.LoadedList("ee-mfa", "Estonia MFA national list", null, null, 7, Now.AddDays(-30), Now.AddDays(-30), 1,
             ListIndex.Build([Subject("Northwind Shipping OÜ", SubjectKind.Entity)]));
         factory.Load(Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity)), manual);
 
@@ -173,6 +173,7 @@ public sealed class ApiTests : IDisposable
         await ScreenAsync(new { receiverName = "Шевченко Т.Г.", companyName = "ТОВ Ромашка", address = "Москва" });
         await client.GetFromJsonAsync<JsonElement>("/api/v1/status");
         await client.GetFromJsonAsync<JsonElement>("/api/v1/examples");
+        await client.GetFromJsonAsync<JsonElement>("/api/v1/sources");
 
         Assert.Equal(0, factory.Database.Opened);
     }

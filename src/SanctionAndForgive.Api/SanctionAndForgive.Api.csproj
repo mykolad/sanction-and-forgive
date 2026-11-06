@@ -16,6 +16,8 @@
   <ItemGroup>
     <ProjectReference Include="..\SanctionAndForgive.Matching\SanctionAndForgive.Matching.csproj" />
     <ProjectReference Include="..\SanctionAndForgive.Data\SanctionAndForgive.Data.csproj" />
+    <!-- The feed catalogue only (ListSources: pages, terms, why a feed isn't imported), for /api/v1/sources. -->
+    <ProjectReference Include="..\SanctionAndForgive.Lists\SanctionAndForgive.Lists.csproj" />
   </ItemGroup>
 
   <ItemGroup>

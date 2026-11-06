@@ -3,7 +3,9 @@ using SanctionAndForgive.Matching;
 namespace SanctionAndForgive.Api.Lists;
 
 /// <summary>One list as the API holds it in memory: what the database said at the last refresh, and the index built
-/// from its active import (null if that failed or there is none).</summary>
+/// from its active import (null if that failed or there is none). <paramref name="UpdatedAt"/>: when the active
+/// import completed, i.e. when the list's content last changed; <paramref name="LastCheckedAt"/>: the last successful
+/// check, changed or not, which is what freshness counts from.</summary>
 public sealed record LoadedList(
     string Code,
     string Name,
@@ -11,6 +13,7 @@ public sealed record LoadedList(
     int? MaxAgeHours,
     int? ActiveImportId,
     DateTimeOffset? LastCheckedAt,
+    DateTimeOffset? UpdatedAt,
     int RecordCount,
     ListIndex? Index)
 {

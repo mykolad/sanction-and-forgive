@@ -96,3 +96,26 @@ ContainerAppConsoleLogs_CL
 ```
 
 Logs are kept 30 days.
+
+## List status: `GET /api/v1/sources` and `/status`
+
+Every list a screening searches, then every known feed that isn't imported, with the reason. The website's
+`/status` page shows the same. It reads memory and the catalogue (`ListSources`), never the database, and answers
+503 `{"state":"warmingUp"}` until the lists have loaded.
+
+```
+{"now":"2026-11-06T10:00:00+00:00","lists":[
+  {"code":"eu","name":"EU consolidated financial sanctions","state":"Current","status":"Active","reason":null,
+   "recordCount":6269,"version":19,"lastCheckedAt":"…","updatedAt":"…","maxAgeHours":72,
+   "homepage":"https://data.europa.eu/…","fileUrl":"https://webgate.ec.europa.eu/…","termsUrl":"https://commission.europa.eu/legal-notice_en"},
+  …,
+  {"code":"un","name":"UN Security Council consolidated","state":"NotImported","status":"TermsUnclear",
+   "reason":"The UN's terms allow personal, non-commercial use only. …","recordCount":null, …}]}
+```
+
+- `state`: `Current` (searched now), `NotChecked` (loaded, but older than `maxAgeHours` or not built yet: its
+  cells say Not checked, and `reason` says which), or `NotImported`.
+- `status`: the catalogue's decision: `Active`, `TermsUnclear` (the terms seem to rule out this use; waiting for
+  the owner), `NeedsAccess` (an API key, or a site that refuses automated clients), or `Manual` (kept by hand).
+- `lastCheckedAt`: the last successful check, changed or not; freshness counts from it. `updatedAt`: when the
+  list's content last changed here. `version`: the active import's id, as in the screening responses.
