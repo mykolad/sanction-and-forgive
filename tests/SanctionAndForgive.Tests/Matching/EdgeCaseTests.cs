@@ -91,4 +91,32 @@ public class EdgeCaseTests
             CultureInfo.CurrentCulture = original;
         }
     }
+
+    [Theory]
+    [InlineData("Гончар Gónchar")]
+    [InlineData("Gónchar Гончар")]
+    public void WordOrder_NeverChangesTheResult(string query)
+    {
+        AssertBand(NameCell(query, Subject("Gonchar Honchar", SubjectKind.Individual, null)), Outcome.Match);
+    }
+
+    [Fact]
+    public void CorroboratingAddress_NeverLiftsAboveACap()
+    {
+        var subject = Subject("AB Incorporated", SubjectKind.Entity, "Tallinn, EE");
+        var cell = Screener.Screen(new ScreeningRequest(null, "AB Corp", "Tallinn, EE"), [List("eu", subject)]).Entries[0].Cells.Single();
+
+        Assert.Equal(AddressState.Corroborated, cell.Best!.AddressState);
+        Assert.Equal(MatchingOptions.Default.ThinCoreCap, cell.Percent);
+    }
+
+    [Theory]
+    [InlineData("г-н Иван Иванов", Outcome.Match)]
+    [InlineData("Г-жа Анна Петрова", Outcome.Match)]
+    [InlineData("Иванов Г.Н.", Outcome.NoMatch)]
+    public void HyphenatedHonorific_IsNotInitials(string query, Outcome expected)
+    {
+        var listed = query.Contains("Анна", StringComparison.Ordinal) ? "Anna Petrova" : "Ivan Ivanov";
+        AssertBand(NameCell(query, Subject(listed, SubjectKind.Individual, null)), expected);
+    }
 }

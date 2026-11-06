@@ -3,11 +3,11 @@ namespace SanctionAndForgive.Matching.Text;
 /// <summary>Section 5.1 in order: normalise, replace multi-word legal forms with their short form, join runs of
 /// single letters (<c>A.B.</c>, <c>A B</c>, <c>L.L.C.</c> → <c>ab</c>, <c>ab</c>, <c>llc</c>) keeping the letters for
 /// initials, then transliterate. Tokens come from <paramref name="cache"/> when it has them (interning).</summary>
-internal sealed class Tokenizer(MatcherData data, Dictionary<string, Token>? cache)
+internal sealed partial class Tokenizer(MatcherData data, Dictionary<string, Token>? cache)
 {
     public List<RawToken> Tokenize(string value, bool joinInitials)
     {
-        var words = ReplaceLegalPhrases(Normalizer.Words(value));
+        var words = ReplaceLegalPhrases(Normalizer.Words(HyphenatedHonorific().Replace(value, " ")));
         var tokens = new List<RawToken>(words.Count);
         for (var i = 0; i < words.Count; i++)
         {
@@ -91,4 +91,9 @@ internal sealed class Tokenizer(MatcherData data, Dictionary<string, Token>? cac
 
         return result;
     }
+
+    /// <summary>Russian honorific abbreviations written with a hyphen (<c>г-н</c>, <c>г-жа</c>): removed before
+    /// normalising, which would split <c>г-н</c> into the initials <c>Г.Н.</c>. Genuine initials have no hyphen.</summary>
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<!\p{L})г-(н|жа)(?!\p{L})\.?", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex HyphenatedHonorific();
 }

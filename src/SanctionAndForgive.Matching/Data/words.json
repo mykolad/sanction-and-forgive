@@ -1,7 +1,7 @@
 {
   "note": "Words that never decide a match. 'stop' and 'honorifics' are ignored in names (honorifics only for people). 'addressWords' are street-type and filler words dropped from addresses.",
   "stop": ["of", "the", "and", "de", "van", "von", "der", "den", "da", "di", "del", "della", "la", "le", "du", "des", "für", "fur", "и", "та"],
-  "honorifics": ["mr", "mrs", "ms", "miss", "dr", "prof", "gen", "general", "col", "colonel", "maj", "major", "capt", "captain", "lt", "sgt", "sir", "господин", "госпожа", "пан", "пані", "г-н"],
+  "honorifics": ["mr", "mrs", "ms", "miss", "dr", "prof", "gen", "general", "col", "colonel", "maj", "major", "capt", "captain", "lt", "sgt", "sir", "господин", "госпожа", "пан", "пані"],
   "addressWords": [
     "ул", "улица", "вул", "вулиця", "пр", "пр-т", "просп", "проспект", "д", "дом", "буд", "будинок", "кв", "квартира",
     "обл", "область", "г", "гор", "город", "м", "місто", "р-н", "район", "р", "пер", "переулок", "пров", "провулок",

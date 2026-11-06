@@ -3,10 +3,11 @@ using SanctionAndForgive.Matching.Text;
 
 namespace SanctionAndForgive.Matching.Names;
 
-/// <summary>A name's percentage against one listed alias, and why.</summary>
-internal sealed record NameScore(int Percent, List<string> Explanation)
+/// <summary>A name's percentage against one listed alias, and why. <paramref name="Ceiling"/> is the lowest cap that
+/// applied (or none): a later adjustment, such as a corroborating address, never lifts the result above it.</summary>
+internal sealed record NameScore(int Percent, List<string> Explanation, int Ceiling)
 {
-    public static NameScore Zero(string reason) => new(0, [reason]);
+    public static NameScore Zero(string reason) => new(0, [reason], 0);
 }
 
 /// <summary>Sections 5.5 and 5.6: aligns the core tokens (order-independent, best pairs first), turns the weighted
@@ -207,7 +208,6 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         return candidateFolds.Any(fold => initial.Folds.Any(initialFold => initialFold.Length > 0 && fold.StartsWith(initialFold, StringComparison.Ordinal)));
     }
 
-
     private static NameScore Finish(int percent, List<(int Cap, string Reason)> caps, List<string> explanation)
     {
         foreach (var (cap, reason) in caps.Where(cap => cap.Cap < percent).OrderBy(cap => cap.Cap))
@@ -215,41 +215,101 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             explanation.Add(string.Create(CultureInfo.InvariantCulture, $"Capped at {cap}%: {reason}"));
         }
 
-        var final = caps.Count == 0 ? percent : Math.Min(percent, caps.Min(cap => cap.Cap));
-        return new NameScore(final, explanation);
+        var ceiling = caps.Count == 0 ? int.MaxValue : caps.Min(cap => cap.Cap);
+        return new NameScore(Math.Min(percent, ceiling), explanation, ceiling);
     }
 
-    /// <summary>Best one-to-one pairs: every aligning pair, highest weighted similarity first, each token used once.</summary>
+    /// <summary>The best one-to-one pairs: the assignment with the highest total weighted similarity, and among equal
+    /// totals the fewest capped alignments. Exact (a bitmask search over the listed tokens), so the order of the
+    /// words never changes the result; names longer than <see cref="MaxExactTokens"/> fall back to best pairs first.</summary>
     private List<(int Query, int Listed, Alignment Alignment)> Align(Token[] query, Token[] listed, Func<Token, double> weight)
     {
-        var candidates = new List<(int Query, int Listed, Alignment Alignment, double Value)>();
+        var alignments = new Alignment[query.Length, listed.Length];
+        var values = new double[query.Length, listed.Length];
         for (var i = 0; i < query.Length; i++)
         {
             for (var j = 0; j < listed.Length; j++)
             {
-                var alignment = comparer.Compare(query[i], listed[j]);
-                if (alignment.Aligned)
+                alignments[i, j] = comparer.Compare(query[i], listed[j]);
+                // A capped alignment is worth a hair less, so equal totals prefer uncapped pairs.
+                values[i, j] = alignments[i, j].Aligned
+                    ? (alignments[i, j].Similarity * (weight(query[i]) + weight(listed[j]))) - (alignments[i, j].Capped ? 1e-9 : 0)
+                    : double.NegativeInfinity;
+            }
+        }
+
+        var assignment = listed.Length <= MaxExactTokens && query.Length <= MaxExactTokens
+            ? ExactAssignment(values, query.Length, listed.Length)
+            : GreedyAssignment(values, query.Length, listed.Length);
+        return [.. assignment.Select(pair => (pair.Query, pair.Listed, alignments[pair.Query, pair.Listed]))];
+    }
+
+    private const int MaxExactTokens = 12;
+
+    private static List<(int Query, int Listed)> ExactAssignment(double[,] values, int queryCount, int listedCount)
+    {
+        // best[i, mask]: the best total for query tokens i.. with the listed tokens in mask already used.
+        var masks = 1 << listedCount;
+        var best = new double[queryCount + 1, masks];
+        for (var i = queryCount - 1; i >= 0; i--)
+        {
+            for (var mask = 0; mask < masks; mask++)
+            {
+                var value = best[i + 1, mask];
+                for (var j = 0; j < listedCount; j++)
                 {
-                    candidates.Add((i, j, alignment, alignment.Similarity * (weight(query[i]) + weight(listed[j]))));
+                    if ((mask & (1 << j)) == 0 && !double.IsNegativeInfinity(values[i, j]))
+                    {
+                        value = Math.Max(value, values[i, j] + best[i + 1, mask | (1 << j)]);
+                    }
+                }
+
+                best[i, mask] = value;
+            }
+        }
+
+        var pairs = new List<(int, int)>();
+        for (int i = 0, used = 0; i < queryCount; i++)
+        {
+            for (var j = 0; j < listedCount; j++)
+            {
+                if ((used & (1 << j)) == 0 && !double.IsNegativeInfinity(values[i, j])
+                    && Math.Abs(values[i, j] + best[i + 1, used | (1 << j)] - best[i, used]) < 1e-12)
+                {
+                    pairs.Add((i, j));
+                    used |= 1 << j;
+                    break;
+                }
+            }
+        }
+
+        return pairs;
+    }
+
+    private static List<(int Query, int Listed)> GreedyAssignment(double[,] values, int queryCount, int listedCount)
+    {
+        var candidates = new List<(int Query, int Listed, double Value)>();
+        for (var i = 0; i < queryCount; i++)
+        {
+            for (var j = 0; j < listedCount; j++)
+            {
+                if (!double.IsNegativeInfinity(values[i, j]))
+                {
+                    candidates.Add((i, j, values[i, j]));
                 }
             }
         }
 
         var usedQuery = new HashSet<int>();
         var usedListed = new HashSet<int>();
-        var pairs = new List<(int, int, Alignment)>();
+        var pairs = new List<(int, int)>();
         foreach (var candidate in candidates.OrderByDescending(candidate => candidate.Value))
         {
-            if (usedQuery.Add(candidate.Query))
+            if (!usedQuery.Contains(candidate.Query) && !usedListed.Contains(candidate.Listed))
             {
-                if (usedListed.Add(candidate.Listed))
-                {
-                    pairs.Add((candidate.Query, candidate.Listed, candidate.Alignment));
-                }
-                else
-                {
-                    usedQuery.Remove(candidate.Query);
-                }
+                usedQuery.Add(candidate.Query);
+                usedListed.Add(candidate.Listed);
+                pairs.Add((candidate.Query, candidate.Listed));
             }
         }
 

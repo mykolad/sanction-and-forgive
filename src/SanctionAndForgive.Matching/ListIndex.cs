@@ -140,7 +140,7 @@ public sealed class ListIndex
             }
             else if (address.State == AddressState.Corroborated)
             {
-                percent = Math.Min(percent + options.CorroboratedBonus, Bands.BandMax(percent, options));
+                percent = Math.Min(percent + options.CorroboratedBonus, Math.Min(Bands.BandMax(percent, options), score.Ceiling));
             }
 
             matches.Add(new SubjectMatch(subjects[subjectIndex], percent, Bands.ToOutcome(percent, options), alias.Name, [.. score.Explanation, address.Explanation], address.State));
