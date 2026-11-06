@@ -22,6 +22,19 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
 
     public void Dispose() => gate.Dispose();
 
+    /// <summary>Reloads the allow-list only (after an administrator's edit): a small read, no list is rebuilt.</summary>
+    public async Task RefreshAllowListAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        await LoadAllowListAsync(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), cancellationToken);
+    }
+
+    private async Task LoadAllowListAsync(ListsDbContext context, CancellationToken cancellationToken)
+    {
+        var snapshot = await new AllowListStore(context, clock).CurrentAsync(cancellationToken);
+        catalog.ReplaceAllowList(AllowList.Build(snapshot.Entries.Select(entry => new AllowListEntry(entry.Id, entry.Name, entry.Reason)), snapshot.Version));
+    }
+
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken);
@@ -42,6 +55,8 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
         var sources = await context.Sources.AsNoTracking().OrderBy(source => source.Code)
             .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport != null ? source.ActiveImport!.RecordCount : 0, UpdatedAt = source.ActiveImport != null ? source.ActiveImport!.CompletedAt : null })
             .ToListAsync(cancellationToken);
+
+        await LoadAllowListAsync(context, cancellationToken);
 
         // The history first: a small read, and the status page shows a held update even while lists rebuild.
         var store = new ImportStore(context, clock);

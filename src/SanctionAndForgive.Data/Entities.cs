@@ -149,3 +149,23 @@ public sealed class SubjectAddress
 
     public string? CountryCode { get; set; }
 }
+
+/// <summary>An allow-list entry (owner's decision, 2026-11-06): a name known to be a legitimate party, whose possible
+/// matches are shown as allowed. Never deleted: a removal sets <see cref="RemovedAt"/>, so the list keeps its history.
+/// Written by administrators only; it holds no screening input.</summary>
+public sealed class AllowListItem
+{
+    public int Id { get; set; }
+
+    public required string Name { get; set; }
+
+    public required string Reason { get; set; }
+
+    public required string AddedBy { get; set; }
+
+    public DateTimeOffset AddedAt { get; set; }
+
+    public string? RemovedBy { get; set; }
+
+    public DateTimeOffset? RemovedAt { get; set; }
+}

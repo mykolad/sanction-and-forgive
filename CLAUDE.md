@@ -140,6 +140,12 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `infra/admin-sign-in.ps1`, run by the owner). Reviewing held updates needs the `Lists.Admin` app role and the
   `X-Requested-By: sanction-and-forgive-admin` header (CSRF). `IImportReview` reviews then reloads the lists;
   `ListLoader.RefreshAsync` runs one at a time. Tests: `AdminTests` (a fake `IImportReview`).
+- **Allow-list** (owner's decision 2026-11-06; `Matching/AllowList.cs`, `Data/AllowListStore.cs`, table
+  `AllowListEntries`, `Admin/AllowListAdmin.cs`, `wwwroot/allow-list/`): an entered receiver or company that is an
+  allow-listed name (same tokens as screening reads them) has its **Review** cells marked `Allowed`, which don't raise
+  the outcome; a Match never is. `Screener.Screen(request, lists, allowList)`; every result carries
+  `AllowListVersion` (additions + removals). Entries are removed, never deleted. Adding a name that is a Match on a
+  list is refused. Loaded with the lists (`ListCatalog.AllowList`) and reloaded at once after an edit. Admin only.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
   `X-Forwarded-For` entry the ingress appended (forward limit 1), so clients can't choose their partition.
 - **Input is never stored or logged.** No request logging; validation errors don't echo values. Every screening
@@ -156,7 +162,7 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   Every page starts with the same menu (`<nav class="menu">`, the current page `aria-current="page"`): Screen,
   **Browse lists** (`wwwroot/lists/`: pick a list, filter, page through entries, expand one for every name, address,
   programme and the official record), **List status** (`wwwroot/status/`: lists searched, then lists not imported and
-  why), **Admin**, API. A new page copies the menu; `SourcesTests` and `BrowseTests` check it. A new catalogued
+  why), **Allow-list** (admin only), **Admin**, API. A new page copies the menu; `SourcesTests` and `BrowseTests` check it. A new catalogued
   feed needs its `Homepage` (and `TermsUrl`), and a `Note` unless it's `Active`; `SourcesTests` checks.
   `app.js` puts every value in as text, never HTML. Run it from `src/SanctionAndForgive.Api` (the content root holds
   `wwwroot`).

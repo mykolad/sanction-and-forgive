@@ -177,6 +177,8 @@ td.list-name .as-of { display: block; font-weight: 400; color: var(--muted); fon
 .cell.Match { background: var(--match-bg); color: var(--match-ink); border-color: var(--match-edge); }
 .cell.Review { background: var(--review-bg); color: var(--review-ink); border-color: var(--review-edge); }
 .cell.NoMatch { background: var(--clear-bg); color: var(--clear-ink); border-color: var(--clear-edge); }
+.cell.Allowed { background: var(--gap-bg); color: var(--review-ink); border-color: var(--review-edge); border-style: dotted; }
+.allowed-note { border-left: 4px solid var(--review-edge); padding: 6px 12px; background: var(--surface); }
 .cell.NotChecked { background: var(--gap-bg); color: var(--gap-ink); border-color: var(--gap-edge); border-style: dashed; }
 .cell[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--focus); }
 .cell:disabled { cursor: default; }
@@ -263,3 +265,9 @@ details.history .note { color: var(--muted); font-size: 0.9rem; }
   .masthead h1 { font-size: 1.6rem; }
   td.list-name { white-space: normal; }
 }
+
+/* The allow-list page (/allow-list). */
+.allow-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin-bottom: 12px; }
+.allow-form .field-wide { grid-column: 1 / -1; }
+table.allow .removed td { color: var(--muted); }
+@media (max-width: 720px) { .allow-form { grid-template-columns: 1fr; } }

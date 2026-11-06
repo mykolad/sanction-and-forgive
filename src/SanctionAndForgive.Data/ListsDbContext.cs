@@ -16,6 +16,8 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
 
     public DbSet<SubjectAddress> SubjectAddresses => Set<SubjectAddress>();
 
+    public DbSet<AllowListItem> AllowList => Set<AllowListItem>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Source>(source =>
@@ -60,6 +62,15 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
             address.Property(a => a.Raw).HasMaxLength(1000);
             address.Property(a => a.CountryCode).HasMaxLength(2).IsUnicode(false).IsFixedLength();
             address.HasIndex(a => a.SubjectId);
+        });
+
+        modelBuilder.Entity<AllowListItem>(item =>
+        {
+            item.ToTable("AllowListEntries");
+            item.Property(i => i.Name).HasMaxLength(300);
+            item.Property(i => i.Reason).HasMaxLength(500);
+            item.Property(i => i.AddedBy).HasMaxLength(256);
+            item.Property(i => i.RemovedBy).HasMaxLength(256);
         });
     }
 }
