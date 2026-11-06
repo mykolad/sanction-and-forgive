@@ -38,7 +38,7 @@ var configuration = new ConfigurationBuilder()
     .Build();
 var euToken = configuration["Lists:EuToken"] is { Length: > 0 } configured ? configured
     : Environment.GetEnvironmentVariable("LISTS_EU_TOKEN") is { Length: > 0 } fromEnvironment ? fromEnvironment
-    : "dG9rZW4tMjAxNw";
+    : ListSources.EuPublicToken;
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>

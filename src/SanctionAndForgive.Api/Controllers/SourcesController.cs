@@ -76,7 +76,7 @@ public sealed record SourceResponse(
             list.UpdatedAt,
             list.MaxAgeHours,
             source?.Homepage,
-            source is null ? null : list.Url,
+            source?.PublicUrl,
             source?.TermsUrl);
     }
 

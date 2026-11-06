@@ -44,6 +44,7 @@ public sealed class SourcesTests : IDisposable
         Assert.Equal(Now.AddHours(-2), eu.GetProperty("lastCheckedAt").GetDateTimeOffset());
         Assert.Equal(ListSources.Find("eu")!.Homepage, eu.GetProperty("homepage").GetString());
         Assert.Equal(JsonValueKind.Null, eu.GetProperty("reason").ValueKind);
+        Assert.EndsWith("token=" + ListSources.EuPublicToken, eu.GetProperty("fileUrl").GetString(), StringComparison.Ordinal);
         var uk = lists["uk"];
         Assert.Equal("NotChecked", uk.GetProperty("state").GetString());
         Assert.Contains("72 hours", uk.GetProperty("reason").GetString(), StringComparison.Ordinal);
