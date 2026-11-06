@@ -225,6 +225,21 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
 
 internal static class SubjectMapper
 {
+    /// <summary>A stored subject as the matcher sees it (the API's loader does the same).</summary>
+    public static SanctionAndForgive.Matching.ListedSubject ToListed(SanctionAndForgive.Data.Subject subject) => new(
+        subject.ExternalId,
+        subject.Type switch
+        {
+            SanctionAndForgive.Data.SubjectType.Individual => SanctionAndForgive.Matching.SubjectKind.Individual,
+            SanctionAndForgive.Data.SubjectType.Entity => SanctionAndForgive.Matching.SubjectKind.Entity,
+            _ => SanctionAndForgive.Matching.SubjectKind.Unknown,
+        },
+        subject.PrimaryName,
+        [.. subject.Names.Select(name => new SanctionAndForgive.Matching.ListedName(name.FullName, name.IsWeak))],
+        [.. subject.Addresses.Select(address => new SanctionAndForgive.Matching.ListedAddress(address.Raw, address.CountryCode?.Trim()))],
+        subject.Programmes,
+        subject.SourceUrl);
+
     public static SanctionAndForgive.Data.Subject ToEntity(ParsedSubject parsed)
     {
         var subject = new SanctionAndForgive.Data.Subject

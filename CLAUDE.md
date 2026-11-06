@@ -93,6 +93,12 @@ reference. The pipeline:
   A list passed with `Index = null` is `Not checked` (no percentage); overall `Match` > `Review` > `Incomplete` >
   `NoMatch`. Throws `ArgumentException` when every field is empty.
 
+**Evaluation** (Phase 6): `dotnet SanctionAndForgive.Cli.dll evaluate` writes `docs/matching-evaluation.md` from the
+active lists: up to 200 subjects per list, each name perturbed six ways (typo, diacritics, words swapped, legal form,
+romanisation, surname and initials), Cyrillic aliases against the same list with its Cyrillic names removed, 600
+made-up names, and a calibration table. Synthetic, deterministic. `docs/matching-calibration.md` reads the numbers
+and holds the open decision for the owner. Run it after any matching change; recall must stay at 95% or more.
+
 Every number is in `MatchingOptions` (bands, caps, initials, candidate limit). Tests: `Matching/GoldenTests.cs` (every
 row of spec 5.10, outcomes and bands, not exact percentages), `PerListTests.cs`, `TextTests.cs`. Calibration must
 not break a golden test without the owner's approval.
