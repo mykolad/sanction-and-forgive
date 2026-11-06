@@ -206,6 +206,9 @@ Spec sections 4 ("Import rules") and 6. The database holds parsed lists only, ne
   (`Authentication=Active Directory Default`), and closes the firewall. With `$env:ConnectionStrings__Lists` set it
   uses that database instead and leaves the firewall alone.
 - **Manual CSV:** `external_id,type,name,aliases,address,country,programme,listed_on,remarks` (`ManualCsvReader`).
+- **`load-inputs`** writes `tests/load/inputs.csv` (gitignored) from the active lists for the k6 run: listed names,
+  near misses, Cyrillic, unlisted (common surnames), addresses and initials, deterministic (fixed seed). The run and
+  its results: `docs/load-test.md`; the owner runs k6 against Azure.
 
 ## EF Core migrations
 
