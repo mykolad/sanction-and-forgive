@@ -1,8 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <PropertyGroup>
+    <UserSecretsId>sanction-and-forgive-api</UserSecretsId>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\SanctionAndForgive.Matching\SanctionAndForgive.Matching.csproj" />
     <ProjectReference Include="..\SanctionAndForgive.Data\SanctionAndForgive.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Migrations tooling only (dotnet ef, with this project as the startup project); not shipped. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>
