@@ -203,11 +203,15 @@ of them has been shown and confirmed.
   characters), `POST /api/v1/admin/allow-list/{id}/remove`. A refusal is `{code, message, possibleMatches}`:
   - 409 `confirm`: the name is a possible match for listed parties, and not all of them were confirmed. Nothing was
     added. `possibleMatches`: each listed party once, the closest first: `key` (`<list>/<external id>`), `list`,
-    `listName`, `listedName`, `alias` (the name or alias that matched), `percent`, `readAs` (`Receiver`, the name read
-    as a person; `Company`; or both), `programme`. Send the same request again with `confirmed`: the keys accepted
-    (at most 200). If a list has changed since and brings a possible match not among them, it's 409 `confirm` again.
+    `listName`, `listedName`, `alias` (the name or alias that matched), `percent`, `programme`. Every listed party at
+    Review the name finds, not only the five closest a screening cell shows: an entry allows the whole cell. Send the
+    same request again with `confirmed`: the keys accepted. If a list has changed since and brings a possible match
+    not among them, it's 409 `confirm` again.
+  - 409 `tooBroad`: the name is a possible match for more than 100 listed parties (the closest 100 are listed): too
+    generic to allow-list.
   - 409 `listed`: the name is a Match on a list; never added.
-  - 409 `exists`: the name is already an entry in force (the same words as screening reads them).
+  - 409 `exists`: the name is already an entry in force (the same words as screening reads them; checked again when
+    it's stored, under a lock, so two additions of one name can't both succeed).
   - 503 `unavailable`: a list can't be checked now (loading, or not current).
 
   The log line for an addition names the possible matches confirmed by key (never the name).

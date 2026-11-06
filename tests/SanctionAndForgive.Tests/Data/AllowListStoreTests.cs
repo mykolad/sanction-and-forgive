@@ -43,8 +43,8 @@ public sealed class AllowListStoreTests : IAsyncLifetime
         var store = new AllowListStore(context, clock);
         var empty = await store.CurrentAsync(CancellationToken.None);
 
-        var huamei = await store.AddAsync("  Huamei Trading ", "A customer since 2019", "owner@example.invalid", CancellationToken.None);
-        var other = await store.AddAsync("Northwind Freight", "Our own carrier", "owner@example.invalid", CancellationToken.None);
+        var huamei = (await store.AddAsync("  Huamei Trading ", "A customer since 2019", "owner@example.invalid", NoneExisting, CancellationToken.None)).Id!.Value;
+        var other = (await store.AddAsync("Northwind Freight", "Our own carrier", "owner@example.invalid", NoneExisting, CancellationToken.None)).Id!.Value;
         var afterAdding = await store.CurrentAsync(CancellationToken.None);
         clock.Advance(TimeSpan.FromHours(1));
         Assert.True(await store.RemoveAsync(huamei, "second@example.invalid", CancellationToken.None));
@@ -57,6 +57,27 @@ public sealed class AllowListStoreTests : IAsyncLifetime
         var removed = (await store.HistoryAsync(CancellationToken.None)).Single(entry => entry.Id == huamei);
         Assert.Equal(("second@example.invalid", clock.GetUtcNow()), (removed.RemovedBy, removed.RemovedAt));
     }
+
+    [SqlServerFact]
+    public async Task ANameTheCheckFinds_IsNotAddedAgain_AndNothingIsWritten()
+    {
+        await using var context = CreateContext();
+        var store = new AllowListStore(context, clock);
+        var first = await store.AddAsync("Huamei Trading", "A customer", "owner@example.invalid", NoneExisting, CancellationToken.None);
+        IReadOnlyList<AllowListRecord>? seen = null;
+
+        var second = await store.AddAsync("HUAMEI TRADING", "Again", "second@example.invalid", inForce =>
+        {
+            seen = inForce;
+            return inForce.FirstOrDefault(entry => string.Equals(entry.Name, "Huamei Trading", StringComparison.OrdinalIgnoreCase))?.Id;
+        }, CancellationToken.None);
+
+        Assert.Equal((null, first.Id), (second.Id, second.ExistingId));
+        Assert.Equal([first.Id!.Value], seen!.Select(entry => entry.Id));
+        Assert.Single(await store.HistoryAsync(CancellationToken.None));
+    }
+
+    private static int? NoneExisting(IReadOnlyList<AllowListRecord> inForce) => null;
 
     private ListsDbContext CreateContext() =>
         new(new DbContextOptionsBuilder<ListsDbContext>().UseSqlServer(connectionString).Options);

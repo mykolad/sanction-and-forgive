@@ -199,8 +199,8 @@ public sealed class AdminTests : IDisposable
         Assert.Equal(HttpStatusCode.Conflict, first.StatusCode);
         Assert.Equal("confirm", refusal.GetProperty("code").GetString());
         var hit = Assert.Single(refusal.GetProperty("possibleMatches").EnumerateArray().ToList());
-        Assert.Equal(("ofac-sdn/123", "OFAC SDN", "SHENZHEN HUAMEI LIANYUN", 72, "Company"),
-            (hit.GetProperty("key").GetString(), hit.GetProperty("listName").GetString(), hit.GetProperty("listedName").GetString(), hit.GetProperty("percent").GetInt32(), hit.GetProperty("readAs")[0].GetString()));
+        Assert.Equal(("ofac-sdn/123", "OFAC SDN", "SHENZHEN HUAMEI LIANYUN", 72, "CHINA-EO13846"),
+            (hit.GetProperty("key").GetString(), hit.GetProperty("listName").GetString(), hit.GetProperty("listedName").GetString(), hit.GetProperty("percent").GetInt32(), hit.GetProperty("programme").GetString()));
         Assert.Equal(HttpStatusCode.Conflict, otherKey.StatusCode);
         Assert.Equal(0, addedBefore);
         Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
@@ -248,24 +248,24 @@ public sealed class AdminTests : IDisposable
         {
             if (name == "Listed Party LLC")
             {
-                return Task.FromResult(new AllowListAddResult(null, "EU: Listed Party LLC", Unavailable: false, PossibleMatches: [], Reloaded: false, ExistingId: null));
+                return Task.FromResult(AllowListAddResult.Refused(AllowListAddOutcome.Listed) with { ListedAs = "EU: Listed Party LLC" });
             }
 
             if (name == "While Loading")
             {
-                return Task.FromResult(new AllowListAddResult(null, null, Unavailable: true, PossibleMatches: [], Reloaded: false, ExistingId: null));
+                return Task.FromResult(AllowListAddResult.Refused(AllowListAddOutcome.Unavailable));
             }
 
             List<AllowListPossibleMatch> possible = name == "Huamei Technologies"
-                ? [new AllowListPossibleMatch("ofac-sdn/123", "ofac-sdn", "OFAC SDN", "SHENZHEN HUAMEI LIANYUN", "SHENZHEN HUAMEI LIANYUN", 72, [EntryKind.Company], "CHINA-EO13846")]
+                ? [new AllowListPossibleMatch("ofac-sdn/123", "ofac-sdn", "OFAC SDN", "SHENZHEN HUAMEI LIANYUN", "SHENZHEN HUAMEI LIANYUN", 72, "CHINA-EO13846")]
                 : [];
             if (possible.Any(hit => !confirmed.Contains(hit.Key)))
             {
-                return Task.FromResult(new AllowListAddResult(null, null, Unavailable: false, possible, Reloaded: false, ExistingId: null));
+                return Task.FromResult(AllowListAddResult.Refused(AllowListAddOutcome.Confirm) with { PossibleMatches = possible, PossibleMatchCount = possible.Count });
             }
 
             Added.Add((name, reason, addedBy));
-            return Task.FromResult(new AllowListAddResult(Added.Count, null, Unavailable: false, possible, Reloaded: true, ExistingId: null));
+            return Task.FromResult(new AllowListAddResult(AllowListAddOutcome.Added, Added.Count, null, null, possible, possible.Count, Reloaded: true));
         }
 
         public Task<AllowListRemoveResult> RemoveAsync(int id, string removedBy, CancellationToken cancellationToken)

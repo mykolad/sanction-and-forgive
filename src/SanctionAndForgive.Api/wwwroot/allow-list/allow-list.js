@@ -99,18 +99,27 @@ $("add-form").addEventListener("submit", (event) => {
   add(name, reason, []);
 });
 
-// A confirmation is for the name and reason it was shown for: editing either asks again.
-for (const id of ["name", "reason"]) $(id).addEventListener("input", () => { $("confirm").hidden = true; });
+// A confirmation is for the name and reason it was shown for: editing either asks again, and an answer still on its
+// way for the old values is dropped (each request has a number; editing moves it on).
+let attempt = 0;
+for (const id of ["name", "reason"]) $(id).addEventListener("input", () => { attempt++; $("confirm").hidden = true; });
 
 // The first try sends no confirmations. If the name is a possible match for listed parties, the service lists them
 // and adds nothing: they're shown, and "Add anyway" sends their keys. If a list changed meanwhile and brought a new
 // possible match, the service lists them again.
 async function add(name, reason, confirmed) {
   const status = $("add-status");
+  const mine = ++attempt;
   $("confirm").hidden = true;
   status.textContent = "Adding…";
   try {
     const response = await fetch("/api/v1/admin/allow-list", { method: "POST", headers: HEADERS, body: JSON.stringify({ name, reason, confirmed }) });
+    if (mine !== attempt) {
+      // Edited meanwhile: what's in the form now hasn't been checked. Say only what became of the earlier values.
+      status.textContent = response.ok ? `Added “${name}”, as entered before your edit.` : "";
+      if (response.ok) load();
+      return;
+    }
     if (response.ok) {
       const body = await response.json();
       status.textContent = body.reloaded ? "Added: it applies to the next screening." : "Added: it applies within 15 minutes, at the next refresh.";
@@ -122,6 +131,8 @@ async function add(name, reason, confirmed) {
       if (body.code === "confirm") {
         status.textContent = "";
         showPossibleMatches(name, reason, body);
+      } else if (body.code === "tooBroad") {
+        status.textContent = body.message;
       } else {
         status.textContent = body.message;
       }
@@ -133,15 +144,12 @@ async function add(name, reason, confirmed) {
   }
 }
 
-const READ_AS = { Receiver: "as a person", Company: "as a company" };
-
 function showPossibleMatches(name, reason, body) {
   const panel = $("confirm");
   const items = body.possibleMatches.map((hit) => el("li", {},
     el("strong", {}, hit.listedName),
     ` — ${hit.listName}, ${hit.percent}%`,
     el("span", { class: "sub" }, [
-      hit.readAs.map((kind) => READ_AS[kind] || kind).join(" and "),
       hit.alias !== hit.listedName ? `alias “${hit.alias}”` : null,
       hit.programme ? `programme ${hit.programme}` : null,
     ].filter(Boolean).join("; "))));

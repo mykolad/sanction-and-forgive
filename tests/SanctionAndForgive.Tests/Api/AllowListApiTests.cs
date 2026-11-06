@@ -85,7 +85,7 @@ public sealed class AllowListApiTests : IDisposable
 
         var result = await admin.AddAsync("Volga Trade", "test", "owner@example.invalid", new HashSet<string>(), CancellationToken.None);
 
-        Assert.True(result.Unavailable);
+        Assert.Equal(AllowListAddOutcome.Unavailable, result.Outcome);
         Assert.Null(result.Id);
         Assert.Equal(0, factory.Database.Opened);
     }
@@ -97,7 +97,7 @@ public sealed class AllowListApiTests : IDisposable
 
         var result = await admin.AddAsync("Romashka LLC", "test", "owner@example.invalid", new HashSet<string>(["eu/X-12-R"]), CancellationToken.None);
 
-        Assert.Null(result.Id);
+        Assert.Equal((AllowListAddOutcome.Listed, null), (result.Outcome, result.Id));
         Assert.Equal("EU: Romashka LLC", result.ListedAs);
         Assert.Equal(0, factory.Database.Opened);
     }
@@ -109,7 +109,7 @@ public sealed class AllowListApiTests : IDisposable
 
         var result = await admin.AddAsync("ab corp.", "test", "owner@example.invalid", new HashSet<string>(["ofac-sdn/X-15-A"]), CancellationToken.None);
 
-        Assert.Equal((null, 5), (result.Id, result.ExistingId));
+        Assert.Equal((AllowListAddOutcome.Exists, null, 5), (result.Outcome, result.Id, result.ExistingId));
         Assert.Equal(0, factory.Database.Opened);
     }
 
@@ -121,13 +121,39 @@ public sealed class AllowListApiTests : IDisposable
         var unconfirmed = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(), CancellationToken.None);
         var otherKey = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(["eu/X-12-R"]), CancellationToken.None);
 
-        Assert.Null(unconfirmed.Id);
-        Assert.Null(unconfirmed.ListedAs);
+        Assert.Equal((AllowListAddOutcome.Confirm, null), (unconfirmed.Outcome, unconfirmed.Id));
         var hit = Assert.Single(unconfirmed.PossibleMatches);
         Assert.Equal(("ofac-sdn/X-15-A", "OFAC SDN", "AB Incorporated"), (hit.Key, hit.ListName, hit.ListedName));
-        Assert.Contains(EntryKind.Company, hit.ReadAs);
-        Assert.Null(otherKey.Id);
-        Assert.Single(otherKey.PossibleMatches);
+        Assert.Equal((AllowListAddOutcome.Confirm, 1), (otherKey.Outcome, otherKey.PossibleMatches.Count));
         Assert.Equal(0, factory.Database.Opened);
     }
+
+    [Fact]
+    public async Task EveryPossibleMatchIsShown_NotOnlyTheFiveACellKeeps()
+    {
+        factory.Load(Feed("ofac-sdn", "OFAC SDN", Now, [.. Enumerable.Range(1, 7).Select(i => Listed($"SDN-{i}", "AB Incorporated"))]));
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var result = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(Enumerable.Range(1, 5).Select(i => $"ofac-sdn/SDN-{i}")), CancellationToken.None);
+
+        Assert.Equal(AllowListAddOutcome.Confirm, result.Outcome);
+        Assert.Equal(7, result.PossibleMatches.Count);
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task ANameWithTooManyPossibleMatches_IsTooBroad_HoweverManyAreConfirmed()
+    {
+        var subjects = Enumerable.Range(1, AllowListAdmin.MaxPossibleMatches + 1).Select(i => Listed($"SDN-{i}", "AB Incorporated")).ToArray();
+        factory.Load(Feed("ofac-sdn", "OFAC SDN", Now, subjects));
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var result = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(subjects.Select(subject => $"ofac-sdn/{subject.ExternalId}")), CancellationToken.None);
+
+        Assert.Equal((AllowListAddOutcome.TooBroad, AllowListAdmin.MaxPossibleMatches + 1, AllowListAdmin.MaxPossibleMatches), (result.Outcome, result.PossibleMatchCount, result.PossibleMatches.Count));
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    private static ListedSubject Listed(string id, string name) =>
+        new(id, SubjectKind.Entity, name, [new ListedName(name, IsWeak: false)], [], "TEST", "https://example.invalid/record");
 }

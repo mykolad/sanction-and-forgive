@@ -18,29 +18,64 @@ public interface IAllowListAdmin
     Task<AllowListRemoveResult> RemoveAsync(int id, string removedBy, CancellationToken cancellationToken);
 }
 
-/// <param name="Id">The new entry's id, when it was added.</param>
-/// <param name="ListedAs">Why it wasn't: the name is a Match on a list as it stands ("EU: Romashka LLC"), so it would
-/// allow-list a listed party.</param>
-/// <param name="Unavailable">Why it wasn't: a list can't be checked right now (loading, stale, or not built), so the
-/// name couldn't be checked against it. Try again later.</param>
-/// <param name="PossibleMatches">The listed parties this name is a possible match for, which the entry shows as allowed.
-/// When it wasn't added, these weren't all confirmed: show them, and add again confirming them.</param>
+public enum AllowListAddOutcome
+{
+    /// <summary>Added (<see cref="AllowListAddResult.Id"/>).</summary>
+    Added,
+
+    /// <summary>Not added: a list can't be checked right now (loading, stale, or not built), so the name couldn't be
+    /// checked against it. Try again later.</summary>
+    Unavailable,
+
+    /// <summary>Not added: the name is already an entry in force (<see cref="AllowListAddResult.ExistingId"/>), the
+    /// same words as screening reads them. A second would stay in force, unnoticed, once the first is removed.</summary>
+    Exists,
+
+    /// <summary>Not added, ever: the name is a Match on a list (<see cref="AllowListAddResult.ListedAs"/>), so it
+    /// would allow-list a listed party.</summary>
+    Listed,
+
+    /// <summary>Not added: the name is a possible match for more listed parties than can be shown and confirmed
+    /// (<see cref="AllowListAdmin.MaxPossibleMatches"/>): it's too generic to allow-list.</summary>
+    TooBroad,
+
+    /// <summary>Not added yet: the name is a possible match for listed parties that weren't all confirmed
+    /// (<see cref="AllowListAddResult.PossibleMatches"/>). Show them, and add again confirming them.</summary>
+    Confirm,
+}
+
+/// <param name="PossibleMatches">The listed parties this name is a possible match for, all of them, which the entry
+/// shows as allowed (with <see cref="AllowListAddOutcome.Confirm"/>, the ones to confirm; with
+/// <see cref="AllowListAddOutcome.Added"/>, the ones confirmed).</param>
+/// <param name="PossibleMatchCount">How many there are (with <see cref="AllowListAddOutcome.TooBroad"/>, more than are listed).</param>
 /// <param name="Reloaded">Added and in use at once; false: added, and in use from the next refresh.</param>
-/// <param name="ExistingId">Why it wasn't: the name is already an entry in force (the same words as screening reads them).</param>
-public sealed record AllowListAddResult(int? Id, string? ListedAs, bool Unavailable, IReadOnlyList<AllowListPossibleMatch> PossibleMatches, bool Reloaded, int? ExistingId);
+public sealed record AllowListAddResult(
+    AllowListAddOutcome Outcome,
+    int? Id,
+    int? ExistingId,
+    string? ListedAs,
+    IReadOnlyList<AllowListPossibleMatch> PossibleMatches,
+    int PossibleMatchCount,
+    bool Reloaded)
+{
+    public static AllowListAddResult Refused(AllowListAddOutcome outcome) => new(outcome, null, null, null, [], 0, Reloaded: false);
+}
 
 /// <summary>A listed party that a name to allow-list is a possible match for (owner's decision, 2026-11-06: shown to the
 /// administrator, who decides whether to add the name anyway).</summary>
 /// <param name="Key">What the administrator confirms: <c>{list code}/{external id}</c>.</param>
-/// <param name="ReadAs">How the name is a possible match: read as a <c>Receiver</c> (a person), a <c>Company</c>, or both (an
-/// entry applies to both).</param>
-public sealed record AllowListPossibleMatch(string Key, string List, string ListName, string ListedName, string Alias, int Percent, IReadOnlyList<EntryKind> ReadAs, string? Programme);
+/// <param name="Alias">The listed name or alias that matched.</param>
+public sealed record AllowListPossibleMatch(string Key, string List, string ListName, string ListedName, string Alias, int Percent, string? Programme);
 
 /// <param name="Reloaded">Whether the allow-list was reloaded. Either way the entry stopped applying at once.</param>
 public sealed record AllowListRemoveResult(bool Removed, bool Reloaded);
 
 public sealed class AllowListAdmin(IServiceScopeFactory scopes, ListLoader loader, ListCatalog catalog, Screener screener, TimeProvider clock) : IAllowListAdmin
 {
+    /// <summary>The most possible matches a name can have and still be allow-listed: each one is shown and confirmed,
+    /// and a name that resembles more listed parties than this is too generic for an entry.</summary>
+    public const int MaxPossibleMatches = 100;
+
     public async Task<IReadOnlyList<AllowListRecord>> HistoryAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopes.CreateAsyncScope();
@@ -55,55 +90,59 @@ public sealed class AllowListAdmin(IServiceScopeFactory scopes, ListLoader loade
         var lists = catalog.Lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? list.Index : null)).ToList();
         if (!catalog.IsReady || lists.Count == 0 || lists.Any(list => list.Index is null))
         {
-            return new AllowListAddResult(null, null, Unavailable: true, PossibleMatches: [], Reloaded: false, ExistingId: null);
+            return AllowListAddResult.Refused(AllowListAddOutcome.Unavailable);
         }
 
-        // One entry per name: a second would stay in force, unnoticed, once the first is removed.
-        if (catalog.AllowList.Find(name) is { } existing)
+        // The quick answer from memory; the store checks again under its lock, against what's stored.
+        if (catalog.AllowList.Find(name) is { } inMemory)
         {
-            return new AllowListAddResult(null, null, Unavailable: false, PossibleMatches: [], Reloaded: false, existing.Id);
+            return AllowListAddResult.Refused(AllowListAddOutcome.Exists) with { ExistingId = inMemory.Id };
         }
 
-        var screening = screener.Screen(new ScreeningRequest(name, name, null), lists);
-        if (screening.Entries.SelectMany(entry => entry.Cells).FirstOrDefault(cell => cell.Outcome == Outcome.Match) is { } match)
+        // Every listed party the entry would allow, not only the closest few a screening cell shows: an entry allows a
+        // whole cell, so each of them must have been seen.
+        var hits = screener.NameHits(name, lists);
+        if (hits.Where(hit => hit.Match.Outcome == Outcome.Match).MaxBy(hit => hit.Match.Percent) is { } match)
         {
-            return new AllowListAddResult(null, $"{ListName(match.List)}: {match.Best!.Subject.PrimaryName}", Unavailable: false, PossibleMatches: [], Reloaded: false, ExistingId: null);
+            return AllowListAddResult.Refused(AllowListAddOutcome.Listed) with { ListedAs = $"{ListName(match.List)}: {match.Match.Subject.PrimaryName}" };
+        }
+
+        var possible = hits
+            .Select(hit => new AllowListPossibleMatch(
+                $"{hit.List}/{hit.Match.Subject.ExternalId}", hit.List, ListName(hit.List), hit.Match.Subject.PrimaryName, hit.Match.Alias, hit.Match.Percent, hit.Match.Subject.Programme))
+            .DistinctBy(hit => hit.Key, StringComparer.Ordinal)
+            .OrderByDescending(hit => hit.Percent)
+            .ThenBy(hit => hit.List, StringComparer.Ordinal)
+            .ThenBy(hit => hit.ListedName, StringComparer.Ordinal)
+            .ToList();
+        if (possible.Count > MaxPossibleMatches)
+        {
+            return AllowListAddResult.Refused(AllowListAddOutcome.TooBroad) with { PossibleMatches = [.. possible.Take(MaxPossibleMatches)], PossibleMatchCount = possible.Count };
         }
 
         // Possible matches are the administrator's call, made knowingly: every one the name has now must have been
         // shown and confirmed. A list that changed since then can bring a new one, which is shown in turn.
-        var possible = PossibleMatches(screening);
         if (possible.Any(hit => !confirmed.Contains(hit.Key)))
         {
-            return new AllowListAddResult(null, null, Unavailable: false, possible, Reloaded: false, ExistingId: null);
+            return AllowListAddResult.Refused(AllowListAddOutcome.Confirm) with { PossibleMatches = possible, PossibleMatchCount = possible.Count };
         }
 
-        int id;
+        AllowListAddition addition;
         await using (var scope = scopes.CreateAsyncScope())
         {
-            id = await new AllowListStore(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), clock).AddAsync(name, reason, addedBy, cancellationToken);
+            addition = await new AllowListStore(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), clock).AddAsync(
+                name, reason, addedBy, inForce => AllowList.Build(inForce.Select(entry => new AllowListEntry(entry.Id, entry.Name, entry.Reason)), "stored").Find(name)?.Id, cancellationToken);
+        }
+
+        if (addition.Id is not { } id)
+        {
+            return AllowListAddResult.Refused(AllowListAddOutcome.Exists) with { ExistingId = addition.ExistingId };
         }
 
         // Committed: from here the request's cancellation no longer matters. A failed reload only delays the entry.
         var reloaded = await loader.ReloadAllowListAsync(withoutId: null, CancellationToken.None);
-        return new AllowListAddResult(id, null, Unavailable: false, possible, reloaded, ExistingId: null);
+        return new AllowListAddResult(AllowListAddOutcome.Added, id, null, null, possible, possible.Count, reloaded);
     }
-
-    // Every listed party at Review in a cell the entry would allow (the best and the others the cell keeps), once each,
-    // at its highest percentage, the closest first.
-    private List<AllowListPossibleMatch> PossibleMatches(ScreeningResult screening) =>
-        [.. screening.Entries
-            .SelectMany(entry => entry.Cells
-                .Where(cell => cell.Outcome == Outcome.Review)
-                .SelectMany(cell => cell.Others.Prepend(cell.Best!)
-                    .Where(hit => hit.Outcome == Outcome.Review)
-                    .Select(hit => new AllowListPossibleMatch(
-                        $"{cell.List}/{hit.Subject.ExternalId}", cell.List, ListName(cell.List), hit.Subject.PrimaryName, hit.Alias, hit.Percent, [entry.Kind], hit.Subject.Programme))))
-            .GroupBy(hit => hit.Key, StringComparer.Ordinal)
-            .Select(group => group.OrderByDescending(hit => hit.Percent).First() with { ReadAs = [.. group.SelectMany(hit => hit.ReadAs).Distinct().Order()] })
-            .OrderByDescending(hit => hit.Percent)
-            .ThenBy(hit => hit.List, StringComparer.Ordinal)
-            .ThenBy(hit => hit.ListedName, StringComparer.Ordinal)];
 
     private string ListName(string code) => catalog.Lists.First(list => list.Code == code).Name;
 

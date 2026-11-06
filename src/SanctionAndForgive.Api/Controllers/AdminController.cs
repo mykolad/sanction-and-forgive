@@ -16,10 +16,8 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
 
     private const string SignOutPath = "/.auth/logout?post_logout_redirect_uri=/admin";
 
-    // Possible matches confirmed in one addition: a cell keeps at most five subjects, for two readings on each list.
-    private const int MaxConfirmed = 200;
-
-    private const int MaxKey = 200;
+    // A key is a source code (up to 32 characters), a slash and an external id (up to 200): room to spare.
+    private const int MaxKey = 256;
 
     [HttpGet("me")]
     public AdminMeResponse Me()
@@ -70,9 +68,9 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
             errors[nameof(body.Reason)] = [$"1 to {AllowListStore.MaxReason} characters: why this party isn't the listed one."];
         }
 
-        if (body.Confirmed is { } keys && (keys.Count > MaxConfirmed || keys.Any(key => key is not { Length: > 0 and <= MaxKey })))
+        if (body.Confirmed is { } keys && (keys.Count > AllowListAdmin.MaxPossibleMatches || keys.Any(key => key is not { Length: > 0 and <= MaxKey })))
         {
-            errors[nameof(body.Confirmed)] = [$"At most {MaxConfirmed} keys of 1 to {MaxKey} characters, as the possible matches gave them."];
+            errors[nameof(body.Confirmed)] = [$"At most {AllowListAdmin.MaxPossibleMatches} keys of 1 to {MaxKey} characters, as the possible matches gave them."];
         }
 
         if (errors.Count > 0)
@@ -82,33 +80,28 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
 
         var confirmed = new HashSet<string>(body.Confirmed?.OfType<string>() ?? [], StringComparer.Ordinal);
         var result = await allowList.AddAsync(body.Name!.Trim(), body.Reason!.Trim(), user!.Name, confirmed, cancellationToken);
-        if (result.Unavailable)
+        var count = result.PossibleMatchCount;
+        switch (result.Outcome)
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new AllowListRefusal(AllowListRefusal.Unavailable, "A list can't be checked right now (loading, or not current), so the name can't be checked against it. Try again later.", []));
+            case AllowListAddOutcome.Unavailable:
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new AllowListRefusal(AllowListRefusal.Unavailable, "A list can't be checked right now (loading, or not current), so the name can't be checked against it. Try again later.", []));
+            case AllowListAddOutcome.Exists:
+                return Conflict(new AllowListRefusal(AllowListRefusal.Exists, $"This name is already on the allow-list (entry {result.ExistingId}). To change its reason, remove it and add it again.", []));
+            case AllowListAddOutcome.Listed:
+                return Conflict(new AllowListRefusal(AllowListRefusal.Listed, $"This name is a match on {result.ListedAs}: a listed party can't be allow-listed.", []));
+            case AllowListAddOutcome.TooBroad:
+                return Conflict(new AllowListRefusal(AllowListRefusal.TooBroad, $"This name is a possible match for {count} listed parties, more than the {AllowListAdmin.MaxPossibleMatches} an entry can be checked against: it's too generic to allow-list. Enter the full name, legal form included.", [.. result.PossibleMatches.Select(PossibleMatchResponse.From)]));
+            case AllowListAddOutcome.Confirm:
+                var message = count == 1
+                    ? "This name is a possible match for a listed party. Once it's on the allow-list, that match is shown as allowed and no longer raises the result. Add it only if this name is not that party."
+                    : $"This name is a possible match for {count} listed parties. Once it's on the allow-list, these matches are shown as allowed and no longer raise the result. Add it only if this name is none of them.";
+                return Conflict(new AllowListRefusal(AllowListRefusal.Confirm, message, [.. result.PossibleMatches.Select(PossibleMatchResponse.From)]));
+            case AllowListAddOutcome.Added:
+            default:
+                // The possible matches confirmed, by list and listed id: what the administrator accepted, never the name.
+                AllowListAdded(logger, result.Id!.Value, user.Name, count == 0 ? "none" : string.Join(", ", result.PossibleMatches.Select(hit => hit.Key)));
+                return Ok(new AllowListChangeResponse(result.Id.Value, result.Reloaded));
         }
-
-        if (result.ExistingId is { } existing)
-        {
-            return Conflict(new AllowListRefusal(AllowListRefusal.Exists, $"This name is already on the allow-list (entry {existing}). To change its reason, remove it and add it again.", []));
-        }
-
-        if (result.ListedAs is { } listedAs)
-        {
-            return Conflict(new AllowListRefusal(AllowListRefusal.Listed, $"This name is a match on {listedAs}: a listed party can't be allow-listed.", []));
-        }
-
-        if (result.Id is not { } id)
-        {
-            var count = result.PossibleMatches.Count;
-            var message = count == 1
-                ? "This name is a possible match for a listed party. Once it's on the allow-list, that match is shown as allowed and no longer raises the result. Add it only if this name is not that party."
-                : $"This name is a possible match for {count} listed parties. Once it's on the allow-list, these matches are shown as allowed and no longer raise the result. Add it only if this name is none of them.";
-            return Conflict(new AllowListRefusal(AllowListRefusal.Confirm, message, [.. result.PossibleMatches.Select(PossibleMatchResponse.From)]));
-        }
-
-        // The possible matches confirmed, by list and listed id: what the administrator accepted, never the name.
-        AllowListAdded(logger, id, user.Name, result.PossibleMatches.Count == 0 ? "none" : string.Join(", ", result.PossibleMatches.Select(hit => hit.Key)));
-        return Ok(new AllowListChangeResponse(id, result.Reloaded));
     }
 
     /// <summary>Removes an entry (it stays in the history).</summary>
@@ -206,22 +199,23 @@ public sealed record AllowListAddRequest(string? Name, string? Reason, IReadOnly
 public sealed record AllowListChangeResponse(int Id, bool Reloaded);
 
 /// <param name="Code"><c>confirm</c>: possible matches to confirm (<paramref name="PossibleMatches"/>); <c>listed</c>: the
-/// name is a Match, never added; <c>exists</c>: the name is already an entry in force; <c>unavailable</c>: a list can't
-/// be checked now.</param>
+/// name is a Match, never added; <c>exists</c>: the name is already an entry in force; <c>tooBroad</c>: a possible match
+/// for more listed parties than can be confirmed (the closest of them listed); <c>unavailable</c>: a list can't be
+/// checked now.</param>
 public sealed record AllowListRefusal(string Code, string Message, IReadOnlyList<PossibleMatchResponse> PossibleMatches)
 {
     public const string Confirm = "confirm";
     public const string Listed = "listed";
     public const string Unavailable = "unavailable";
     public const string Exists = "exists";
+    public const string TooBroad = "tooBroad";
 }
 
 /// <param name="Key">What to send back in <c>confirmed</c>: <c>{list code}/{external id}</c>.</param>
-/// <param name="ReadAs"><c>Receiver</c> (the name read as a person), <c>Company</c>, or both.</param>
-public sealed record PossibleMatchResponse(string Key, string List, string ListName, string ListedName, string Alias, int Percent, IReadOnlyList<string> ReadAs, string? Programme)
+public sealed record PossibleMatchResponse(string Key, string List, string ListName, string ListedName, string Alias, int Percent, string? Programme)
 {
     public static PossibleMatchResponse From(AllowListPossibleMatch hit) =>
-        new(hit.Key, hit.List, hit.ListName, hit.ListedName, hit.Alias, hit.Percent, [.. hit.ReadAs.Select(kind => kind.ToString())], hit.Programme);
+        new(hit.Key, hit.List, hit.ListName, hit.ListedName, hit.Alias, hit.Percent, hit.Programme);
 }
 
 public sealed record AllowListResponse(IReadOnlyList<AllowListEntryResponse> Entries);
