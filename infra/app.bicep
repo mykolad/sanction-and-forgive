@@ -66,11 +66,20 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     workloadProfileName: 'Consumption'
     configuration: {
       activeRevisionsMode: 'Single'
+      // Azure's defaults, stated so what-if doesn't report them as removals.
+      maxInactiveRevisions: 100
       ingress: {
         external: true
         targetPort: 8080
+        exposedPort: 0
         transport: 'auto'
         allowInsecure: false
+        traffic: [
+          {
+            latestRevision: true
+            weight: 100
+          }
+        ]
         ipSecurityRestrictions: [for (cidr, i) in allowedCidrs: {
           name: 'allowed-${i}'
           action: 'Allow'
