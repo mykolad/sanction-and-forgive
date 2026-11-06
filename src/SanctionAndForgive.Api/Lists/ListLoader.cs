@@ -14,7 +14,7 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
         await using var scope = scopes.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<ListsDbContext>();
         var sources = await context.Sources.AsNoTracking().OrderBy(source => source.Code)
-            .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport == null ? 0 : source.ActiveImport.RecordCount })
+            .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport != null ? source.ActiveImport!.RecordCount : 0 })
             .ToListAsync(cancellationToken);
 
         var current = catalog.Lists.ToDictionary(list => list.Code, StringComparer.Ordinal);
@@ -22,7 +22,7 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
         foreach (var source in sources)
         {
             var existing = current.GetValueOrDefault(source.Code);
-            var index = existing?.ActiveImportId == source.ActiveImportId ? existing.Index : null;
+            var index = existing is not null && existing.ActiveImportId == source.ActiveImportId ? existing.Index : null;
             if (index is null && source.ActiveImportId is { } importId)
             {
                 index = await BuildAsync(context, source.Code, importId, cancellationToken);
