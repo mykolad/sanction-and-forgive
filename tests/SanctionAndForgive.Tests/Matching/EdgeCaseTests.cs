@@ -128,4 +128,23 @@ public class EdgeCaseTests
 
         AssertBand(cell, Outcome.NoMatch);
     }
+
+    [Theory]
+    [InlineData("NESTEROV O.Y.", "Oleg Yuryevich NESTEROV")]
+    [InlineData("TATRIEV K.K.", "Khasan Kureyshevich TATRIEV")]
+    public void LatinInitials_MatchTheNamesOwnFirstLetter(string query, string listed)
+    {
+        AssertBand(NameCell(query, Subject(listed, SubjectKind.Individual, null)), Outcome.Review);
+    }
+
+    [Theory]
+    [InlineData("Ibex Shippig Inc.", "Ibex Shipping Inc.")]
+    [InlineData("Expert Partnes", "Expert Partners")]
+    public void TypoInALongGenericWord_IsStillThatWord(string query, string listed)
+    {
+        var subject = Subject(listed, SubjectKind.Entity, null);
+        var cell = Screener.Screen(new ScreeningRequest(null, query, null), [List("eu", subject)]).Entries[0].Cells.Single();
+
+        AssertBand(cell, Outcome.Match);
+    }
 }
