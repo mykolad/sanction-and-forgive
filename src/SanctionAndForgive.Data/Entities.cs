@@ -74,6 +74,10 @@ public sealed class Import
     /// are kept only for the active import, the one before it, and one held for review.</summary>
     public bool HasData { get; set; }
 
+    /// <summary>For an import held for review: the active import it was compared against. Confirming it is refused if
+    /// the source has moved on from that list since, so a stale hold can never roll a list back.</summary>
+    public int? BasedOnImportId { get; set; }
+
     /// <summary>When a held import was confirmed or rejected, and by whom (the reviewer's sign-in name). Not shown
     /// on the public pages.</summary>
     public DateTimeOffset? ReviewedAt { get; set; }

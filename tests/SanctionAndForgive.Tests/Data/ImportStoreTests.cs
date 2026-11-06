@@ -139,6 +139,45 @@ public sealed class ImportStoreTests : IAsyncLifetime
     }
 
     [SqlServerFact]
+    public async Task AHold_IsSupersededWithTheActivation_AndAStaleOneCanNeverRollTheListBack()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+
+        var forced = await store.ImportAsync(source, Subjects(12), force: true, CancellationToken.None);
+        Assert.Equal(ImportStatus.Rejected, (await context.Imports.AsNoTracking().SingleAsync(i => i.Id == held.ImportId)).Status);
+
+        // As if the superseding had been lost: the hold looks pending again, still with its records.
+        await context.Imports.Where(i => i.Id == held.ImportId).ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, ImportStatus.PendingReview).SetProperty(i => i.HasData, true));
+        var result = await store.ReviewAsync(held.ImportId!.Value, confirm: true, "owner@example.invalid", CancellationToken.None);
+
+        Assert.Equal(ReviewResult.NotPending, result);
+        await context.Entry(source).ReloadAsync();
+        Assert.Equal(forced.ImportId, source.ActiveImportId);
+        Assert.Equal(12, (await store.ActiveSubjectsAsync(source, CancellationToken.None)).Count);
+    }
+
+    [SqlServerFact]
+    public async Task AHeldUpdate_StaysFindable_AfterManyLaterChecks()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+        for (var i = 0; i < 25; i++)
+        {
+            await store.RecordFailureAsync(source, "HttpRequestException: 503", CancellationToken.None);
+        }
+
+        Assert.DoesNotContain(await store.HistoryAsync("eu", perSource: 20, CancellationToken.None), entry => entry.Id == held.ImportId);
+        Assert.Equal(held.ImportId, Assert.Single(await store.HeldAsync(CancellationToken.None)).Id);
+    }
+
+    [SqlServerFact]
     public async Task RejectingAHeldUpdate_DeletesItsRecords_KeepsItInTheHistory()
     {
         await using var context = CreateContext();

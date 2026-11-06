@@ -84,11 +84,11 @@ function held(list) {
     el("span", { class: "state-badge Held" }, el("span", { "aria-hidden": "true" }, "!"), " Update held for review"),
     el("span", { class: "sub" },
       `${list.held.recordCount.toLocaleString()} records downloaded ${utc(list.held.downloadedAt)}, against ${list.recordCount.toLocaleString()} now. `,
-      "Screenings keep using the list above until an administrator confirms or rejects it."));
+      "Screenings keep using the list above while it's current (it still turns Not checked after its allowed age) until an administrator confirms or rejects the update."));
 }
 
 const RESULTS = {
-  Active: "Searched now",
+  Active: "The list in use",
   Replaced: "Replaced by a later update",
   HeldForReview: "Held for review",
   Rejected: "Rejected",

@@ -221,8 +221,11 @@ Spec sections 4 ("Import rules") and 6. The database holds parsed lists only, ne
   than 20% (owner's decision, 2026-11-06) → written in full but **held** (`PendingReview`, `ImportResult.HeldForReview`):
   the old list keeps serving, `LastCheckedAt` doesn't move, so it still ages out after `MaxAgeHours`; the same update
   again stays held without writing; a later update that needs no review, or the feed returning to the active list,
-  supersedes it (`Rejected`, "superseded"). `ReviewAsync` confirms (conditional flip, `LastCheckedAt` = when it was
-  downloaded) or rejects it, recording the reviewer. `--force` imports past the drop, never zero. Otherwise
+  supersedes it (`Rejected`, "superseded"), always in the same transaction as that activation or check (records
+  later). A hold keeps `BasedOnImportId`, the list it was compared with: `ReviewAsync` confirms only while that's still
+  active (never a rollback), in the activation's transaction with the reviewer and `LastCheckedAt` = when it was
+  downloaded; rejecting marks it `Rejected` before deleting its records. `HeldAsync` finds holds however old (the
+  history is bounded); the public history never shows a failure's details or a reviewer's name. `--force` imports past the drop, never zero. Otherwise
   `SqlBulkCopy` in batches of 5,000, then the conditional flip of `ActiveImportId`. Records are kept for the active
   import, the one before it and a held one; other imports' records are deleted in chunks (`HasData` false), their rows
   stay.

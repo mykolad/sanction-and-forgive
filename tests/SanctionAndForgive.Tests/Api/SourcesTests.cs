@@ -51,26 +51,46 @@ public sealed class SourcesTests : IDisposable
     }
 
     [Fact]
-    public async Task AHeldUpdate_AndTheHistory_AreShown_WithoutTheReviewersName()
+    public async Task AHeldUpdate_AndTheHistory_AreShown_WithoutTheReviewersName_OrFailureDetails()
     {
         factory.Load(Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity)));
+        var held = new SanctionAndForgive.Data.ImportHistoryEntry(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddHours(-1), Now.AddHours(-1), 4900, "Records dropped from 6269 to 4900, more than 20 %: held for review", Active: false, ReviewedAt: null, ReviewedBy: null);
         factory.Catalog.ReplaceHistory(new Dictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>>
         {
             ["eu"] =
             [
-                new(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddHours(-1), Now.AddHours(-1), 4900, "Records dropped from 6269 to 4900, more than 20 %: held for review", Active: false, ReviewedAt: null, ReviewedBy: null),
+                new(4, "eu", SanctionAndForgive.Data.ImportStatus.Failed, Now.AddMinutes(-30), Now.AddMinutes(-30), 0, "FileNotFoundException: Could not find file '/home/owner/eu.xml'.", Active: false, ReviewedAt: null, ReviewedBy: null),
+                held,
                 new(2, "eu", SanctionAndForgive.Data.ImportStatus.Rejected, Now.AddDays(-1), Now.AddDays(-1), 100, "…; rejected on review", Active: false, Now.AddDays(-1), "owner@example.invalid"),
                 new(1, "eu", SanctionAndForgive.Data.ImportStatus.Completed, Now.AddDays(-2), Now.AddDays(-2), 6269, null, Active: true, ReviewedAt: null, ReviewedBy: null),
             ],
         });
+        factory.Catalog.ReplaceHeld(new Dictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> { ["eu"] = held });
 
         var eu = (await SourcesAsync())["eu"];
 
         Assert.Equal((3, 4900), (eu.GetProperty("held").GetProperty("importId").GetInt32(), eu.GetProperty("held").GetProperty("recordCount").GetInt32()));
-        Assert.Equal(["HeldForReview", "Rejected", "Active"], eu.GetProperty("history").EnumerateArray().Select(entry => entry.GetProperty("result").GetString()));
-        Assert.True(eu.GetProperty("history")[1].GetProperty("reviewed").GetBoolean());
+        Assert.Equal(["Failed", "HeldForReview", "Rejected", "Active"], eu.GetProperty("history").EnumerateArray().Select(entry => entry.GetProperty("result").GetString()));
+        Assert.True(eu.GetProperty("history")[2].GetProperty("reviewed").GetBoolean());
+        Assert.Equal("The download or the parse failed.", eu.GetProperty("history")[0].GetProperty("note").GetString());
         Assert.DoesNotContain("owner@example.invalid", eu.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("eu.xml", eu.GetRawText(), StringComparison.Ordinal);
         Assert.Equal("Current", eu.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task AHeldUpdate_IsShown_EvenWhenLaterChecksPushedItOutOfTheHistory()
+    {
+        factory.Load(Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity)));
+        factory.Catalog.ReplaceHeld(new Dictionary<string, SanctionAndForgive.Data.ImportHistoryEntry>
+        {
+            ["eu"] = new(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddDays(-3), Now.AddDays(-3), 4900, "held for review", Active: false, ReviewedAt: null, ReviewedBy: null),
+        });
+
+        var eu = (await SourcesAsync())["eu"];
+
+        Assert.Equal(3, eu.GetProperty("held").GetProperty("importId").GetInt32());
+        Assert.Equal(0, eu.GetProperty("history").GetArrayLength());
     }
 
     [Fact]

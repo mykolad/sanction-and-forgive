@@ -15,6 +15,12 @@ namespace SanctionAndForgive.Data.Migrations
                 name: "IX_Imports_SourceId",
                 table: "Imports");
 
+            migrationBuilder.AddColumn<int>(
+                name: "BasedOnImportId",
+                table: "Imports",
+                type: "int",
+                nullable: true);
+
             migrationBuilder.AddColumn<bool>(
                 name: "HasData",
                 table: "Imports",
@@ -24,6 +30,7 @@ namespace SanctionAndForgive.Data.Migrations
 
             // Until now only the active import and the one before it were kept, both Completed, both with their records.
             migrationBuilder.Sql("UPDATE Imports SET HasData = 1 WHERE Status = 'Completed'");
+
             migrationBuilder.AddColumn<DateTimeOffset>(
                 name: "ReviewedAt",
                 table: "Imports",
@@ -48,8 +55,13 @@ namespace SanctionAndForgive.Data.Migrations
         {
             // The earlier code knows no PendingReview: a held import becomes Rejected (its records go with the next cleanup).
             migrationBuilder.Sql("UPDATE Imports SET Status = 'Rejected' WHERE Status = 'PendingReview'");
+
             migrationBuilder.DropIndex(
                 name: "IX_Imports_SourceId_Status",
+                table: "Imports");
+
+            migrationBuilder.DropColumn(
+                name: "BasedOnImportId",
                 table: "Imports");
 
             migrationBuilder.DropColumn(

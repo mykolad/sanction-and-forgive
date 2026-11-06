@@ -128,11 +128,14 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 return ReviewResult.Rejected;
             }
 
-            await ActivateAsync(source, held, source.ActiveImportId, held.StartedAt, cancellationToken);
-            held.ReviewedAt = now;
-            held.ReviewedBy = Truncate(reviewer, 256);
-            held.Message = Truncate(held.Message + "; confirmed on review", 1000);
-            await context.SaveChangesAsync(cancellationToken);
+            // Held against another list than the one active now: it no longer says what it said. Never roll back.
+            if (held.BasedOnImportId != source.ActiveImportId)
+            {
+                await RejectHeldAsync(held, "superseded: the list changed after it was held", now, reviewer: null, cancellationToken);
+                return ReviewResult.NotPending;
+            }
+
+            await ActivateAsync(source, held, source.ActiveImportId, held.StartedAt, new ReviewStamp(Truncate(reviewer, 256)!, now, Truncate(held.Message + "; confirmed on review", 1000)!), cancellationToken);
             await DeleteOldImportsAsync(source, cancellationToken);
             return ReviewResult.Confirmed;
         }
@@ -146,6 +149,14 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
     /// <summary>Who this connection is signed in as (<c>SUSER_SNAME()</c>): the reviewer the CLI records.</summary>
     public async Task<string> CurrentLoginAsync(CancellationToken cancellationToken) =>
         (await context.Database.SqlQueryRaw<string>("SELECT SUSER_SNAME() AS Value").ToListAsync(cancellationToken)).FirstOrDefault() ?? "unknown";
+
+    /// <summary>Every import held for review, newest first, however many checks came after it.</summary>
+    public async Task<List<ImportHistoryEntry>> HeldAsync(CancellationToken cancellationToken)
+    {
+        var held = await context.Imports.AsNoTracking().Where(i => i.Status == ImportStatus.PendingReview && i.HasData)
+            .OrderByDescending(i => i.Id).Select(i => new { Import = i, i.Source!.Code }).ToListAsync(cancellationToken);
+        return [.. held.Select(h => new ImportHistoryEntry(h.Import.Id, h.Code, h.Import.Status, h.Import.StartedAt, h.Import.CompletedAt, h.Import.RecordCount, h.Import.Message, Active: false, h.Import.ReviewedAt, h.Import.ReviewedBy))];
+    }
 
     /// <summary>The latest imports of every source (or of <paramref name="code"/>), newest first,
     /// <paramref name="perSource"/> each.</summary>
@@ -186,16 +197,20 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             var active = source.ActiveImportId is { } activeId ? await context.Imports.SingleAsync(i => i.Id == activeId, cancellationToken) : null;
             var now = clock.GetUtcNow();
 
-            var held = await context.Imports.Where(i => i.SourceId == source.Id && i.Status == ImportStatus.PendingReview).OrderByDescending(i => i.Id).ToListAsync(cancellationToken);
+            var held = await context.Imports.AsNoTracking().Where(i => i.SourceId == source.Id && i.Status == ImportStatus.PendingReview).OrderByDescending(i => i.Id).ToListAsync(cancellationToken);
             if (mode != ImportMode.Forced && active?.ContentHash == hash)
             {
                 // A feed checked successfully: it's current again, and an update held for review is moot. A manual
                 // edit that changes nothing writes nothing.
                 if (mode == ImportMode.Feed)
                 {
-                    source.LastCheckedAt = now;
-                    await context.SaveChangesAsync(cancellationToken);
-                    await SupersedeHeldAsync(held, "superseded: the feed returned to the active list", now, cancellationToken);
+                    await InTransactionAsync(async () =>
+                    {
+                        await context.Sources.Where(s => s.Id == source.Id).ExecuteUpdateAsync(set => set.SetProperty(s => s.LastCheckedAt, now), cancellationToken);
+                        await SupersedeHeldAsync(source.Id, exceptId: null, "superseded: the feed returned to the active list", cancellationToken);
+                    }, cancellationToken);
+                    await context.Entry(source).ReloadAsync(cancellationToken);
+                    await DeleteOldImportsAsync(source, cancellationToken);
                 }
 
                 return new ImportOutcome(ImportResult.Unchanged, active.RecordCount, active.RecordCount, "Unchanged since the active import", null);
@@ -217,7 +232,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 return new ImportOutcome(ImportResult.HeldForReview, records.Count, active?.RecordCount, $"Still held for review (import {same.Id}); the active list is kept", same.Id);
             }
 
-            var import = new Import { SourceId = source.Id, StartedAt = now, ContentHash = hash, RecordCount = records.Count, Status = ImportStatus.Running, HasData = true };
+            var import = new Import { SourceId = source.Id, StartedAt = now, ContentHash = hash, RecordCount = records.Count, Status = ImportStatus.Running, HasData = true, BasedOnImportId = drop is null ? null : active!.Id };
             context.Imports.Add(import);
             await context.SaveChangesAsync(cancellationToken);
             var (previousActive, previousChecked) = (source.ActiveImportId, source.LastCheckedAt);
@@ -226,14 +241,19 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 await WriteSubjectsAsync(source, import, records, cancellationToken);
                 if (drop is not null)
                 {
-                    import.Status = ImportStatus.PendingReview;
-                    import.CompletedAt = clock.GetUtcNow();
-                    import.Message = drop;
-                    await context.SaveChangesAsync(cancellationToken);
+                    // Held, and any older hold superseded, in one transaction.
+                    var completed = clock.GetUtcNow();
+                    await InTransactionAsync(async () =>
+                    {
+                        await context.Imports.Where(i => i.Id == import.Id).ExecuteUpdateAsync(
+                            set => set.SetProperty(i => i.Status, ImportStatus.PendingReview).SetProperty(i => i.CompletedAt, completed).SetProperty(i => i.Message, drop), cancellationToken);
+                        await SupersedeHeldAsync(source.Id, import.Id, $"superseded by import {import.Id}", cancellationToken);
+                    }, cancellationToken);
+                    await context.Entry(import).ReloadAsync(cancellationToken);
                 }
                 else
                 {
-                    await ActivateAsync(source, import, previousActive, now, cancellationToken);
+                    await ActivateAsync(source, import, previousActive, now, review: null, cancellationToken);
                 }
             }
             catch (Exception exception) when (exception is SqlException or DbUpdateException or RetryLimitExceededException or InvalidOperationException or OperationCanceledException)
@@ -258,8 +278,6 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 await context.Entry(import).ReloadAsync(CancellationToken.None);
             }
 
-            // A newer update replaces one already held; one that needed no review makes it moot.
-            await SupersedeHeldAsync(held, $"superseded by import {import.Id}", clock.GetUtcNow(), cancellationToken);
             if (drop is not null)
             {
                 return new ImportOutcome(ImportResult.HeldForReview, records.Count, active?.RecordCount, $"{drop} (import {import.Id}); the active list is kept", import.Id);
@@ -467,7 +485,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
     /// <summary>The flip, in one transaction: the source moves to the new import only if its active import is still
     /// the one this import started from, and the import completes. The condition, not the application lock, is
     /// what guarantees no lost update: a retried command may run on a new session that no longer holds the lock.</summary>
-    private async Task ActivateAsync(Source source, Import import, int? expectedActive, DateTimeOffset checkedAt, CancellationToken cancellationToken)
+    private async Task ActivateAsync(Source source, Import import, int? expectedActive, DateTimeOffset checkedAt, ReviewStamp? review, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
         var strategy = context.Database.CreateExecutionStrategy();
@@ -484,6 +502,14 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
 
             await context.Imports.Where(i => i.Id == import.Id)
                 .ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, ImportStatus.Completed).SetProperty(i => i.CompletedAt, now), cancellationToken);
+            if (review is { } stamp)
+            {
+                await context.Imports.Where(i => i.Id == import.Id).ExecuteUpdateAsync(
+                    set => set.SetProperty(i => i.ReviewedBy, stamp.Reviewer).SetProperty(i => i.ReviewedAt, stamp.At).SetProperty(i => i.Message, stamp.Message), cancellationToken);
+            }
+
+            // Any other hold is moot once a list becomes active: superseded in the same transaction, records later.
+            await SupersedeHeldAsync(source.Id, import.Id, $"superseded by import {import.Id}", cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         });
 
@@ -508,20 +534,17 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         await context.Imports.Where(i => old.Contains(i.Id)).ExecuteUpdateAsync(set => set.SetProperty(i => i.HasData, false), cancellationToken);
     }
 
-    /// <summary>Rejects every import in <paramref name="held"/>: a later check made it moot.</summary>
-    private async Task SupersedeHeldAsync(List<Import> held, string reason, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        foreach (var import in held)
-        {
-            await RejectHeldAsync(import, reason, now, reviewer: null, cancellationToken);
-        }
-    }
+    /// <summary>Marks the source's other held imports Rejected (one statement, so it can join a transaction). Their
+    /// records go with the next cleanup (<see cref="DeleteOldImportsAsync"/>).</summary>
+    private async Task SupersedeHeldAsync(int sourceId, int? exceptId, string reason, CancellationToken cancellationToken) =>
+        await context.Imports.Where(i => i.SourceId == sourceId && i.Status == ImportStatus.PendingReview && i.Id != exceptId)
+            .ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, ImportStatus.Rejected).SetProperty(i => i.Message, i => ((i.Message ?? string.Empty) + "; " + reason).Substring(0, 1000)), cancellationToken);
 
+    /// <summary>Rejected first, then its records deleted: an interrupted deletion leaves a rejected import (cleaned up
+    /// later), never a held one that could still be confirmed with part of its records.</summary>
     private async Task RejectHeldAsync(Import import, string reason, DateTimeOffset now, string? reviewer, CancellationToken cancellationToken)
     {
-        await DeleteImportDataAsync(import.Id, cancellationToken);
         import.Status = ImportStatus.Rejected;
-        import.HasData = false;
         import.Message = Truncate($"{import.Message}; {reason}", 1000);
         if (reviewer is not null)
         {
@@ -530,6 +553,20 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         }
 
         await context.SaveChangesAsync(cancellationToken);
+        await DeleteImportDataAsync(import.Id, cancellationToken);
+        import.HasData = false;
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task InTransactionAsync(Func<Task> work, CancellationToken cancellationToken)
+    {
+        var strategy = context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            await work();
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     /// <summary>Deletes an import's names, addresses and subjects in chunks, so a 5 DTU database isn't held by one
@@ -594,6 +631,9 @@ public sealed record SourceStatus(
     ImportStatus? LastImportStatus,
     string? LastImportMessage,
     int? HeldImportId);
+
+/// <summary>Who confirmed a held import, when, and its message after: written with the activation.</summary>
+internal sealed record ReviewStamp(string Reviewer, DateTimeOffset At, string Message);
 
 /// <summary>How an import treats "unchanged" and the drop guard.</summary>
 internal enum ImportMode

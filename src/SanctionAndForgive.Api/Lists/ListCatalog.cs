@@ -44,5 +44,14 @@ public sealed class ListCatalog
 
     public void ReplaceHistory(IReadOnlyDictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>> latest) => history = latest;
 
+    private volatile IReadOnlyDictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> held =
+        new Dictionary<string, SanctionAndForgive.Data.ImportHistoryEntry>();
+
+    /// <summary>Each source's update held for review (the newest, if any), read on its own: it shows however many
+    /// checks came after it, not only while it's within <see cref="History"/>.</summary>
+    public IReadOnlyDictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> Held => held;
+
+    public void ReplaceHeld(IReadOnlyDictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> latest) => held = latest;
+
     private sealed record Snapshot(IReadOnlyList<LoadedList> Lists, bool Ready);
 }

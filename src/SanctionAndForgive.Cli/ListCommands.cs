@@ -87,7 +87,7 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
     public async Task<int> ReviewListAsync(CancellationToken cancellationToken)
     {
         var statuses = await store.StatusAsync(cancellationToken);
-        var held = (await store.HistoryAsync(code: null, perSource: 20, cancellationToken)).Where(entry => entry.Status == ImportStatus.PendingReview).ToList();
+        var held = await store.HeldAsync(cancellationToken);
         if (held.Count == 0)
         {
             output.WriteLine("No updates are held for review.");

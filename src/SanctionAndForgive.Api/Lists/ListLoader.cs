@@ -25,7 +25,10 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
             .ToListAsync(cancellationToken);
 
         // The history first: a small read, and the status page shows a held update even while lists rebuild.
-        var history = await new ImportStore(context, clock).HistoryAsync(code: null, HistoryLength, cancellationToken);
+        var store = new ImportStore(context, clock);
+        var history = await store.HistoryAsync(code: null, HistoryLength, cancellationToken);
+        catalog.ReplaceHeld((await store.HeldAsync(cancellationToken)).GroupBy(entry => entry.SourceCode, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
         catalog.ReplaceHistory(history.GroupBy(entry => entry.SourceCode, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<ImportHistoryEntry>)[.. group], StringComparer.Ordinal));
 

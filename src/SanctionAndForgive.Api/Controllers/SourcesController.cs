@@ -26,9 +26,10 @@ public sealed class SourcesController(ListCatalog catalog, TimeProvider clock) :
         var now = clock.GetUtcNow();
         var loaded = catalog.Lists;
         var history = catalog.History;
+        var heldUpdates = catalog.Held;
         var searched = loaded.Select(list => SourceResponse.From(list, ListSources.Find(list.Code), now) with
         {
-            Held = history.GetValueOrDefault(list.Code)?.FirstOrDefault(entry => entry.Status == ImportStatus.PendingReview) is { } held
+            Held = heldUpdates.GetValueOrDefault(list.Code) is { } held
                 ? new HeldUpdateResponse(held.Id, held.RecordCount, held.StartedAt, held.Message)
                 : null,
             History = [.. (history.GetValueOrDefault(list.Code) ?? []).Select(HistoryEntryResponse.From)],
@@ -114,8 +115,10 @@ public sealed record SourceResponse(
 /// administrator (<c>tools/lists.ps1 confirm|reject -Import</c>).</summary>
 public sealed record HeldUpdateResponse(int ImportId, int RecordCount, DateTimeOffset DownloadedAt, string? Reason);
 
-/// <param name="Result"><c>Active</c> (the list now searched), <c>Replaced</c> (an earlier list), <c>HeldForReview</c>,
-/// <c>Rejected</c>, <c>Failed</c> or <c>Running</c>.</param>
+/// <param name="Result"><c>Active</c> (the list in use: searched while it's current), <c>Replaced</c> (an earlier
+/// list), <c>HeldForReview</c>, <c>Rejected</c>, <c>Failed</c> or <c>Running</c>.</param>
+/// <param name="Note">Why it was held or rejected. For a failure, only that it failed: its details (an exception, a
+/// path on the operator's machine) stay in <c>tools/lists.ps1 history</c>.</param>
 /// <param name="Reviewed">Whether a person confirmed or rejected it (who, isn't public).</param>
 public sealed record HistoryEntryResponse(int ImportId, string Result, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, int RecordCount, string? Note, bool Reviewed)
 {
@@ -131,6 +134,6 @@ public sealed record HistoryEntryResponse(int ImportId, string Result, DateTimeO
         entry.StartedAt,
         entry.CompletedAt,
         entry.RecordCount,
-        entry.Message,
+        entry.Status == ImportStatus.Failed ? "The download or the parse failed." : entry.Message,
         entry.ReviewedAt is not null);
 }

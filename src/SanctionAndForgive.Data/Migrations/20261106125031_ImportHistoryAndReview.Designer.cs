@@ -12,7 +12,7 @@ using SanctionAndForgive.Data;
 namespace SanctionAndForgive.Data.Migrations
 {
     [DbContext(typeof(ListsDbContext))]
-    [Migration("20261106122952_ImportHistoryAndReview")]
+    [Migration("20261106125031_ImportHistoryAndReview")]
     partial class ImportHistoryAndReview
     {
         /// <inheritdoc />
@@ -32,6 +32,9 @@ namespace SanctionAndForgive.Data.Migrations
                         .HasColumnType("int");
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("BasedOnImportId")
+                        .HasColumnType("int");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("datetimeoffset");

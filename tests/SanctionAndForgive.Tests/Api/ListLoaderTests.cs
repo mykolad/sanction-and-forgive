@@ -65,6 +65,7 @@ public sealed class ListLoaderTests : IAsyncLifetime
         var history = catalog.History["eu"];
         Assert.Equal([ImportStatus.PendingReview, ImportStatus.Completed], history.Select(entry => entry.Status));
         Assert.Equal((7, false), (history[0].RecordCount, history[0].Active));
+        Assert.Equal(history[0].Id, catalog.Held["eu"].Id);
     }
 
     [SqlServerFact]
