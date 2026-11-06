@@ -51,6 +51,29 @@ public sealed class SourcesTests : IDisposable
     }
 
     [Fact]
+    public async Task AHeldUpdate_AndTheHistory_AreShown_WithoutTheReviewersName()
+    {
+        factory.Load(Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity)));
+        factory.Catalog.ReplaceHistory(new Dictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>>
+        {
+            ["eu"] =
+            [
+                new(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddHours(-1), Now.AddHours(-1), 4900, "Records dropped from 6269 to 4900, more than 20 %: held for review", Active: false, ReviewedAt: null, ReviewedBy: null),
+                new(2, "eu", SanctionAndForgive.Data.ImportStatus.Rejected, Now.AddDays(-1), Now.AddDays(-1), 100, "…; rejected on review", Active: false, Now.AddDays(-1), "owner@example.invalid"),
+                new(1, "eu", SanctionAndForgive.Data.ImportStatus.Completed, Now.AddDays(-2), Now.AddDays(-2), 6269, null, Active: true, ReviewedAt: null, ReviewedBy: null),
+            ],
+        });
+
+        var eu = (await SourcesAsync())["eu"];
+
+        Assert.Equal((3, 4900), (eu.GetProperty("held").GetProperty("importId").GetInt32(), eu.GetProperty("held").GetProperty("recordCount").GetInt32()));
+        Assert.Equal(["HeldForReview", "Rejected", "Active"], eu.GetProperty("history").EnumerateArray().Select(entry => entry.GetProperty("result").GetString()));
+        Assert.True(eu.GetProperty("history")[1].GetProperty("reviewed").GetBoolean());
+        Assert.DoesNotContain("owner@example.invalid", eu.GetRawText(), StringComparison.Ordinal);
+        Assert.Equal("Current", eu.GetProperty("state").GetString());
+    }
+
+    [Fact]
     public async Task CataloguedFeeds_NotLoaded_AreListedWithTheirReason()
     {
         factory.Load(Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity)));

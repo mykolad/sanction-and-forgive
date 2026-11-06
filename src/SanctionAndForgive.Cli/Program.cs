@@ -9,6 +9,10 @@ const string Usage = """
       probe        [--source <code>|all] [--file <path>] [--keep <directory>]
       import       --source <code>|all [--file <path>] [--force]
       status
+      history      [--source <code>]
+      review                         (updates held for review: a drop of more than 20%)
+      confirm      --import <id>     (make a held update active)
+      reject       --import <id>     (discard a held update)
       source-add   --code <code> --name <name>
       add          --source <code> --file <records.csv>
       remove       --source <code> --external-id <id>
@@ -74,6 +78,10 @@ return args[0] switch
 {
     "import" when options.Get("source") is { } source => await commands.ImportAsync(source, options.Get("file"), options.Has("force"), token),
     "status" => await commands.StatusAsync(token),
+    "history" => await commands.HistoryAsync(options.Get("source"), token),
+    "review" => await commands.ReviewListAsync(token),
+    "confirm" when int.TryParse(options.Get("import"), System.Globalization.CultureInfo.InvariantCulture, out var held) => await commands.ReviewAsync(held, confirm: true, token),
+    "reject" when int.TryParse(options.Get("import"), System.Globalization.CultureInfo.InvariantCulture, out var held) => await commands.ReviewAsync(held, confirm: false, token),
     "source-add" when options.Get("code") is { } code && options.Get("name") is { } name => await commands.SourceAddAsync(code, name, token),
     "add" when options.Get("source") is { } source && options.Get("file") is { } file => await commands.AddAsync(source, file, token),
     "remove" when options.Get("source") is { } source && options.Get("external-id") is { } id => await commands.RemoveAsync(source, id, token),

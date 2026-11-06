@@ -45,11 +45,26 @@ public sealed class ListLoaderTests : IAsyncLifetime
         var importId = await ImportAsync(3);
         var catalog = new ListCatalog();
 
-        await new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), catalog, NullLogger<ListLoader>.Instance).RefreshAsync(CancellationToken.None);
+        await new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), catalog, TimeProvider.System, NullLogger<ListLoader>.Instance).RefreshAsync(CancellationToken.None);
 
         Assert.True(catalog.IsReady);
         var list = Assert.Single(catalog.Lists);
         Assert.Equal((importId, 3), (list.ActiveImportId, list.Index!.Subjects.Count));
+    }
+
+    [SqlServerFact]
+    public async Task Refresh_LoadsTheHistory_AHeldUpdateFirst_AndKeepsServingTheActiveList()
+    {
+        var active = await ImportAsync(10);
+        await ImportAsync(7);
+        var catalog = new ListCatalog();
+
+        await new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), catalog, TimeProvider.System, NullLogger<ListLoader>.Instance).RefreshAsync(CancellationToken.None);
+
+        Assert.Equal((active, 10), (catalog.Lists[0].ActiveImportId, catalog.Lists[0].Index!.Subjects.Count));
+        var history = catalog.History["eu"];
+        Assert.Equal([ImportStatus.PendingReview, ImportStatus.Completed], history.Select(entry => entry.Status));
+        Assert.Equal((7, false), (history[0].RecordCount, history[0].Active));
     }
 
     [SqlServerFact]
@@ -65,7 +80,7 @@ public sealed class ListLoaderTests : IAsyncLifetime
         }
 
         var catalog = new ListCatalog();
-        await new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), catalog, NullLogger<ListLoader>.Instance).RefreshAsync(CancellationToken.None);
+        await new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), catalog, TimeProvider.System, NullLogger<ListLoader>.Instance).RefreshAsync(CancellationToken.None);
 
         Assert.Null(Assert.Single(catalog.Lists).Index);
     }
@@ -83,7 +98,7 @@ public sealed class ListLoaderTests : IAsyncLifetime
         }
 
         await using var buildScope = services.CreateAsyncScope();
-        var loader = new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), new ListCatalog(), NullLogger<ListLoader>.Instance);
+        var loader = new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), new ListCatalog(), TimeProvider.System, NullLogger<ListLoader>.Instance);
         var index = await loader.BuildAsync(buildScope.ServiceProvider.GetRequiredService<ListsDbContext>(), "eu", first, 3, CancellationToken.None);
 
         Assert.Null(index);
@@ -101,6 +116,7 @@ public sealed class ListLoaderTests : IAsyncLifetime
             return subject;
         }).ToList();
         await store.ImportAsync(source, subjects, force: false, CancellationToken.None);
+        await scope.ServiceProvider.GetRequiredService<ListsDbContext>().Entry(source).ReloadAsync();
         return source.ActiveImportId!.Value;
     }
 }

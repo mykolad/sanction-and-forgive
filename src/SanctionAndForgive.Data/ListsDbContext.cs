@@ -33,6 +33,8 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
             import.Property(i => i.ContentHash).HasMaxLength(64).IsUnicode(false);
             import.Property(i => i.Status).HasConversion<string>().HasMaxLength(16).IsUnicode(false);
             import.Property(i => i.Message).HasMaxLength(1000);
+            import.Property(i => i.ReviewedBy).HasMaxLength(256);
+            import.HasIndex(i => new { i.SourceId, i.Status });
             import.HasMany<Subject>().WithOne().HasForeignKey(s => s.ImportId).OnDelete(DeleteBehavior.Cascade);
         });
 
