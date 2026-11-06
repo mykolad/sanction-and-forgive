@@ -27,7 +27,7 @@ Content-Type: application/x-ndjson
 
 ```
 {"type":"header","matcherVersion":"c0d2b94021a5","disclaimer":"…","lists":[…],"maxRecords":50000,"maxSeconds":200}
-{"type":"result","line":1,"reference":"TX-1","outcome":"Match","entries":[{"kind":"Company","cells":[{"list":"eu","state":"Checked","percent":99,"outcome":"Match","best":{"listedName":"…","alias":"…","externalId":"…","sourceUrl":"…"}},{"list":"uk","state":"NotChecked","percent":null,"outcome":null,"best":null}]}]}
+{"type":"result","line":1,"reference":"TX-1","outcome":"Match","entries":[{"kind":"Company","cells":[{"list":"eu","state":"Checked","percent":99,"outcome":"Match","best":{"listedName":"…","alias":"…","externalId":"…","sourceUrl":"…","percent":99,"words":[{"entered":1,"listed":"romashka","how":"Transliterated"}],"caps":[],"addressState":"NotCompared"}},{"list":"uk","state":"NotChecked","percent":null,"outcome":null,"best":null}]}]}
 {"type":"result","line":2,"reference":"TX-2","outcome":"Review","entries":[…]}
 {"type":"end","screened":2,"errors":0,"truncated":false,"nextLine":null}
 ```
@@ -37,8 +37,14 @@ Content-Type: application/x-ndjson
 - **`result`**, one per record, in order: `line` (its 1-based line number in the request; blank lines are skipped but
   counted), your `reference`, the overall `outcome`, and per entry (Receiver, Company, Address) one cell per list:
   `state` (`Checked`, or `NotChecked` with no percentage, never 0%), `percent`, `outcome` (`Match`, `Review`,
-  `NoMatch`) and, from 20%, the `best` candidate: enough to find it on the list. Nothing you sent is echoed back:
-  you have it already, keyed by reference.
+  `NoMatch`) and, from 20%, the `best` candidate: enough to find it on the list, and how it aligned. Nothing you
+  sent is echoed back (you have it already, keyed by reference), so the explanation names your words by position:
+  `words` has, per entered word (1-based, among the words compared: legal forms, generic words and honorifics
+  aside), the listed word it aligned with and `how` (`Same`, `Transliterated`, `SpellingVariant`, `Romanisation`,
+  `Cognate`, `OneLetterDiffers`, `TwoLettersDiffer`; `NotListed` for an entered word with no partner, `NotEntered` for
+  a listed one; `Initial`, `InitialContradicts`, `InitialUnchecked` for initials). `caps` says why a percentage was
+  capped. The single endpoint gives the same explanation in plain words. Matching is deterministic, so screening
+  one record again with the same list versions gives the same answer.
 - **`error`** for a record that couldn't be screened (not JSON, a line over 4,096 bytes, a missing reference, nothing
   entered, a field over 300 characters): `line`, the `reference` if there was one, and `errors` by field. The
   messages never quote the input. The stream goes on.
@@ -46,8 +52,9 @@ Content-Type: application/x-ndjson
 
 **Limits.** A stream stops after **50,000 records** (`Screening:StreamMaxRecords`) or **200 seconds**
 (`Screening:StreamMaxSeconds`), whichever comes first: the Container Apps ingress ends any request at 240 seconds.
-Then `end` says `"truncated":true` and `nextLine`, the first line it didn't read; send the rest from that line in a
-new stream. A client should always check `end`: no `end` line means the connection broke, and the records after the
+The time limit counts reading too, so a slow upload stops at it like a long one. Then `end` says
+`"truncated":true` and `nextLine`, the first line it didn't read (or didn't finish reading); send the rest from that
+line in a new stream. A client that stops reading the answer is disconnected 20 seconds after the limit. A client should always check `end`: no `end` line means the connection broke, and the records after the
 last `result` or `error` weren't screened. **One stream at a time** across all clients (`Screening:ConcurrentStreams`):
 a second one gets 429 until the first ends, so a batch can't starve the website on the demo's single small replica.
 

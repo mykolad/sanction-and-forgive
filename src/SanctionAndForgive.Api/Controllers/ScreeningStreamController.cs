@@ -13,13 +13,18 @@ namespace SanctionAndForgive.Api.Controllers;
 /// memory stays flat however long the stream; each record writes its own audit line, never its input. One stream
 /// at a time (<c>Screening:ConcurrentStreams</c>), so a batch can't starve the website on one small replica.
 /// A stream stops after <c>Screening:StreamMaxRecords</c> records or <c>Screening:StreamMaxSeconds</c> seconds (the
-/// ingress ends any request at 240), whichever comes first; the end line then says which line to resume from.</summary>
+/// ingress ends any request at 240), whichever comes first; the end line then says which line to resume from. The
+/// time limit also bounds reading, so a slow or stalled upload can't hold the one stream past it.</summary>
 [ApiController]
 [Route("api/v1/screenings/stream")]
 public sealed class ScreeningStreamController(ScreeningService screenings, IConfiguration configuration, TimeProvider clock) : ControllerBase
 {
-    /// <summary>The longest line read; longer ones are an error line (and the rest of that line is skipped).</summary>
+    /// <summary>The longest line read, in UTF-8 bytes; longer ones are an error line (and the rest of that line is
+    /// skipped).</summary>
     public const int MaxLineBytes = 4096;
+
+    /// <summary>After the time limit, how long writing the last lines may take before the stream is dropped.</summary>
+    private static readonly TimeSpan WriteGrace = TimeSpan.FromSeconds(20);
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -42,26 +47,57 @@ public sealed class ScreeningStreamController(ScreeningService screenings, IConf
         var maxRecords = configuration.GetValue("Screening:StreamMaxRecords", 50_000);
         var maxSeconds = configuration.GetValue("Screening:StreamMaxSeconds", 200);
         var deadline = clock.GetUtcNow().AddSeconds(maxSeconds);
+
+        // Reading stops at the deadline (the end line says where to resume); writing gets a short grace after it, so
+        // the end line can still go out, but a client that stops reading can't hold the stream either.
+        using var timeUp = new CancellationTokenSource(TimeSpan.FromSeconds(maxSeconds), clock);
+        using var dropAt = new CancellationTokenSource(TimeSpan.FromSeconds(maxSeconds) + WriteGrace, clock);
+        using var reading = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeUp.Token);
+        using var writing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, dropAt.Token);
         HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
         Response.ContentType = "application/x-ndjson; charset=utf-8";
 
         // One snapshot for the whole stream: every result in it has the versions the header states.
         var lists = screenings.Snapshot;
         var now = screenings.Now;
-        await WriteLineAsync(new StreamHeaderLine("header", screenings.MatcherVersion, ScreeningResponse.DisclaimerText, [.. lists.Select(list => ListResponse.From(list, now))], maxRecords, maxSeconds), cancellationToken);
+        await WriteLineAsync(new StreamHeaderLine("header", screenings.MatcherVersion, ScreeningResponse.DisclaimerText, [.. lists.Select(list => ListResponse.From(list, now))], maxRecords, maxSeconds), writing.Token);
 
         using var reader = new BoundedLineReader(new StreamReader(Request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 16 * 1024), MaxLineBytes);
         int line = 0, screened = 0, errors = 0;
         int? nextLine = null;
-        while (await reader.ReadLineAsync(cancellationToken) is { } text)
+        while (true)
         {
+            (string Value, bool TooLong)? read;
+            try
+            {
+                // WaitAsync as well: a body stream that ignores the token still can't hold the stream past the limit.
+                read = await reader.ReadLineAsync(reading.Token).WaitAsync(reading.Token);
+            }
+            catch (OperationCanceledException) when (timeUp.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                // Out of time mid-line: that line wasn't read.
+                nextLine = line + 1;
+                break;
+            }
+
+            if (read is not { } text)
+            {
+                break;
+            }
+
             line++;
+            if (timeUp.IsCancellationRequested || clock.GetUtcNow() >= deadline)
+            {
+                nextLine = line;
+                break;
+            }
+
             if (text.Value.Length == 0 && !text.TooLong)
             {
                 continue;
             }
 
-            if (screened + errors >= maxRecords || clock.GetUtcNow() >= deadline)
+            if (screened + errors >= maxRecords)
             {
                 nextLine = line;
                 break;
@@ -71,16 +107,16 @@ public sealed class ScreeningStreamController(ScreeningService screenings, IConf
             if (problem is not null)
             {
                 errors++;
-                await WriteLineAsync(new StreamErrorLine("error", line, body?.Reference is { Length: <= 64 } reference ? reference : null, problem), cancellationToken);
+                await WriteLineAsync(new StreamErrorLine("error", line, body?.Reference is { Length: <= 64 } reference ? reference : null, problem), writing.Token);
                 continue;
             }
 
             var result = screenings.ScreenForStream(body!, lists);
             screened++;
-            await WriteLineAsync(new StreamResultLine("result", line, body!.Reference!, result.Outcome.ToString(), [.. result.Entries.Select(entry => StreamEntry.From(entry, screenings.Options))]), cancellationToken);
+            await WriteLineAsync(new StreamResultLine("result", line, body!.Reference!, result.Outcome.ToString(), [.. result.Entries.Select(entry => StreamEntry.From(entry, screenings.Options))]), writing.Token);
         }
 
-        await WriteLineAsync(new StreamEndLine("end", screened, errors, nextLine is not null, nextLine), cancellationToken);
+        await WriteLineAsync(new StreamEndLine("end", screened, errors, nextLine is not null, nextLine), writing.Token);
     }
 
     private static (ScreeningRequestBody? Body, Dictionary<string, string[]>? Problem) Parse((string Value, bool TooLong) text)

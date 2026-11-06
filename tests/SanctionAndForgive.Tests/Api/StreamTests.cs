@@ -125,11 +125,80 @@ public sealed class StreamTests : IDisposable
     [Fact]
     public async Task BoundedLineReader_HoldsAtMostTheLimit_AndSkipsTheRestOfALongLine()
     {
-        using var reader = new BoundedLineReader(new StringReader("short\r\n" + new string('x', 50) + "\nnext"), maxLength: 10);
+        using var reader = new BoundedLineReader(new StringReader("short\r\n" + new string('x', 50) + "\nnext"), maxBytes: 10);
 
         Assert.Equal(("short", false), await reader.ReadLineAsync(CancellationToken.None));
         Assert.Equal((string.Empty, true), await reader.ReadLineAsync(CancellationToken.None));
         Assert.Equal(("next", false), await reader.ReadLineAsync(CancellationToken.None));
         Assert.Null(await reader.ReadLineAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task BoundedLineReader_CountsUtf8Bytes_NotCharacters()
+    {
+        // 6 characters, 12 bytes: over a 10-byte limit. 5 of them, 10 bytes: at it.
+        using var reader = new BoundedLineReader(new StringReader("ЖЖЖЖЖЖ\nЖЖЖЖЖ"), maxBytes: 10);
+
+        Assert.Equal((string.Empty, true), await reader.ReadLineAsync(CancellationToken.None));
+        Assert.Equal(("ЖЖЖЖЖ", false), await reader.ReadLineAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AHit_IsExplained_WithoutTheEnteredText()
+    {
+        Load();
+        using var client = factory.CreateClient();
+
+        var lines = await StreamAsync(client, """{"reference":"TX-1","companyName":"ТОВ Ромашка"}""");
+
+        var best = lines[1].GetProperty("entries")[0].GetProperty("cells").EnumerateArray().Single(cell => cell.GetProperty("list").GetString() == "eu").GetProperty("best");
+        var word = Assert.Single(best.GetProperty("words").EnumerateArray());
+        Assert.Equal((1, "romashka", "Transliterated"), (word.GetProperty("entered").GetInt32(), word.GetProperty("listed").GetString(), word.GetProperty("how").GetString()));
+        Assert.DoesNotContain("Ромашка", best.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task AStalledUpload_StopsAtTheTimeLimit_WithAnEndLine()
+    {
+        // Real Kestrel: the in-memory test server only hands the app a request once its body is complete.
+        using var kestrel = new ApiFactory();
+        kestrel.UseKestrel(0);
+        kestrel.StartServer();
+        kestrel.Load(Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity)));
+        var server = kestrel.ClientOptions.BaseAddress;
+
+        // A raw HTTP/1.1 request with a chunked body: line 1, then half of line 2, then nothing more. (HttpClient
+        // won't hand over a response while its own upload is still open.)
+        using var tcp = new System.Net.Sockets.TcpClient();
+        await tcp.ConnectAsync(server.Host, server.Port);
+        await using var connection = tcp.GetStream();
+        var body = "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",";
+        var bodyBytes = Encoding.UTF8.GetByteCount(body);
+        await connection.WriteAsync(Encoding.UTF8.GetBytes(
+            $"POST /api/v1/screenings/stream HTTP/1.1\r\nHost: {server.Authority}\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n{bodyBytes:x}\r\n{body}\r\n"));
+        await connection.FlushAsync();
+
+        // Read the answer as it comes; once record 1 is answered, the time runs out with line 2 half sent.
+        var received = new StringBuilder();
+        var buffer = new byte[4096];
+        var advanced = false;
+        using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!received.ToString().Contains("\"type\":\"end\"", StringComparison.Ordinal))
+        {
+            var read = await connection.ReadAsync(buffer, patience.Token);
+            Assert.NotEqual(0, read);
+            received.Append(Encoding.UTF8.GetString(buffer, 0, read));
+            if (!advanced && received.ToString().Contains("\"type\":\"result\"", StringComparison.Ordinal))
+            {
+                advanced = true;
+                kestrel.Clock.Advance(TimeSpan.FromSeconds(201));
+            }
+        }
+
+        var lines = received.ToString().Split('\n').Where(line => line.TrimStart().StartsWith("{\"type\"", StringComparison.Ordinal))
+            .Select(line => JsonDocument.Parse(line.Trim()).RootElement.Clone()).ToList();
+        Assert.Equal(["header", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
+        Assert.True(lines[^1].GetProperty("truncated").GetBoolean());
+        Assert.Equal(2, lines[^1].GetProperty("nextLine").GetInt32());
     }
 }

@@ -143,7 +143,7 @@ public sealed class ListIndex
                 percent = Math.Min(percent + options.CorroboratedBonus, Math.Min(Bands.BandMax(percent, options), score.Ceiling));
             }
 
-            matches.Add(new SubjectMatch(subjects[subjectIndex], percent, Bands.ToOutcome(percent, options), alias.Name, [.. score.Explanation, address.Explanation], address.State));
+            matches.Add(new SubjectMatch(subjects[subjectIndex], percent, Bands.ToOutcome(percent, options), alias.Name, [.. score.Explanation, address.Explanation], address.State, score.Words, score.Caps));
         }
 
         return [.. matches.OrderByDescending(match => match.Percent).ThenBy(match => match.Subject.PrimaryName, StringComparer.Ordinal)];
@@ -172,7 +172,7 @@ public sealed class ListIndex
                 .Select(address => (Address: address, Result: comparer.CompareAddressOnly(entered, address)))
                 .MaxBy(pair => (pair.Result.Matches, pair.Result.Aligned));
             var percent = bestAddress.Result.Matches ? options.AddressOnlyPercent : Math.Min(options.NoMatchMaxPercent, bestAddress.Result.Aligned * 15);
-            matches.Add(new SubjectMatch(subjects[subject], percent, Bands.ToOutcome(percent, options), bestAddress.Address.Raw, [bestAddress.Result.Explanation], AddressState.NotCompared));
+            matches.Add(new SubjectMatch(subjects[subject], percent, Bands.ToOutcome(percent, options), bestAddress.Address.Raw, [bestAddress.Result.Explanation], AddressState.NotCompared, [], []));
         }
 
         return [.. matches.OrderByDescending(match => match.Percent).ThenBy(match => match.Subject.PrimaryName, StringComparer.Ordinal)];
