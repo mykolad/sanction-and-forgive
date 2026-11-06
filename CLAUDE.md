@@ -231,10 +231,17 @@ $env:SQLSERVER_TEST_CONNECTION = "Server=localhost,14333;User ID=sa;Password=Thr
 ## Azure resources
 
 All in `sanction-and-forgive-rg` (Sweden Central), all from Bicep (`infra/README.md` lists each file and the
-bootstrap commands). Deployed so far: the bootstrap and the platform (Log Analytics, Container Apps environment
-`sanction-and-forgive-cae`, identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` with database
-`sanction-and-forgive-db`, Basic 5 DTU / 2 GB, Entra-only, the owner as admin). The Container App and import job come
-with `app.bicep` in Phase 4.
+bootstrap and deploy steps): the platform (Log Analytics, Container Apps environment `sanction-and-forgive-cae`, identity
+`sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` with database `sanction-and-forgive-db`, Basic
+5 DTU / 2 GB, Entra-only, the owner as admin, and the alerts) and the app (`app.bicep`: Container App
+`sanction-and-forgive`, job `sanction-and-forgive-import`, image `ghcr.io/mykolad/sanction-and-forgive:<sha>`, which must
+be public).
+
+- **Deploy** (`.github/workflows/deploy.yml`, after Build and Test on master): image + migration bundle, then in
+  environment `production`: platform what-if and deploy, firewall open, migrations, firewall closed, app, smoke tests.
+  `app.bicepparam` reads `IMAGE_TAG` and `RATE_LIMIT_PER_MINUTE` (120; 0 for a load test only).
+- **Alerts** (all to the subscription's Owner role through the action group): database storage above 80%, an import
+  that failed or was rejected (a log query on the job's console and system logs), and a $20 monthly budget.
 
 - **Deploy identity** `sanction-and-forgive-github-cd`: Contributor on the resource group only, trusted from the
   GitHub `production` environment only (master). The workflows log in with OIDC using the repository variables
