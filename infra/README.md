@@ -59,6 +59,12 @@ gh variable set ADMIN_CLIENT_ID --body <app id>  # as printed; the next deploy t
 gh workflow run deploy.yml                       # or wait for the next push to master
 ```
 
+The deploy turns the app's trust in the principal header on only after it has checked that the Container App's
+auth config is in place for that client id (`ADMIN_SIGN_IN_READY`, checked on every deploy): the first deploy creates
+the auth config with the app still ignoring the header, then deploys again with it on. A failed provisioning never
+leaves the app trusting a header anyone could send. If the auth config is ever removed by hand, deploy again (or set
+`ADMIN_CLIENT_ID` empty) so the app stops trusting it too.
+
 Until `ADMIN_CLIENT_ID` is set, sign-in is off and the app ignores any principal header: the admin page says so and
 held updates are reviewed with `tools/lists.ps1 review|confirm|reject`. Others get the role in the Entra admin center
 (Enterprise applications, the registration, Users and groups). No client secret: the ID token carries the role.

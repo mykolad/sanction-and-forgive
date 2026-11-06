@@ -27,6 +27,9 @@ param allowedCidrs array = []
 @description('Client id of the admin sign-in app registration (infra/admin-sign-in.ps1). Empty: sign-in stays off.')
 param adminClientId string = ''
 
+@description('True only once the deploy workflow has checked that the built-in sign-in is in place for this client id.')
+param adminSignInReady bool = false
+
 var signInEnabled = !empty(adminClientId)
 
 var name = 'sanction-and-forgive'
@@ -107,9 +110,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
               value: string(rateLimitPerMinute)
             }
             {
-              // The app trusts the platform's principal header only when this template also turns sign-in on.
+              // The app trusts the platform's principal header only once the sign-in is known to be in place: the
+              // deploy that first creates the auth config leaves this off, and a second deploy, after checking it,
+              // turns it on. A failed provisioning never leaves the app trusting a header anyone could send.
               name: 'Admin__SignInEnabled'
-              value: string(signInEnabled)
+              value: string(signInEnabled && adminSignInReady)
             }
           ])
           probes: [

@@ -135,7 +135,8 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Admin** (`Admin/`, `Controllers/AdminController.cs`, `wwwroot/admin/`; owner's decision 2026-11-06: Entra sign-in):
   Container Apps' built-in Entra ID sign-in in "allow unauthenticated" mode, so screening stays open. `AdminAccess`
   reads `X-MS-CLIENT-PRINCIPAL` (base64 JSON claims; the platform doesn't let clients set it) **only when
-  `Admin:SignInEnabled`**, which `app.bicep` sets in the same template that turns the auth config on (`ADMIN_CLIENT_ID`;
+  `Admin:SignInEnabled`**, which `app.bicep` sets only when the deploy has verified the auth config is in place
+  (`ADMIN_CLIENT_ID` and `ADMIN_SIGN_IN_READY`: the deploy that creates it leaves the flag off and deploys again;
   `infra/admin-sign-in.ps1`, run by the owner). Reviewing held updates needs the `Lists.Admin` app role and the
   `X-Requested-By: sanction-and-forgive-admin` header (CSRF). `IImportReview` reviews then reloads the lists;
   `ListLoader.RefreshAsync` runs one at a time. Tests: `AdminTests` (a fake `IImportReview`).

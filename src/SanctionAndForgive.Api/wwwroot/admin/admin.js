@@ -89,14 +89,14 @@ function heldCard(list) {
 // Two steps for each: a click asks, a second click does it.
 function showActions(actions, status, list) {
   actions.replaceChildren(
-    el("button", { type: "button", class: "primary", onclick: () => ask(actions, status, list, true) }, "Confirm: make it the list searched"),
+    el("button", { type: "button", class: "primary", onclick: () => ask(actions, status, list, true) }, "Confirm: make it the active list"),
     el("button", { type: "button", class: "secondary", onclick: () => ask(actions, status, list, false) }, "Reject: discard it"));
 }
 
 function ask(actions, status, list, confirm) {
   actions.replaceChildren(
     el("span", {}, confirm
-      ? `Screenings will use the ${list.held.recordCount.toLocaleString()}-record update from now on.`
+      ? `The ${list.held.recordCount.toLocaleString()}-record update becomes the active list; screenings use it while it's current (List status shows it).`
       : "The update will be deleted; the current list stays."),
     el("button", { type: "button", class: confirm ? "primary" : "secondary", onclick: () => review(actions, status, list, confirm) }, confirm ? "Yes, confirm" : "Yes, reject"),
     el("button", { type: "button", class: "secondary", onclick: () => showActions(actions, status, list) }, "Cancel"));
@@ -110,8 +110,10 @@ async function review(actions, status, list, confirm) {
       method: "POST",
       headers: { Accept: "application/json", "X-Requested-By": "sanction-and-forgive-admin" },
     });
+    const body = response.ok ? await response.json() : null;
+    const later = body && !body.reloaded ? " The lists reload within 15 minutes." : "";
     status.textContent = response.ok
-      ? (confirm ? "Confirmed: it's the list searched now." : "Rejected: the update is deleted.")
+      ? (confirm ? `Confirmed: it's the active list. List status shows whether it's searched now.${later}` : `Rejected: the update is deleted.${later}`)
       : response.status === 409 ? "It isn't held any more: someone reviewed it, or a later check replaced it."
       : response.status === 401 || response.status === 403 ? "Your sign-in doesn't allow this. Sign in again as a lists administrator."
       : "That didn't work. Try again in a moment.";

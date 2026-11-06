@@ -132,10 +132,10 @@ public sealed class AdminTests : IDisposable
 
         public List<(int ImportId, bool Confirm, string Reviewer)> Calls { get; } = [];
 
-        public Task<ReviewResult> ReviewAsync(int importId, bool confirm, string reviewer, CancellationToken cancellationToken)
+        public Task<ReviewOutcome> ReviewAsync(int importId, bool confirm, string reviewer, CancellationToken cancellationToken)
         {
             Calls.Add((importId, confirm, reviewer));
-            return Task.FromResult(Result);
+            return Task.FromResult(new ReviewOutcome(Result, Reloaded: true));
         }
     }
 }

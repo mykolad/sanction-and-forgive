@@ -141,7 +141,25 @@ jobs:
           IMAGE_TAG: ${{ needs.build.outputs.sha }}
           ADMIN_CLIENT_ID: ${{ vars.ADMIN_CLIENT_ID }}
         run: |
+          # The app trusts the sign-in's principal header only once the auth config is verifiably in place: check
+          # it before deploying; if this deploy is the one that creates it, check again after and deploy once more.
+          signInReady() {
+            [ -n "$ADMIN_CLIENT_ID" ] || { echo false; return; }
+            az containerapp auth show -g "$RESOURCE_GROUP" -n sanction-and-forgive \
+              --query "platform.enabled == \`true\` && identityProviders.azureActiveDirectory.registration.clientId == '$ADMIN_CLIENT_ID'" \
+              -o tsv 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qx true && echo true || echo false
+          }
+          export ADMIN_SIGN_IN_READY="$(signInReady)"
           az deployment group create -g "$RESOURCE_GROUP" -n app --parameters infra/app.bicepparam -o none
+          if [ -n "$ADMIN_CLIENT_ID" ] && [ "$ADMIN_SIGN_IN_READY" != "true" ]; then
+            ADMIN_SIGN_IN_READY="$(signInReady)"
+            if [ "$ADMIN_SIGN_IN_READY" = "true" ]; then
+              echo "The sign-in is in place now: deploying again with it turned on in the app."
+              az deployment group create -g "$RESOURCE_GROUP" -n app --parameters infra/app.bicepparam -o none
+            else
+              echo "::warning::The admin sign-in isn't in place: the app keeps ignoring sign-in headers."
+            fi
+          fi
           echo "url=$(az deployment group show -g "$RESOURCE_GROUP" -n app --query properties.outputs.url.value -o tsv)" >> "$GITHUB_OUTPUT"
           echo "revision=$(az deployment group show -g "$RESOURCE_GROUP" -n app --query properties.outputs.latestRevision.value -o tsv)" >> "$GITHUB_OUTPUT"
 

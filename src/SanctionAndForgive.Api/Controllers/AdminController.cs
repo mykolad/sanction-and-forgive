@@ -53,13 +53,13 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
             return BadRequest(new ValidationProblemDetails(new Dictionary<string, string[]> { [AdminAccess.RequestHeader] = ["Send this request from the admin page."] }));
         }
 
-        var result = await review.ReviewAsync(importId, confirm, user.Name, cancellationToken);
-        Reviewed(logger, importId, result, user.Name);
-        return result switch
+        var outcome = await review.ReviewAsync(importId, confirm, user.Name, cancellationToken);
+        Reviewed(logger, importId, outcome.Result, user.Name);
+        return outcome.Result switch
         {
-            ReviewResult.Confirmed or ReviewResult.Rejected => Ok(new ReviewResponse(importId, result.ToString())),
+            ReviewResult.Confirmed or ReviewResult.Rejected => Ok(new ReviewResponse(importId, outcome.Result.ToString(), outcome.Reloaded)),
             ReviewResult.NotFound => NotFound(),
-            _ => Conflict(new ReviewResponse(importId, result.ToString())),
+            _ => Conflict(new ReviewResponse(importId, outcome.Result.ToString(), Reloaded: false)),
         };
     }
 
@@ -73,4 +73,6 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
 public sealed record AdminMeResponse(bool Enabled, bool SignedIn, string? Name, bool IsAdmin, string? SignInUrl, string? SignOutUrl);
 
 /// <param name="Result"><c>Confirmed</c>, <c>Rejected</c>, or <c>NotPending</c> (409: it isn't held any more).</param>
-public sealed record ReviewResponse(int ImportId, string Result);
+/// <param name="Reloaded">Whether the lists were reloaded at once; if not, the review stands and the next refresh
+/// (within 15 minutes) shows it.</param>
+public sealed record ReviewResponse(int ImportId, string Result, bool Reloaded);

@@ -173,6 +173,8 @@ on (`Admin:SignInEnabled`): otherwise nobody is signed in, whatever a request sa
 - `POST /api/v1/admin/imports/{id}/confirm` and `…/reject`: review an update held for review (its `importId` from
   `held` in `/api/v1/sources`). Needs the `Lists.Admin` role and the header `X-Requested-By: sanction-and-forgive-admin`
   (which another site can't send, so a signed-in admin's cookie can't be used against them). 200
-  `{importId, result}`; 401 not signed in; 403 without the role; 400 without the header; 404 sign-in off or no such
+  `{importId, result, reloaded}` (`reloaded` false: the review stands, and the next refresh, within 15 minutes,
+  shows it); 401 not signed in; 403 without the role; 400 without the header; 404 sign-in off or no such
   import; 409 `NotPending` (already reviewed, superseded, or held against a list that has changed since). Confirming
-  makes it the active list and reloads the lists at once; the review is logged with the reviewer's sign-in name.
+  makes it the active list (searched while it's current: the status page shows whether it is) and reloads the lists
+  at once; the review is logged with the reviewer's sign-in name.
