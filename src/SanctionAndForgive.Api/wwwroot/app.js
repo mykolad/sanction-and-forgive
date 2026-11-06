@@ -12,6 +12,9 @@ const form = $("screen-form");
 const stateBox = $("state");
 let lists = [];
 let warmUpTimer = null;
+// Each screening (and each Clear) takes a new number; only the latest request may change the page.
+let current = 0;
+let pending = null;
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -102,6 +105,9 @@ async function screen(event) {
   }
 
   const button = $("screen-button");
+  const request = ++current;
+  if (pending) pending.abort();
+  pending = new AbortController();
   button.disabled = true;
   showState("Screening…");
   try {
@@ -109,7 +115,9 @@ async function screen(event) {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
+      signal: pending.signal,
     });
+    if (request !== current) return;
     if (response.status === 503) {
       showState("The lists are still loading. Try again in a few seconds.", true);
       return;
@@ -124,12 +132,17 @@ async function screen(event) {
       showState(errors || "That didn't work. Check the fields and try again.", true);
       return;
     }
+    const result = await response.json();
+    if (request !== current) return;
     showState("");
-    render(await response.json());
+    render(result);
   } catch {
-    showState("The service isn't answering. Try again in a moment.", true);
+    if (request === current) showState("The service isn't answering. Try again in a moment.", true);
   } finally {
-    button.disabled = false;
+    if (request === current) {
+      button.disabled = false;
+      pending = null;
+    }
   }
 }
 
@@ -193,6 +206,7 @@ function showDetail(button, cell, entry, list) {
       el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
       el("dt", {}, "Type"), el("dd", {}, candidate.type === "Unknown" ? "Not stated by the list" : candidate.type),
       el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
+      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses.length ? el("ul", {}, candidate.listedAddresses.map((address) => el("li", {}, address))) : "None listed"),
       el("dt", {}, "Address"), el("dd", {}, addressText(candidate.addressState, entry)),
       el("dt", {}, "Compared"), el("dd", {}, entry.compared),
       el("dt", {}, "Official record"), el("dd", {}, candidate.sourceUrl ? el("a", { href: candidate.sourceUrl, target: "_blank", rel: "noopener noreferrer" }, "Open the list's own record") : `${list.name}, id ${candidate.externalId}`)),
@@ -211,6 +225,10 @@ function addressText(state, entry) {
 
 form.addEventListener("submit", screen);
 $("clear-button").addEventListener("click", () => {
+  current++;
+  if (pending) pending.abort();
+  pending = null;
+  $("screen-button").disabled = false;
   form.reset();
   $("result").hidden = true;
   showState("");

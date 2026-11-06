@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using SanctionAndForgive.Data;
 using SanctionAndForgive.Matching;
@@ -5,8 +6,11 @@ using SanctionAndForgive.Matching;
 namespace SanctionAndForgive.Api.Lists;
 
 /// <summary>Loads the lists from SQL into the <see cref="ListCatalog"/>. Only lists whose active import changed are
-/// rebuilt, one at a time, so memory holds at most one list twice (section 3). If the database is unreachable the
-/// catalog keeps serving what it has: each list then turns Not checked once it passes its allowed age.</summary>
+/// rebuilt, one at a time, and once the API is ready each is published as soon as it's built, so its old index can
+/// go: memory holds at most one list twice (section 3). Each list is read in one snapshot transaction and checked
+/// against its import's record count, so a concurrent cleanup can never make half a list searchable; a list that
+/// fails either stays Not checked. If the database is unreachable the catalog keeps serving what it has, and lists
+/// age out.</summary>
 public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, ILogger<ListLoader> logger)
 {
     public async Task RefreshAsync(CancellationToken cancellationToken)
@@ -18,31 +22,66 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
             .ToListAsync(cancellationToken);
 
         var current = catalog.Lists.ToDictionary(list => list.Code, StringComparer.Ordinal);
-        var lists = new List<LoadedList>(sources.Count);
-        foreach (var source in sources)
+        var lists = new LoadedList[sources.Count];
+        var pending = new List<(int Position, LoadedList Target)>();
+        for (var i = 0; i < sources.Count; i++)
         {
+            var source = sources[i];
+            var target = new LoadedList(source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, source.RecordCount, Index: null);
             var existing = current.GetValueOrDefault(source.Code);
-            var index = existing is not null && existing.ActiveImportId == source.ActiveImportId ? existing.Index : null;
-            if (index is null && source.ActiveImportId is { } importId)
+            if (existing is not null && existing.ActiveImportId == source.ActiveImportId && (existing.Index is not null || source.ActiveImportId is null))
             {
-                index = await BuildAsync(context, source.Code, importId, cancellationToken);
+                // Unchanged: same index, fresh check time. (A list whose build failed is built again.)
+                lists[i] = target with { Index = existing.Index };
+                continue;
             }
 
-            lists.Add(new LoadedList(source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, source.RecordCount, index));
+            // Changed or new: until its new index is built, a changed list serves its previous one (with its previous
+            // version and check time), and a new list is Not checked. A list never disappears from the rows.
+            lists[i] = existing ?? target;
+            if (source.ActiveImportId is not null)
+            {
+                pending.Add((i, target));
+            }
         }
 
-        // One swap per refresh, with every source in it: a list never silently disappears from the rows (it would
-        // be missing instead of Not checked), and the first swap is what makes the API ready.
+        foreach (var (position, target) in pending)
+        {
+            lists[position] = target with { Index = await BuildAsync(context, target.Code, target.ActiveImportId!.Value, target.RecordCount, cancellationToken) };
+            if (catalog.IsReady)
+            {
+                catalog.Replace([.. lists]);
+            }
+        }
+
+        // One full swap with every source in it: the first one is what makes the API ready.
         catalog.Replace(lists);
     }
 
-    private async Task<ListIndex?> BuildAsync(ListsDbContext context, string code, int importId, CancellationToken cancellationToken)
+    private async Task<ListIndex?> BuildAsync(ListsDbContext context, string code, int importId, int expectedCount, CancellationToken cancellationToken)
     {
         try
         {
-            var subjects = await context.Subjects.AsNoTracking().Where(subject => subject.ImportId == importId)
-                .Include(subject => subject.Names).Include(subject => subject.Addresses).AsSplitQuery()
-                .ToListAsync(cancellationToken);
+            var strategy = context.Database.CreateExecutionStrategy();
+            var subjects = await strategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
+                var stillThere = await context.Imports.AnyAsync(import => import.Id == importId && import.Status == ImportStatus.Completed, cancellationToken);
+                var loaded = stillThere
+                    ? await context.Subjects.AsNoTracking().Where(subject => subject.ImportId == importId)
+                        .Include(subject => subject.Names).Include(subject => subject.Addresses).AsSplitQuery()
+                        .ToListAsync(cancellationToken)
+                    : null;
+                await transaction.CommitAsync(cancellationToken);
+                return loaded;
+            });
+
+            if (subjects is null || subjects.Count != expectedCount)
+            {
+                logger.LogWarning("The {Code} import {ImportId} changed while loading ({Loaded} of {Expected} subjects); it stays Not checked until the next refresh", code, importId, subjects?.Count, expectedCount);
+                return null;
+            }
+
             var index = ListIndex.Build(subjects.Select(ToListed));
             logger.LogInformation("Built the {Code} index from import {ImportId}: {Subjects} subjects, {Aliases} aliases", code, importId, subjects.Count, index.AliasCount);
             return index;

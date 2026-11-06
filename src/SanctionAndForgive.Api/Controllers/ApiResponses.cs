@@ -24,10 +24,11 @@ public sealed record ScreeningResponse(
 
 /// <param name="State"><c>Current</c>, or <c>NotChecked</c> (failed to load, older than allowed, or no index).</param>
 /// <param name="AsOf">The list's last successful check.</param>
-public sealed record ListResponse(string Code, string Name, DateTimeOffset? AsOf, string State, int RecordCount, string? Url)
+/// <param name="Version">The import the answer was computed from (immutable: a changed list is a new import).</param>
+public sealed record ListResponse(string Code, string Name, DateTimeOffset? AsOf, string State, int? Version, int RecordCount, string? Url)
 {
     public static ListResponse From(LoadedList list, DateTimeOffset now) =>
-        new(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? "Current" : "NotChecked", list.RecordCount, list.Url);
+        new(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? "Current" : "NotChecked", list.Index is null ? null : list.ActiveImportId, list.RecordCount, list.Url);
 }
 
 public sealed record EntryResponse(string Kind, string Input, string Compared, IReadOnlyList<CellResponse> Cells)
@@ -59,7 +60,8 @@ public sealed record CandidateResponse(
     int Percent,
     string Outcome,
     IReadOnlyList<string> Alignment,
-    string AddressState)
+    string AddressState,
+    IReadOnlyList<string> ListedAddresses)
 {
     public static CandidateResponse From(SubjectMatch match) => new(
         match.Subject.PrimaryName,
@@ -71,7 +73,8 @@ public sealed record CandidateResponse(
         match.Percent,
         match.Outcome.ToString(),
         match.Alignment,
-        match.AddressState.ToString());
+        match.AddressState.ToString(),
+        [.. match.Subject.Addresses.Select(address => address.CountryCode is { } country && !address.Raw.Contains(country, StringComparison.Ordinal) ? $"{address.Raw} ({country})" : address.Raw)]);
 }
 
 public sealed record StatusResponse(string State, string Version, string MatcherVersion, IReadOnlyList<ListResponse> Lists);

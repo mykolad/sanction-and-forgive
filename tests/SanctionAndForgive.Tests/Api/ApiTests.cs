@@ -117,6 +117,18 @@ public sealed class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Response_CarriesEachListsVersion_AndTheListedAddresses()
+    {
+        var subject = new ListedSubject("E1", SubjectKind.Entity, "Romashka LLC", [new ListedName("Romashka LLC", false)], [new ListedAddress("Lenina 5, Moscow", "RU")], "RUS", null);
+        factory.Load(Feed("eu", "EU", Now, subject) with { ActiveImportId = 42 });
+
+        var result = await ScreenAsync(new { companyName = "Romashka" });
+
+        Assert.Equal(42, result.GetProperty("lists")[0].GetProperty("version").GetInt32());
+        Assert.Equal(["Lenina 5, Moscow (RU)"], Cell(result, "eu").GetProperty("bestCandidate").GetProperty("listedAddresses").EnumerateArray().Select(address => address.GetString()));
+    }
+
+    [Fact]
     public async Task ManualSource_AppearsAsARow_WithNoCodeChange()
     {
         var manual = new SanctionAndForgive.Api.Lists.LoadedList("ee-mfa", "Estonia MFA national list", null, null, 7, Now.AddDays(-30), 1,
