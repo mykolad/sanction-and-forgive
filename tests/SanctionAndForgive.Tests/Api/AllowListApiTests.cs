@@ -83,7 +83,7 @@ public sealed class AllowListApiTests : IDisposable
             Feed("uk", "UK", Now.AddHours(-80), Subject("Volga Trade", SubjectKind.Entity)));
         var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
 
-        var result = await admin.AddAsync("Volga Trade", "test", "owner@example.invalid", CancellationToken.None);
+        var result = await admin.AddAsync("Volga Trade", "test", "owner@example.invalid", new HashSet<string>(), CancellationToken.None);
 
         Assert.True(result.Unavailable);
         Assert.Null(result.Id);
@@ -95,10 +95,39 @@ public sealed class AllowListApiTests : IDisposable
     {
         var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
 
-        var result = await admin.AddAsync("Romashka LLC", "test", "owner@example.invalid", CancellationToken.None);
+        var result = await admin.AddAsync("Romashka LLC", "test", "owner@example.invalid", new HashSet<string>(["eu/X-12-R"]), CancellationToken.None);
 
         Assert.Null(result.Id);
         Assert.Equal("EU: Romashka LLC", result.ListedAs);
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task ANameAlreadyInForce_IsNotAddedTwice_HoweverItsWritten()
+    {
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var result = await admin.AddAsync("ab corp.", "test", "owner@example.invalid", new HashSet<string>(["ofac-sdn/X-15-A"]), CancellationToken.None);
+
+        Assert.Equal((null, 5), (result.Id, result.ExistingId));
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task ANameWithPossibleMatches_ListsThem_AndIsNotAddedUntilEachIsConfirmed()
+    {
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var unconfirmed = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(), CancellationToken.None);
+        var otherKey = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(["eu/X-12-R"]), CancellationToken.None);
+
+        Assert.Null(unconfirmed.Id);
+        Assert.Null(unconfirmed.ListedAs);
+        var hit = Assert.Single(unconfirmed.PossibleMatches);
+        Assert.Equal(("ofac-sdn/X-15-A", "OFAC SDN", "AB Incorporated"), (hit.Key, hit.ListName, hit.ListedName));
+        Assert.Contains(EntryKind.Company, hit.ReadAs);
+        Assert.Null(otherKey.Id);
+        Assert.Single(otherKey.PossibleMatches);
         Assert.Equal(0, factory.Database.Opened);
     }
 }

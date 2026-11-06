@@ -144,7 +144,8 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `AllowListEntries`, `Admin/AllowListAdmin.cs`, `wwwroot/allow-list/`): an entered receiver or company that is an
   allow-listed name (same tokens as screening reads them) has its **Review** cells marked `Allowed`, which don't raise
   the outcome; a Match never is. `Screener.Screen(request, lists, allowList)`; every result carries
-  `AllowListVersion` (additions + removals). Entries are removed, never deleted. Adding a name that is a Match on a
+  `AllowListVersion` (additions + removals). Entries are removed, never deleted. A name that is a possible match for listed parties is added only once the administrator has seen and confirmed each
+  (`confirmed` keys; a new one since asks again). Adding a name that is a Match on a
   list is refused, and so is any addition while a list can't be checked. Loaded with the lists (`ListCatalog.AllowList`);
   an edit reloads it under the refresh gate (a removal drops the entry from memory first: never looser). Admin only.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the

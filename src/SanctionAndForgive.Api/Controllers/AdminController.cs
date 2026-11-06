@@ -16,6 +16,11 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
 
     private const string SignOutPath = "/.auth/logout?post_logout_redirect_uri=/admin";
 
+    // Possible matches confirmed in one addition: a cell keeps at most five subjects, for two readings on each list.
+    private const int MaxConfirmed = 200;
+
+    private const int MaxKey = 200;
+
     [HttpGet("me")]
     public AdminMeResponse Me()
     {
@@ -65,23 +70,44 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
             errors[nameof(body.Reason)] = [$"1 to {AllowListStore.MaxReason} characters: why this party isn't the listed one."];
         }
 
+        if (body.Confirmed is { } keys && (keys.Count > MaxConfirmed || keys.Any(key => key is not { Length: > 0 and <= MaxKey })))
+        {
+            errors[nameof(body.Confirmed)] = [$"At most {MaxConfirmed} keys of 1 to {MaxKey} characters, as the possible matches gave them."];
+        }
+
         if (errors.Count > 0)
         {
             return ValidationProblem(new ValidationProblemDetails(errors));
         }
 
-        var result = await allowList.AddAsync(body.Name!.Trim(), body.Reason!.Trim(), user!.Name, cancellationToken);
+        var confirmed = new HashSet<string>(body.Confirmed?.OfType<string>() ?? [], StringComparer.Ordinal);
+        var result = await allowList.AddAsync(body.Name!.Trim(), body.Reason!.Trim(), user!.Name, confirmed, cancellationToken);
         if (result.Unavailable)
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new AllowListRefusal("A list can't be checked right now (loading, or not current), so the name can't be checked against it. Try again later."));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new AllowListRefusal(AllowListRefusal.Unavailable, "A list can't be checked right now (loading, or not current), so the name can't be checked against it. Try again later.", []));
+        }
+
+        if (result.ExistingId is { } existing)
+        {
+            return Conflict(new AllowListRefusal(AllowListRefusal.Exists, $"This name is already on the allow-list (entry {existing}). To change its reason, remove it and add it again.", []));
+        }
+
+        if (result.ListedAs is { } listedAs)
+        {
+            return Conflict(new AllowListRefusal(AllowListRefusal.Listed, $"This name is a match on {listedAs}: a listed party can't be allow-listed.", []));
         }
 
         if (result.Id is not { } id)
         {
-            return Conflict(new AllowListRefusal($"This name is a match on {result.ListedAs}: a listed party can't be allow-listed."));
+            var count = result.PossibleMatches.Count;
+            var message = count == 1
+                ? "This name is a possible match for a listed party. Once it's on the allow-list, that match is shown as allowed and no longer raises the result. Add it only if this name is not that party."
+                : $"This name is a possible match for {count} listed parties. Once it's on the allow-list, these matches are shown as allowed and no longer raise the result. Add it only if this name is none of them.";
+            return Conflict(new AllowListRefusal(AllowListRefusal.Confirm, message, [.. result.PossibleMatches.Select(PossibleMatchResponse.From)]));
         }
 
-        AllowListChanged(logger, id, "added", user.Name);
+        // The possible matches confirmed, by list and listed id: what the administrator accepted, never the name.
+        AllowListAdded(logger, id, user.Name, result.PossibleMatches.Count == 0 ? "none" : string.Join(", ", result.PossibleMatches.Select(hit => hit.Key)));
         return Ok(new AllowListChangeResponse(id, result.Reloaded));
     }
 
@@ -157,6 +183,9 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
     // By id only: an entry's name can be a person's.
     [LoggerMessage(Level = LogLevel.Information, Message = "Allow-list entry {Id} {Change} by {Administrator}")]
     private static partial void AllowListChanged(ILogger logger, int id, string change, string administrator);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Allow-list entry {Id} added by {Administrator}; possible matches confirmed: {Confirmed}")]
+    private static partial void AllowListAdded(ILogger logger, int id, string administrator, string confirmed);
 }
 
 /// <param name="Enabled">Whether sign-in is set up on this deployment at all.</param>
@@ -168,13 +197,32 @@ public sealed record AdminMeResponse(bool Enabled, bool SignedIn, string? Name, 
 /// (within 15 minutes) shows it.</param>
 public sealed record ReviewResponse(int ImportId, string Result, bool Reloaded);
 
-public sealed record AllowListAddRequest(string? Name, string? Reason);
+/// <param name="Confirmed">The keys of the possible matches the administrator has seen and accepts (from a 409 with
+/// code <c>confirm</c>); omitted the first time.</param>
+public sealed record AllowListAddRequest(string? Name, string? Reason, IReadOnlyList<string?>? Confirmed);
 
 /// <param name="Reloaded">Whether the allow-list in use was reloaded at once; if not, the change is stored and the next
 /// refresh (within 15 minutes) applies it (a removal applies at once regardless).</param>
 public sealed record AllowListChangeResponse(int Id, bool Reloaded);
 
-public sealed record AllowListRefusal(string Message);
+/// <param name="Code"><c>confirm</c>: possible matches to confirm (<paramref name="PossibleMatches"/>); <c>listed</c>: the
+/// name is a Match, never added; <c>exists</c>: the name is already an entry in force; <c>unavailable</c>: a list can't
+/// be checked now.</param>
+public sealed record AllowListRefusal(string Code, string Message, IReadOnlyList<PossibleMatchResponse> PossibleMatches)
+{
+    public const string Confirm = "confirm";
+    public const string Listed = "listed";
+    public const string Unavailable = "unavailable";
+    public const string Exists = "exists";
+}
+
+/// <param name="Key">What to send back in <c>confirmed</c>: <c>{list code}/{external id}</c>.</param>
+/// <param name="ReadAs"><c>Receiver</c> (the name read as a person), <c>Company</c>, or both.</param>
+public sealed record PossibleMatchResponse(string Key, string List, string ListName, string ListedName, string Alias, int Percent, IReadOnlyList<string> ReadAs, string? Programme)
+{
+    public static PossibleMatchResponse From(AllowListPossibleMatch hit) =>
+        new(hit.Key, hit.List, hit.ListName, hit.ListedName, hit.Alias, hit.Percent, [.. hit.ReadAs.Select(kind => kind.ToString())], hit.Programme);
+}
 
 public sealed record AllowListResponse(IReadOnlyList<AllowListEntryResponse> Entries);
 

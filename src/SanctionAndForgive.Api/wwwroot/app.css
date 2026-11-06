@@ -270,4 +270,8 @@ details.history .note { color: var(--muted); font-size: 0.9rem; }
 .allow-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; margin-bottom: 12px; }
 .allow-form .field-wide { grid-column: 1 / -1; }
 table.allow .removed td { color: var(--muted); }
+.possible-matches { margin: 8px 0 14px; padding-left: 20px; }
+.possible-matches li { margin: 6px 0; }
+.possible-matches .sub { display: block; color: var(--muted); font-size: 0.9rem; }
+#confirm h3:focus { outline: none; }
 @media (max-width: 720px) { .allow-form { grid-template-columns: 1fr; } }
