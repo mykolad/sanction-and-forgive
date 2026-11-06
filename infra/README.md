@@ -74,6 +74,12 @@ az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/
 Remove-Item Env:RATE_LIMIT_PER_MINUTE   # then the same create again
 ```
 
+**What-if on a deployed environment** lists a few changes that aren't changes, a what-if limitation: values read from
+other resources at deploy time (the connection string, the identity's client ID, the Log Analytics ID) show as
+`[reference(…)]` against their current values, and the read-only `runningStatus` as removed. Anything else in a
+what-if is a real change. Bicep files are LF everywhere (`.gitattributes`): the alert query is a multi-line
+string, and a CRLF checkout would deploy a different one from CI's.
+
 ## Demo-day checklist
 
 1. `/api/v1/status`: every list `Current`, and today's date on the daily ones.

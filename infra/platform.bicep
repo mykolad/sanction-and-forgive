@@ -18,7 +18,10 @@ param logDailyCapGb string = '0.2'
 param monthlyBudget int = 20
 
 @description('The budget\'s first month (the first day of a month). Fixed: a budget\'s start can\'t move later.')
-param budgetStartDate string = '2026-11-01'
+param budgetStartDate string = '2026-11-01T00:00:00Z'
+
+@description('The budget\'s end, as Azure would default it (ten years), stated so what-if stays quiet.')
+param budgetEndDate string = '2036-11-01T00:00:00Z'
 
 var name = 'sanction-and-forgive'
 
@@ -182,6 +185,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = {
     timeGrain: 'Monthly'
     timePeriod: {
       startDate: budgetStartDate
+      endDate: budgetEndDate
     }
     notifications: {
       actual80: {
