@@ -10,6 +10,9 @@ const $ = (id) => document.getElementById(id);
 const stateBox = $("state");
 let offset = 0;
 let total = 0;
+// The filters that produced the page on screen: Previous and Next page through those, not through whatever has been
+// typed into the form since (that takes "Show entries", from the first page).
+let shown = null;
 // Each request takes a new number; only the latest may change the page.
 let current = 0;
 
@@ -57,23 +60,26 @@ async function loadLists() {
     const wanted = new URLSearchParams(location.search).get("list");
     if (wanted && loaded.some((list) => list.code === wanted)) $("list").value = wanted;
     showState("");
-    browse(0);
+    browse(0, formFilters());
   } catch {
     showState("The service isn't answering. Try again in a moment.", true);
   }
 }
 
-async function browse(start) {
-  const code = $("list").value;
-  if (!code) return;
+function formFilters() {
+  return { code: $("list").value, query: $("query").value.trim() || null, type: $("type").value || null };
+}
+
+async function browse(start, filters) {
+  if (!filters.code) return;
   const request = ++current;
-  history.replaceState(null, "", `/lists?list=${encodeURIComponent(code)}`);
+  history.replaceState(null, "", `/lists?list=${encodeURIComponent(filters.code)}`);
   showState("Loading…");
   try {
-    const response = await fetch(`/api/v1/lists/${encodeURIComponent(code)}/browse`, {
+    const response = await fetch(`/api/v1/lists/${encodeURIComponent(filters.code)}/browse`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ query: $("query").value.trim() || null, type: $("type").value || null, offset: start, limit: PAGE }),
+      body: JSON.stringify({ query: filters.query, type: filters.type, offset: start, limit: PAGE }),
     });
     if (request !== current) return;
     if (response.status === 429) {
@@ -92,6 +98,7 @@ async function browse(start) {
     const page = await response.json();
     // A newer request may have finished while this body was still arriving.
     if (request !== current) return;
+    shown = filters;
     render(page);
     showState("");
   } catch {
@@ -152,16 +159,16 @@ function details(entry) {
 
 $("browse-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  browse(0);
+  browse(0, formFilters());
 });
-$("list").addEventListener("change", () => browse(0));
-$("type").addEventListener("change", () => browse(0));
+$("list").addEventListener("change", () => browse(0, formFilters()));
+$("type").addEventListener("change", () => browse(0, formFilters()));
 $("clear-button").addEventListener("click", () => {
   $("query").value = "";
   $("type").value = "";
-  browse(0);
+  browse(0, formFilters());
 });
-$("previous").addEventListener("click", () => browse(Math.max(0, offset - PAGE)));
-$("next").addEventListener("click", () => { if (offset + PAGE < total) browse(offset + PAGE); });
+$("previous").addEventListener("click", () => { if (shown) browse(Math.max(0, offset - PAGE), shown); });
+$("next").addEventListener("click", () => { if (shown && offset + PAGE < total) browse(offset + PAGE, shown); });
 
 loadLists();
