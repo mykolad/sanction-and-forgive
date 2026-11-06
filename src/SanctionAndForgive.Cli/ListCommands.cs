@@ -67,9 +67,18 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
         return 0;
     }
 
+    /// <summary>Creates (or renames) a manual source. Codes are lower-case letters, digits and hyphens, so a padded or
+    /// differently cased code can't reach a feed's row (SQL Server compares them as equal).</summary>
     public async Task<int> SourceAddAsync(string code, string name, CancellationToken cancellationToken)
     {
-        if (ListSources.Find(code) is not null)
+        code = code.Trim();
+        if (!System.Text.RegularExpressions.Regex.IsMatch(code, "^[a-z0-9][a-z0-9-]{1,31}$"))
+        {
+            output.WriteLine($"'{code}' isn't a valid code: use 2-32 lower-case letters, digits and hyphens.");
+            return 2;
+        }
+
+        if (ListSources.Find(code) is not null || await store.FindSourceAsync(code, cancellationToken) is { Url: not null })
         {
             output.WriteLine($"{code} is a feed's code; pick another for a manual source.");
             return 2;
@@ -166,7 +175,7 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
             return outcome.Result != ImportResult.Rejected;
         }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutException or IOException or ListFormatException or System.Xml.XmlException
-            or System.Text.Json.JsonException or Microsoft.Data.SqlClient.SqlException or Microsoft.EntityFrameworkCore.DbUpdateException
+            or System.Text.Json.JsonException or Microsoft.Data.SqlClient.SqlException or Microsoft.EntityFrameworkCore.DbUpdateException or Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException
             or InvalidOperationException or ArgumentException)
         {
             output.WriteLine($"{source.Code}: FAILED: {exception.GetType().Name}: {exception.Message}");
@@ -183,7 +192,7 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
                         await store.RecordFailureAsync(stored, $"{exception.GetType().Name}: {exception.Message}", CancellationToken.None);
                     }
                 }
-                catch (Exception recordFailure) when (recordFailure is Microsoft.Data.SqlClient.SqlException or Microsoft.EntityFrameworkCore.DbUpdateException or InvalidOperationException)
+                catch (Exception recordFailure) when (recordFailure is Microsoft.Data.SqlClient.SqlException or Microsoft.EntityFrameworkCore.DbUpdateException or Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException or InvalidOperationException)
                 {
                     output.WriteLine($"{source.Code}: the failure couldn't be recorded either ({recordFailure.GetType().Name}).");
                     store.Reset();

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace SanctionAndForgive.Data;
 
@@ -62,13 +63,14 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
     /// are always refused). Throws <see cref="ArgumentException"/> for an external id over 200 characters: ids are
     /// keys, never truncated.</summary>
     public Task<ImportOutcome> ImportAsync(Source source, IReadOnlyList<Subject> subjects, bool force, CancellationToken cancellationToken) =>
-        LockedImportAsync(source, subjects, change: null, force, cancellationToken);
+        LockedImportAsync(source, subjects, change: null, force ? ImportMode.Forced : ImportMode.Feed, cancellationToken);
 
     /// <summary>A manual change: <paramref name="change"/> gets the active list as it is under the source's lock, and
     /// its result becomes the new list. Reading, changing and activating all happen under one lock, so two edits
-    /// can't overwrite each other.</summary>
+    /// can't overwrite each other. A change that changes nothing returns <c>Unchanged</c> and writes nothing; the drop
+    /// guard doesn't apply (a manual list is what its owner says it is), the zero-record guard does.</summary>
     public Task<ImportOutcome> ChangeAsync(Source source, Func<List<Subject>, IReadOnlyList<Subject>> change, CancellationToken cancellationToken) =>
-        LockedImportAsync(source, subjects: null, change, force: true, cancellationToken);
+        LockedImportAsync(source, subjects: null, change, ImportMode.Manual, cancellationToken);
 
     /// <summary>Records a refresh that failed before it could import (download, parse): a <c>Failed</c> import with
     /// the reason, for <c>status</c>. The active list and <see cref="Source.LastCheckedAt"/> don't change.</summary>
@@ -82,7 +84,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
     /// <summary>Forgets every tracked change after a failed source, so the next source's save can't retry it.</summary>
     public void Reset() => context.ChangeTracker.Clear();
 
-    private async Task<ImportOutcome> LockedImportAsync(Source source, IReadOnlyList<Subject>? subjects, Func<List<Subject>, IReadOnlyList<Subject>>? change, bool force, CancellationToken cancellationToken)
+    private async Task<ImportOutcome> LockedImportAsync(Source source, IReadOnlyList<Subject>? subjects, Func<List<Subject>, IReadOnlyList<Subject>>? change, ImportMode mode, CancellationToken cancellationToken)
     {
         await context.Database.OpenConnectionAsync(cancellationToken);
         try
@@ -101,15 +103,20 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             var active = source.ActiveImportId is { } activeId ? await context.Imports.SingleAsync(i => i.Id == activeId, cancellationToken) : null;
             var now = clock.GetUtcNow();
 
-            if (!force && active?.ContentHash == hash)
+            if (mode != ImportMode.Forced && active?.ContentHash == hash)
             {
-                source.LastCheckedAt = now;
-                await context.SaveChangesAsync(cancellationToken);
+                // A feed checked successfully: it's current again. A manual edit that changes nothing writes nothing.
+                if (mode == ImportMode.Feed)
+                {
+                    source.LastCheckedAt = now;
+                    await context.SaveChangesAsync(cancellationToken);
+                }
+
                 return new ImportOutcome(ImportResult.Unchanged, active.RecordCount, active.RecordCount, "Unchanged since the active import");
             }
 
             var refusal = records.Count == 0 ? "Zero records"
-                : !force && active is not null && records.Count < active.RecordCount * (1 - MaxDrop)
+                : mode == ImportMode.Feed && active is not null && records.Count < active.RecordCount * (1 - MaxDrop)
                     ? $"Records dropped from {active.RecordCount} to {records.Count}, more than {MaxDrop:P0}"
                     : null;
             if (refusal is not null)
@@ -128,7 +135,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 await WriteSubjectsAsync(source, import, records, cancellationToken);
                 await ActivateAsync(source, import, cancellationToken);
             }
-            catch (Exception exception) when (exception is SqlException or DbUpdateException or InvalidOperationException or OperationCanceledException)
+            catch (Exception exception) when (exception is SqlException or DbUpdateException or RetryLimitExceededException or InvalidOperationException or OperationCanceledException)
             {
                 // The activation may have committed before the failure surfaced: if so, the import is active and whole.
                 var persisted = await context.Sources.AsNoTracking().Where(s => s.Id == source.Id).Select(s => s.ActiveImportId).SingleAsync(CancellationToken.None);
@@ -429,3 +436,16 @@ public sealed record SourceStatus(
     bool Current,
     ImportStatus? LastImportStatus,
     string? LastImportMessage);
+
+/// <summary>How an import treats "unchanged" and the drop guard.</summary>
+internal enum ImportMode
+{
+    /// <summary>A feed refresh: unchanged moves <see cref="Source.LastCheckedAt"/>; the drop guard applies.</summary>
+    Feed,
+
+    /// <summary><c>--force</c>: imported even if unchanged, past the drop guard.</summary>
+    Forced,
+
+    /// <summary>A manual edit: unchanged writes nothing; no drop guard.</summary>
+    Manual,
+}
