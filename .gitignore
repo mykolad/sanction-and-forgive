@@ -63,3 +63,6 @@ coverage/
 
 # The owner's working spec stays local: the repository is public.
 HANDOVER.md
+
+# The load test's inputs: generated from the active lists (load-inputs).
+tests/load/inputs.csv

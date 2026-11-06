@@ -17,10 +17,11 @@ touched.
 ./tools/lists.ps1 add -Source ee-mfa -File .\records.csv  # upsert by external_id
 ./tools/lists.ps1 remove -Source ee-mfa -ExternalId EE-12
 ./tools/lists.ps1 probe                                   # download and parse every feed; writes nothing
+./tools/lists.ps1 load-inputs -File tests/load/inputs.csv # the load test's inputs, from the active lists
 #>
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('status', 'import', 'source-add', 'add', 'remove', 'probe')]
+    [ValidateSet('status', 'import', 'source-add', 'add', 'remove', 'probe', 'load-inputs')]
     [string] $Command,
     [string] $Source,
     [string] $File,
@@ -39,7 +40,8 @@ $project = Join-Path $root 'src/SanctionAndForgive.Cli'
 
 $cliArgs = @($Command)
 if ($Source) { $cliArgs += @('--source', $Source) }
-if ($File) { $cliArgs += @('--file', (Resolve-Path $File).Path) }
+# Relative to PowerShell's current location (not the process's), and allowed not to exist yet (load-inputs writes it).
+if ($File) { $cliArgs += @('--file', $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($File)) }
 if ($Force) { $cliArgs += '--force' }
 if ($Code) { $cliArgs += @('--code', $Code) }
 if ($Name) { $cliArgs += @('--name', $Name) }

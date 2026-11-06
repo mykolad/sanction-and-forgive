@@ -3,7 +3,7 @@
   "forms": {
     "INC": { "unambiguous": ["inc", "incorporated"] },
     "CORP": { "unambiguous": ["corp", "corporation"] },
-    "LLC": { "unambiguous": ["llc", "ooo", "ооо", "tov", "тов", "тоо"], "ambiguous": ["too"] },
+    "LLC": { "unambiguous": ["llc", "ooo", "ооо", "tov", "тов", "тоо", "liability"], "ambiguous": ["too"] },
     "LTD": { "unambiguous": ["ltd", "limited"] },
     "LLP": { "unambiguous": ["llp"] },
     "LP": { "ambiguous": ["lp"] },

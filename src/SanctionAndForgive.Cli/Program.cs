@@ -12,6 +12,8 @@ const string Usage = """
       source-add   --code <code> --name <name>
       add          --source <code> --file <records.csv>
       remove       --source <code> --external-id <id>
+      load-inputs  [--file tests/load/inputs.csv] [--count 2000]
+      evaluate     [--file docs/matching-evaluation.md]
 
     Feeds: eu, ofac-sdn, ofac-cons, un, uk, us-export, ch-seco, ca-sema, au-dfat, ua-nsdc, ua-sfms.
     Configuration (environment variables or user secrets): ConnectionStrings:Lists, and Lists:EuToken
@@ -75,6 +77,10 @@ return args[0] switch
     "source-add" when options.Get("code") is { } code && options.Get("name") is { } name => await commands.SourceAddAsync(code, name, token),
     "add" when options.Get("source") is { } source && options.Get("file") is { } file => await commands.AddAsync(source, file, token),
     "remove" when options.Get("source") is { } source && options.Get("external-id") is { } id => await commands.RemoveAsync(source, id, token),
+    "evaluate" => await new EvaluateCommand(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), SanctionAndForgive.Matching.MatchingOptions.Default, Console.Out)
+        .RunAsync(options.Get("file") ?? "docs/matching-evaluation.md", seed: 20261106, token),
+    "load-inputs" when int.TryParse(options.Get("count") ?? "2000", System.Globalization.CultureInfo.InvariantCulture, out var count) && count > 0 =>
+        await new LoadInputsCommand(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), Console.Out).RunAsync(options.Get("file") ?? "tests/load/inputs.csv", count, seed: 20261106, token),
     _ => ShowUsage(),
 };
 

@@ -44,14 +44,16 @@ public sealed partial class CanadaSemaParser : IListParser
 
         builder.AddName(entityName ?? personName, isWeak: false, isPrimary: true);
 
-        // "A, B, Belarusian: В, Russian: Г": comma-separated, some with a language label.
-        foreach (var alias in record.Val("Aliases-Alias")?.Split(',') ?? [])
+        // "A, B, Belarusian: В, Russian: Г" or "LLC A; OOO A; ООО А": comma- or semicolon-separated, some with a language label.
+        foreach (var alias in record.Val("Aliases-Alias")?.Split(AliasSeparators) ?? [])
         {
             builder.AddName(LanguageLabel().Replace(alias, string.Empty), isWeak: false, isPrimary: false);
         }
 
         return builder.Build();
     }
+
+    private static readonly char[] AliasSeparators = [',', ';'];
 
     [GeneratedRegex(@"^\s*\p{L}+:\s*")]
     private static partial Regex LanguageLabel();

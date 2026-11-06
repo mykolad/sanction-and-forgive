@@ -68,6 +68,27 @@ internal sealed class MatcherData
 
     public required int MaxPlaceWords { get; init; }
 
+    /// <summary>The canonical generic word one edit from <paramref name="form"/> (same first letter, 7 letters and up,
+    /// Latin spellings only), or null. Short words are left out: a one-letter change there is often another word.</summary>
+    public string? NearGeneric(string form)
+    {
+        if (form.Length < 7)
+        {
+            return null;
+        }
+
+        foreach (var (spelling, canonical) in Generic)
+        {
+            if (spelling.Length >= 7 && spelling[0] == form[0] && Math.Abs(spelling.Length - form.Length) <= 1
+                && Names.EditDistance.DamerauLevenshtein(spelling, form, 2) == 1)
+            {
+                return canonical;
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>The other spellings of <paramref name="spelling"/>'s group, or none.</summary>
     public IEnumerable<string> SpellingMembers(string spelling) =>
         SpellingGroups.TryGetValue(spelling, out var group) ? SpellingGroupMembers[group] : [];

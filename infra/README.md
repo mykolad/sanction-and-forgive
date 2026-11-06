@@ -6,8 +6,8 @@ reproducible from an empty group. Nothing here belongs to or touches lazydad.
 | File | Scope | Deployed by | What |
 |---|---|---|---|
 | `bootstrap.bicep` | Subscription | The owner, once | Resource group; `sanction-and-forgive-github-cd` (the identity GitHub Actions deploys as), trusted from this repository's `production` environment only, Contributor on the group only |
-| `platform.bicep` | Resource group | The deploy workflow (first time: by hand) | Log Analytics (30 days, daily cap), Container Apps environment `sanction-and-forgive-cae`, app identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` (Entra-only), database `sanction-and-forgive-db` (Basic, 5 DTU, 2 GB), the Azure services firewall rule, a storage alert at 80%, emailed to the subscription's Owner role |
-| `app.bicep` | Resource group | The deploy workflow | Container App and the daily import job (Phase 4) |
+| `platform.bicep` | Resource group | The deploy workflow (first time: by hand) | Log Analytics (30 days, daily cap), Container Apps environment `sanction-and-forgive-cae`, app identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` (Entra-only), database `sanction-and-forgive-db` (Basic, 5 DTU, 2 GB), the Azure services firewall rule; alerts to the subscription's Owner role: database storage above 80%, a failed or rejected import, and a $20 monthly budget (80% spent, 100% forecast) |
+| `app.bicep` | Resource group | The deploy workflow | Container App `sanction-and-forgive` (0.25 vCPU / 0.5 GiB, min = max = 1, port 8080, liveness `/healthz`, readiness `/readyz`, public ingress unless `allowedCidrs`) and the job `sanction-and-forgive-import` (daily 03:30 UTC, `import --source all`, 0.5 vCPU / 1 GiB, 30 minutes), both from `ghcr.io/mykolad/sanction-and-forgive:<sha>` as identity `sanction-and-forgive-app` |
 | `sql/grant-identities.sql` | Database | The owner, once (or after re-creating the database) | Database users for the app and deploy identities: what Bicep can't do |
 
 Nothing personal lives in this public repository: the SQL admin's object ID and login come from environment variables
@@ -44,6 +44,41 @@ re-created repository can't inherit the trust. It isn't a secret.
 - **Environment `production`**: deployments from `master` only. The deploy identity trusts only this environment.
 - **Rulesets** on `master`: PR with `build-and-test` passing and up to date, review threads resolved; no force-push or
   deletion; Copilot code review on every PR and push.
+
+## Deploying
+
+`.github/workflows/deploy.yml` (**Deploy**) runs after Build and Test passes on a push to `master`, or by hand:
+
+1. **build**: the image `ghcr.io/mykolad/sanction-and-forgive:<sha>` (version metadata baked in) with the job's own
+   token, and the EF migration bundle.
+2. **deploy** (environment `production`, OIDC): `platform.bicep` what-if (logged), then deployed; the SQL firewall
+   opened for the runner, the migration bundle as the deploy identity, the firewall closed (always); `app.bicep`
+   with the commit's image; the smoke tests (`tests/SanctionAndForgive.SmokeTests`) against the new revision.
+
+**The image must be public** (no registry, no pull role, no secret). GitHub creates the package private on the first
+push: once, open https://github.com/users/mykolad/packages/container/sanction-and-forgive/settings, *Change visibility*
+to Public, then re-run the deploy. Nothing in the image is secret: it's this public repository's code.
+
+**First deploy:** the app starts with no lists (every row Not checked). Run the import once instead of waiting for 03:30:
+
+```powershell
+az containerapp job start -g sanction-and-forgive-rg -n sanction-and-forgive-import
+az containerapp job execution list -g sanction-and-forgive-rg -n sanction-and-forgive-import -o table
+```
+
+**Load tests** (Phase 5): deploy with the rate limit off, then deploy again without it:
+
+```powershell
+$env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'
+az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/app.bicepparam
+Remove-Item Env:RATE_LIMIT_PER_MINUTE   # then the same create again
+```
+
+**What-if on a deployed environment** lists a few changes that aren't changes, a what-if limitation: values read from
+other resources at deploy time (the connection string, the identity's client ID, the Log Analytics ID) show as
+`[reference(…)]` against their current values, and the read-only `runningStatus` as removed. Anything else in a
+what-if is a real change. Bicep files are LF everywhere (`.gitattributes`): the alert query is a multi-line
+string, and a CRLF checkout would deploy a different one from CI's.
 
 ## Demo-day checklist
 

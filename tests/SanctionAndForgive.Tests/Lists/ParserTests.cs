@@ -125,7 +125,7 @@ public class ParserTests
                   <Name><Name1>Hryhorii</Name1><Name6>HONCHAR</Name6><NameType>Primary Name</NameType></Name>
                   <Name><Name1>Grigoriy</Name1><Name6>GONCHAR</Name6><NameType>Alias</NameType><AliasStrength>Low quality a.k.a</AliasStrength></Name>
                 </Names>
-                <NonLatinNames><NonLatinName><NameNonLatinScript>Григорій Гончар</NameNonLatinScript></NonLatinName></NonLatinNames>
+                <NonLatinNames><NonLatinName><NameNonLatinScript>Григорій Гончар / Григорий Гончар</NameNonLatinScript></NonLatinName></NonLatinNames>
                 <RegimeName>The Russia (Sanctions) (EU Exit) Regulations 2019</RegimeName>
                 <IndividualEntityShip>Individual</IndividualEntityShip>
                 <Addresses><Address><AddressLine1>Khreshchatyk 1</AddressLine1><AddressLine6>Kyiv</AddressLine6><AddressCountry>Ukraine</AddressCountry></Address></Addresses>
@@ -139,6 +139,7 @@ public class ParserTests
         Assert.Equal(new DateOnly(2022, 3, 15), person.ListedOn);
         Assert.Contains(person.Names, name => name is { FullName: "Grigoriy GONCHAR", IsWeak: true });
         Assert.Contains(person.Names, name => name is { FullName: "Григорій Гончар", Script: NameScript.Cyrillic });
+        Assert.Contains(person.Names, name => name is { FullName: "Григорий Гончар", Script: NameScript.Cyrillic });
         Assert.Equal("Khreshchatyk 1, Kyiv, Ukraine", Assert.Single(person.Addresses).Raw);
     }
 
@@ -198,7 +199,7 @@ public class ParserTests
         var subjects = Parse(new CanadaSemaParser(), """
             <data-set>
               <record><Country-Pays>Belarus / Bélarus</Country-Pays><LastName-NomDeFamille>Kovalenko</LastName-NomDeFamille><GivenName-Prenom>Roman</GivenName-Prenom>
-                <Aliases-Alias>Raman Kavalenka, Belarusian: Раман Каваленка,  Russian: Роман Коваленко</Aliases-Alias>
+                <Aliases-Alias>Raman Kavalenka, Belarusian: Раман Каваленка;  Russian: Роман Коваленко</Aliases-Alias>
                 <Schedule-Annexe>1, Part 1</Schedule-Annexe><Item-NumeroDarticle>12</Item-NumeroDarticle><DateOfListing-DateDinscription>2020-09-28</DateOfListing-DateDinscription></record>
               <record><Country-Pays>Russia / Russie</Country-Pays><EntityOrShip-EntiteOuNavire>Volga Trade</EntityOrShip-EntiteOuNavire><Schedule-Annexe>1, Part 2</Schedule-Annexe><Item-NumeroDarticle>3</Item-NumeroDarticle></record>
               <record><Country-Pays>Russia / Russie</Country-Pays><EntityOrShip-EntiteOuNavire>Sea Star</EntityOrShip-EntiteOuNavire><ShipIMONumber-NumeroOMIDuNavire>9262924</ShipIMONumber-NumeroOMIDuNavire><Item-NumeroDarticle>69</Item-NumeroDarticle></record>
