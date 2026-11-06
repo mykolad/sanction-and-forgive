@@ -1,0 +1,234 @@
+using System.Globalization;
+using SanctionAndForgive.Matching.Text;
+
+namespace SanctionAndForgive.Matching.Names;
+
+/// <summary>A name's percentage against one listed alias, and why.</summary>
+internal sealed record NameScore(int Percent, List<string> Explanation)
+{
+    public static NameScore Zero(string reason) => new(0, [reason]);
+}
+
+/// <summary>Sections 5.5 and 5.6: aligns the core tokens (order-independent, best pairs first), turns the weighted
+/// score into a percentage, applies the caps (lowest wins), contained names and initials.</summary>
+internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options)
+{
+    public NameScore Score(NameForm query, NameForm listed, bool weakAlias, Func<Token, double> weight)
+    {
+        if (query.LegalOnly)
+        {
+            return NameScore.Zero("Legal form only: nothing distinctive to compare");
+        }
+
+        if (query.IsEmpty || listed.IsEmpty)
+        {
+            return NameScore.Zero("Nothing distinctive to compare");
+        }
+
+        if (query.IsPerson && listed.IsPerson && (query.Initials.Length > 0 || listed.Initials.Length > 0)
+            && ScoreInitials(query, listed, weakAlias) is { } initials)
+        {
+            return initials;
+        }
+
+        var pairs = Align(query.Core, listed.Core, weight);
+        var explanation = new List<string>();
+        var aligned = 0.0;
+        foreach (var pair in pairs)
+        {
+            aligned += pair.Alignment.Similarity * (weight(query.Core[pair.Query]) + weight(listed.Core[pair.Listed]));
+            explanation.Add(Describe(query.Core[pair.Query], listed.Core[pair.Listed], pair.Alignment));
+        }
+
+        var total = query.Core.Sum(weight) + listed.Core.Sum(weight);
+        var score = aligned / total;
+        var percent = Bands.ToPercent(score, options);
+        var caps = new List<(int Cap, string Reason)>();
+
+        var unalignedQuery = Enumerable.Range(0, query.Core.Length).Except(pairs.Select(pair => pair.Query)).Select(i => query.Core[i]).ToList();
+        var unalignedListed = Enumerable.Range(0, listed.Core.Length).Except(pairs.Select(pair => pair.Listed)).Select(i => listed.Core[i]).ToList();
+        explanation.AddRange(unalignedQuery.Select(token => $"{token}: not in the listed name"));
+        explanation.AddRange(unalignedListed.Select(token => $"{token}: listed, not entered"));
+
+        // Contained names: every core token of the shorter name (at least 2) aligned, and the longer has more.
+        var shorter = Math.Min(query.Core.Length, listed.Core.Length);
+        if (shorter >= 2 && pairs.Count == shorter && query.Core.Length != listed.Core.Length)
+        {
+            percent = options.ContainedNamePercent;
+            explanation.Add("One name contains the other");
+        }
+        else if (unalignedQuery.Count > 0 || unalignedListed.Count > 0)
+        {
+            caps.Add((options.NotAllAlignedCap, "Not every distinctive word aligned"));
+        }
+
+        if (!query.IsPerson && !listed.IsPerson && query.Core.Length == 1 && listed.Core.Length == 1 && pairs.Count == 1
+            && query.Core[0].Length < 4 && !query.LegalClasses.Intersect(listed.LegalClasses).Any())
+        {
+            caps.Add((options.ThinCoreCap, query.LegalClasses.Length == 0 ? "Short name with no legal form" : "Short name with a different legal form"));
+        }
+
+        if (!query.IsPerson && !listed.IsPerson && !query.Generic.SequenceEqual(listed.Generic))
+        {
+            caps.Add((options.GenericCap, "Generic words differ"));
+        }
+
+        if (weakAlias)
+        {
+            caps.Add((options.WeakAliasCap, "The list marks this alias as low quality"));
+        }
+
+        if (pairs.Any(pair => pair.Alignment.Capped))
+        {
+            caps.Add((options.CappedMethodCap, "A word aligned only approximately"));
+        }
+
+        foreach (var legal in query.LegalClasses.Union(listed.LegalClasses))
+        {
+            explanation.Add($"Legal form {legal} not compared");
+        }
+
+        return Finish(percent, caps, explanation);
+    }
+
+    /// <summary>Surname plus initials, in either direction (section 5.6). Null when the full tokens don't support
+    /// it (a full token on the initials side didn't align, or none has 4 letters): then the name is scored as usual.</summary>
+    private NameScore? ScoreInitials(NameForm query, NameForm listed, bool weakAlias)
+    {
+        var (initialsSide, otherSide, queryHasInitials) = query.Initials.Length > 0 ? (query, listed, true) : (listed, query, false);
+        if (initialsSide.Core.Length == 0)
+        {
+            return null;
+        }
+
+        var pairs = Align(initialsSide.Core, otherSide.Core, _ => 1.0);
+        if (pairs.Count != initialsSide.Core.Length || !pairs.Any(pair => initialsSide.Core[pair.Query].Length >= 4))
+        {
+            return null;
+        }
+
+        var explanation = pairs
+            .Select(pair => queryHasInitials
+                ? Describe(initialsSide.Core[pair.Query], otherSide.Core[pair.Listed], pair.Alignment)
+                : Describe(otherSide.Core[pair.Listed], initialsSide.Core[pair.Query], pair.Alignment))
+            .ToList();
+        var candidates = Enumerable.Range(0, otherSide.Core.Length).Except(pairs.Select(pair => pair.Listed))
+            .Select(i => otherSide.Core[i]).Concat(otherSide.Initials).ToList();
+        int matched = 0, contradicted = 0;
+        foreach (var initial in initialsSide.Initials)
+        {
+            var found = candidates.FirstOrDefault(candidate => InitialMatches(initial, candidate));
+            if (found is not null)
+            {
+                matched++;
+                candidates.Remove(found);
+                explanation.Add($"Initial {initial.Text.ToUpperInvariant()} matches {found}");
+            }
+            else if (candidates.Count > 0)
+            {
+                contradicted++;
+                explanation.Add($"Initial {initial.Text.ToUpperInvariant()} doesn't match {string.Join(", ", candidates)}");
+            }
+            else
+            {
+                explanation.Add($"Initial {initial.Text.ToUpperInvariant()}: nothing to compare with");
+            }
+        }
+
+        var percent = contradicted > 0 ? options.ContradictingInitialsPercent
+            : matched >= 2 ? options.TwoInitialsPercent
+            : matched == 1 ? options.OneInitialPercent
+            : options.UncheckedInitialsPercent;
+        var caps = new List<(int, string)>();
+        if (weakAlias)
+        {
+            caps.Add((options.WeakAliasCap, "The list marks this alias as low quality"));
+        }
+
+        if (pairs.Any(pair => pair.Alignment.Capped))
+        {
+            caps.Add((options.CappedMethodCap, "A word aligned only approximately"));
+        }
+
+        return Finish(percent, caps, explanation);
+    }
+
+    /// <summary>An initial matches a given name whose fold key starts with the initial's (<c>Г</c>: <c>Grigoriy</c>
+    /// and <c>Hryhorii</c>), directly or through a cognate (<c>М</c>: <c>Nikolay</c>, via <c>Mykola</c>), or the same
+    /// initial on the other side.</summary>
+    private bool InitialMatches(Token initial, Token candidate)
+    {
+        if (candidate.Length == 1)
+        {
+            return initial.Folds.Intersect(candidate.Folds).Any();
+        }
+
+        var candidateFolds = candidate.Folds.Concat(comparer.CognateGroups(candidate).SelectMany(comparer.CognateFoldsOf));
+        return candidateFolds.Any(fold => initial.Folds.Any(initialFold => initialFold.Length > 0 && fold.StartsWith(initialFold, StringComparison.Ordinal)));
+    }
+
+
+    private static NameScore Finish(int percent, List<(int Cap, string Reason)> caps, List<string> explanation)
+    {
+        foreach (var (cap, reason) in caps.Where(cap => cap.Cap < percent).OrderBy(cap => cap.Cap))
+        {
+            explanation.Add(string.Create(CultureInfo.InvariantCulture, $"Capped at {cap}%: {reason}"));
+        }
+
+        var final = caps.Count == 0 ? percent : Math.Min(percent, caps.Min(cap => cap.Cap));
+        return new NameScore(final, explanation);
+    }
+
+    /// <summary>Best one-to-one pairs: every aligning pair, highest weighted similarity first, each token used once.</summary>
+    private List<(int Query, int Listed, Alignment Alignment)> Align(Token[] query, Token[] listed, Func<Token, double> weight)
+    {
+        var candidates = new List<(int Query, int Listed, Alignment Alignment, double Value)>();
+        for (var i = 0; i < query.Length; i++)
+        {
+            for (var j = 0; j < listed.Length; j++)
+            {
+                var alignment = comparer.Compare(query[i], listed[j]);
+                if (alignment.Aligned)
+                {
+                    candidates.Add((i, j, alignment, alignment.Similarity * (weight(query[i]) + weight(listed[j]))));
+                }
+            }
+        }
+
+        var usedQuery = new HashSet<int>();
+        var usedListed = new HashSet<int>();
+        var pairs = new List<(int, int, Alignment)>();
+        foreach (var candidate in candidates.OrderByDescending(candidate => candidate.Value))
+        {
+            if (usedQuery.Add(candidate.Query))
+            {
+                if (usedListed.Add(candidate.Listed))
+                {
+                    pairs.Add((candidate.Query, candidate.Listed, candidate.Alignment));
+                }
+                else
+                {
+                    usedQuery.Remove(candidate.Query);
+                }
+            }
+        }
+
+        return pairs;
+    }
+
+    private static string Describe(Token query, Token listed, Alignment alignment) => alignment.Method switch
+    {
+        AlignMethod.Identical => $"{query} = {listed}",
+        AlignMethod.Transliteration => $"{query} read as {Common(query, listed)} = {listed}",
+        AlignMethod.SpellingPair => $"{query} ~ {listed} (spelling variant)",
+        AlignMethod.FoldKey => $"{query} ~ {listed} (romanisation)",
+        AlignMethod.FoldKeyLatin => $"{query} ~ {listed} (romanisation, both Latin)",
+        AlignMethod.Cognate => $"{query} ~ {listed} (Russian and Ukrainian forms of one name)",
+        AlignMethod.OneEdit or AlignMethod.OneEditShort => $"{query} ~ {listed} (one letter differs)",
+        AlignMethod.TwoEdits => $"{query} ~ {listed} (two letters differ)",
+        _ => $"{query} ≠ {listed}",
+    };
+
+    private static string Common(Token query, Token listed) =>
+        query.Forms.FirstOrDefault(form => listed.Forms.Contains(form)) ?? query.Forms.FirstOrDefault() ?? query.Text;
+}
