@@ -132,6 +132,7 @@ button.secondary { background: transparent; color: var(--text); border-color: va
   border-left: 8px solid;
 }
 .summary .badge { font-weight: 800; white-space: nowrap; font-size: 1.25rem; }
+.summary .reference { display: block; font-size: 0.85rem; opacity: 0.8; margin-top: 6px; font-variant-numeric: tabular-nums; }
 .summary.Match { background: var(--match-bg); color: var(--match-ink); border-color: var(--match-edge); }
 .summary.Review { background: var(--review-bg); color: var(--review-ink); border-color: var(--review-edge); }
 .summary.NoMatch { background: var(--clear-bg); color: var(--clear-ink); border-color: var(--clear-edge); }

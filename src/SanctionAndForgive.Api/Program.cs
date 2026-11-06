@@ -1,10 +1,19 @@
 using SanctionAndForgive.Api;
 using SanctionAndForgive.Api.Controllers;
 using SanctionAndForgive.Api.Lists;
+using SanctionAndForgive.Api.Screening;
 using SanctionAndForgive.Data;
 using SanctionAndForgive.Matching;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// One JSON object per log line outside Development: Log Analytics keeps each line as one row, so a screening's audit
+// line (and its reference) is one searchable record.
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Logging.ClearProviders();
+    builder.Logging.AddJsonConsole(json => json.IncludeScopes = false);
+}
 
 // The lists database. Only the refresh reads it; a screening never does.
 builder.Services.AddListsDatabase(builder.Configuration.GetConnectionString("Lists"));
@@ -16,6 +25,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(AppInfo.From(builder.Configuration));
 builder.Services.AddSingleton<ListCatalog>();
 builder.Services.AddSingleton<ListLoader>();
+builder.Services.AddSingleton<ScreeningService>();
 if (builder.Configuration.GetValue("Lists:RefreshEnabled", true))
 {
     builder.Services.AddHostedService<ListRefreshService>();

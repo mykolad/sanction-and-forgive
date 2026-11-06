@@ -97,6 +97,7 @@ function currentStep() {
 export default function () {
   const input = inputs[Math.floor(Math.random() * inputs.length)];
   const response = http.post(`${BASE_URL}/api/v1/screenings`, JSON.stringify({
+    reference: `load-${exec.vu.idInTest}-${exec.vu.iterationInScenario}`,
     receiverName: input.receiverName,
     companyName: input.companyName,
     address: input.address,
