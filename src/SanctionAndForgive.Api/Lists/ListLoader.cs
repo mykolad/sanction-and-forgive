@@ -47,7 +47,10 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
 
         foreach (var (position, target) in pending)
         {
-            lists[position] = target with { Index = await BuildAsync(context, target.Code, target.ActiveImportId!.Value, target.RecordCount, cancellationToken) };
+            // A build that fails or finds the list moved on keeps whatever served before (or Not checked for a new
+            // list); the next refresh tries again.
+            var index = await BuildAsync(context, target.Code, target.ActiveImportId!.Value, target.RecordCount, cancellationToken);
+            lists[position] = index is not null ? target with { Index = index } : lists[position];
             if (catalog.IsReady)
             {
                 catalog.Replace([.. lists]);
@@ -58,7 +61,7 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
         catalog.Replace(lists);
     }
 
-    private async Task<ListIndex?> BuildAsync(ListsDbContext context, string code, int importId, int expectedCount, CancellationToken cancellationToken)
+    internal async Task<ListIndex?> BuildAsync(ListsDbContext context, string code, int importId, int expectedCount, CancellationToken cancellationToken)
     {
         try
         {
@@ -66,7 +69,9 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
             var subjects = await strategy.ExecuteAsync(async () =>
             {
                 await using var transaction = await context.Database.BeginTransactionAsync(IsolationLevel.Snapshot, cancellationToken);
-                var stillThere = await context.Imports.AnyAsync(import => import.Id == importId && import.Status == ImportStatus.Completed, cancellationToken);
+                // Cleanup only ever deletes imports that are neither active nor the one before: if the source still
+                // points at this import in this snapshot, nothing of it can have been deleted yet.
+                var stillThere = await context.Sources.AnyAsync(source => source.Code == code && source.ActiveImportId == importId, cancellationToken);
                 var loaded = stillThere
                     ? await context.Subjects.AsNoTracking().Where(subject => subject.ImportId == importId)
                         .Include(subject => subject.Names).Include(subject => subject.Addresses).AsSplitQuery()

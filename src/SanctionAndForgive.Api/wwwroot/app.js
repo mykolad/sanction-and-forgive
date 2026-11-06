@@ -128,6 +128,7 @@ async function screen(event) {
     }
     if (!response.ok) {
       const problem = await response.json().catch(() => null);
+      if (request !== current) return;
       const errors = problem && problem.errors ? Object.values(problem.errors).flat().join(" ") : "";
       showState(errors || "That didn't work. Check the fields and try again.", true);
       return;

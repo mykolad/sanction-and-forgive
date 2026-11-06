@@ -19,7 +19,8 @@
   <main class="wrap">
     <section class="panel" aria-labelledby="form-title">
       <h2 id="form-title" class="visually-hidden">Screen a shipment</h2>
-      <form id="screen-form" novalidate>
+      <!-- method="post": without JavaScript the form must never put what was typed into the URL. -->
+      <form id="screen-form" method="post" action="/api/v1/screenings" novalidate>
         <div class="fields">
           <label class="field">
             <span class="field-label">Receiver</span>

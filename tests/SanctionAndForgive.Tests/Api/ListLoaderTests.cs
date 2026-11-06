@@ -70,6 +70,25 @@ public sealed class ListLoaderTests : IAsyncLifetime
         Assert.Null(Assert.Single(catalog.Lists).Index);
     }
 
+    [SqlServerFact]
+    public async Task ImportTheSourceMovedOnFrom_IsNotBuilt_EvenIfItsRowsLookComplete()
+    {
+        var first = await ImportAsync(3);
+        await ImportAsync(4);
+        await using (var scope = services.CreateAsyncScope())
+        {
+            // What a cleanup of the old import leaves for a moment: its names gone, its subjects still there.
+            var context = scope.ServiceProvider.GetRequiredService<ListsDbContext>();
+            await context.SubjectNames.Where(name => context.Subjects.Any(subject => subject.Id == name.SubjectId && subject.ImportId == first)).ExecuteDeleteAsync();
+        }
+
+        await using var buildScope = services.CreateAsyncScope();
+        var loader = new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), new ListCatalog(), NullLogger<ListLoader>.Instance);
+        var index = await loader.BuildAsync(buildScope.ServiceProvider.GetRequiredService<ListsDbContext>(), "eu", first, 3, CancellationToken.None);
+
+        Assert.Null(index);
+    }
+
     private async Task<int> ImportAsync(int count)
     {
         await using var scope = services.CreateAsyncScope();
