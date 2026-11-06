@@ -70,6 +70,14 @@ a { color: var(--brand); }
 
 .masthead { background: var(--brand); color: var(--brand-ink); padding: 28px 0 24px; }
 .masthead h1 { margin: 0; font-size: 2.1rem; letter-spacing: -0.01em; }
+
+/* The site menu, on every page: the current page is underlined and bold, never colour alone. */
+.menu { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 14px; font-size: 0.98rem; }
+.menu a { color: var(--brand-ink); opacity: 0.85; text-decoration: none; padding: 4px 0; border-bottom: 2px solid transparent; }
+.menu a:hover { opacity: 1; border-bottom-color: color-mix(in srgb, var(--brand-ink) 50%, transparent); }
+.menu a[aria-current="page"] { opacity: 1; font-weight: 700; border-bottom-color: var(--brand-ink); }
+/* On the masthead the page's focus colour can equal the background (dark mode): outline in the ink colour. */
+.menu a:focus-visible { opacity: 1; outline-color: var(--brand-ink); }
 .tagline { margin: 6px 0 0; font-size: 1.05rem; opacity: 0.9; }
 
 .panel, .result, .state:not(:empty) {
@@ -191,8 +199,6 @@ td.list-name .as-of { display: block; font-weight: 400; color: var(--muted); fon
 .fineprint { font-size: 0.85rem; }
 
 /* The list status page (/status). */
-.crumb { margin: 0 0 8px; font-size: 0.95rem; }
-.crumb a { color: var(--brand-ink); opacity: 0.9; }
 .panel h2 { margin: 0 0 6px; font-size: 1.35rem; }
 .section-note { color: var(--muted); margin: 0 0 14px; font-size: 0.95rem; }
 table.sources { border-collapse: collapse; border-spacing: 0; }
