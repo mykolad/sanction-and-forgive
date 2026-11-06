@@ -124,13 +124,14 @@ jobs:
           chmod +x efbundle
           ./efbundle --connection "Server=tcp:$SQL_SERVER.database.windows.net,1433;Database=sanction-and-forgive-db;Authentication=Active Directory Default;Encrypt=True;Connect Timeout=60"
 
-      # A rule that was never created (the step above failed first) is fine; a failed removal fails the job, so an
-      # open rule never goes unnoticed.
+      # A rule that was never created (the step above failed first) is fine. Any failure, of the lookup or of the
+      # removal, fails the job (bash runs with -e), so an open rule never goes unnoticed.
       - name: Close the SQL firewall
         if: always()
         run: |
           rule="github-${{ github.run_id }}"
-          if az sql server firewall-rule show -g "$RESOURCE_GROUP" -s "$SQL_SERVER" -n "$rule" -o none 2>/dev/null; then
+          found=$(az sql server firewall-rule list -g "$RESOURCE_GROUP" -s "$SQL_SERVER" --query "[?name=='$rule'].name" -o tsv)
+          if [ -n "$found" ]; then
             az sql server firewall-rule delete -g "$RESOURCE_GROUP" -s "$SQL_SERVER" -n "$rule" -o none
           fi
 
