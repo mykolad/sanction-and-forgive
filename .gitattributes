@@ -1,1 +1,6 @@
 * text=auto
+
+# Bicep and parameter files as LF everywhere: the alert query is a multi-line string, and a CRLF checkout
+# would deploy a different query from CI's (what-if would show it changing on every run).
+*.bicep text eol=lf
+*.bicepparam text eol=lf
