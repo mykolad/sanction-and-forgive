@@ -14,6 +14,9 @@ From the owner's machine, with k6 installed:
 # 2. The rate limit off (it would answer 429 long before the app is the limit):
 $env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'
 az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/app.bicepparam
+#    Then wait until the new revision has all the traffic and has loaded its lists: until then the old one answers
+#    (and k6's readiness check passes on it). latestReadyRevisionName can still name the old one: look at the traffic.
+az containerapp revision list -g sanction-and-forgive-rg -n sanction-and-forgive --query "[?properties.trafficWeight==``100``].{name:name, created:properties.createdTime, rate:properties.template.containers[0].env[?name=='RateLimiting__PerMinute'].value | [0]}" -o table
 
 # 3. The run: screenings per second in steps of 2 minutes (1, 2, 4, 6, 8, 12, 16, 24, 32), stopping by itself when
 #    p95 passes 2 s or more than 2% fail. Note the CPU and memory in the portal (Container App → Metrics) meanwhile.
@@ -36,11 +39,40 @@ what stopped the run.
 
 ### Azure, one 0.25 vCPU replica
 
-*Not run yet: the owner runs it (Phase 5).*
-
 | Date | Image | Lists | Sustained screenings/s | p95 at that rate | CPU | Memory | Stopped by |
 |---|---|---|---|---|---|---|---|
-| | | | | | | | |
+| 2026-11-06 | 358c9b0 | 6 (eu, ofac-cons, ofac-sdn, ua-sfms, uk, us-export: 37,362 subjects) | **2** | 0.86 s (p50 39 ms) | 0.07-0.14 vCPU (highest 1-minute value) | 380-450 MB working set of 512 MiB, no restarts | p95 5.6 s at 4/s |
+
+Per step (2,000 inputs from the live lists; no request failed, none rate limited, no iteration dropped):
+
+| Step | Screenings | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|
+| 1/s | 139 | 68 ms | 0.77 s | 1.9 s | 4.5 s |
+| 2/s | 270 | 39 ms | 0.86 s | 3.4 s | 4.6 s |
+| 4/s | 78 (stopped 31 s in) | 112 ms | 5.6 s | 7.1 s | 7.5 s |
+
+Reading it:
+
+- **One 0.25 vCPU replica sustains about 2 screenings a second** (120 a minute, which is also the per-IP rate limit).
+  At 4 a second requests queue: p95 climbs past 5 s within half a minute.
+- **The limit is the CPU quota, not the average.** The per-minute CPU never passed 0.14 vCPU of the 0.25, but a
+  screening is a burst of CPU (20 ms median on a desktop core, more for common surnames) and a 0.25 vCPU quota lets
+  the container use a quarter of each scheduling period: a burst that needs more waits for the next period, and
+  bursts that arrive together queue behind each other. This is the most likely reading; the platform doesn't
+  report throttling.
+- **The tail at 1 and 2 a second** (p99 2-3 s) is partly the start: the run's first half minute went to the
+  previous revision, and the new one was still building its indexes during the first steps (the procedure above now
+  waits for that). Step 4 ran on a settled replica.
+- **Memory has the least headroom:** 380-450 MB working set of the 512 MiB, with six lists. No restarts, but adding
+  the TermsUnclear or NeedsAccess lists would leave little room.
+- **The stream** (`/api/v1/screenings/stream`, measured the same day with the rate limit back on: one stream of
+  1,000 of the same inputs) answered all 1,000 in 154 s, **6.5 records a second**, no errors, the first after 0.3 s.
+  One record at a time doesn't queue, so it does better than concurrent single requests. A stream's 200 s therefore
+  covers about 1,300 records here: a 50,000-record batch is about 40 streams, each resuming from `nextLine`, roughly
+  2 hours on one replica.
+
+The next step (spec section 7) is 0.5 vCPU / 1 GiB, about twice the cost of the replica: the owner's decision.
+Rerun this test after any change in size.
 
 ### Local baseline (2026-11-06, a desktop with many cores, so not the limit to plan with)
 
