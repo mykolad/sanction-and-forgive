@@ -118,11 +118,27 @@ public sealed class ListIndex
         var addressComparer = new AddressComparer(comparer, data);
         var best = new Dictionary<int, (NameScore Score, AliasEntry Alias)>();
 
+        // A token's weight once per search (the scorer asks for it for every pair it compares), by reference: the same
+        // value as asking again, without the dictionary lookup and the logarithm each time.
+        var weights = new Dictionary<Token, double>(ReferenceEqualityComparer.Instance);
+        double TokenWeight(Token token)
+        {
+            if (!weights.TryGetValue(token, out var weight))
+            {
+                weight = Weight(token, options);
+                weights[token] = weight;
+            }
+
+            return weight;
+        }
+
+        Func<Token, double> weightOf = TokenWeight;
+
         foreach (var aliasId in Candidates(query, options))
         {
             var alias = aliases[aliasId];
             var form = alias.Form.IsPerson ? query.Person : query.Entity;
-            var score = scorer.Score(form, alias.Form, alias.IsWeak, token => Weight(token, options));
+            var score = scorer.Score(form, alias.Form, alias.IsWeak, weightOf);
             if (!best.TryGetValue(alias.Subject, out var current) || score.Percent > current.Score.Percent)
             {
                 best[alias.Subject] = (score, alias);

@@ -59,11 +59,38 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         var percent = Bands.ToPercent(score, options);
         var caps = new List<(int Cap, string Reason)>();
 
-        var unalignedQuery = Enumerable.Range(0, query.Core.Length).Except(pairs.Select(pair => pair.Query)).Select(i => query.Core[i]).ToList();
-        var unalignedListed = Enumerable.Range(0, listed.Core.Length).Except(pairs.Select(pair => pair.Listed)).Select(i => listed.Core[i]).ToList();
+        // The tokens no pair uses, in their order (marks rather than set differences: this runs for every candidate).
+        var pairedQuery = new bool[query.Core.Length];
+        var pairedListed = new bool[listed.Core.Length];
+        foreach (var pair in pairs)
+        {
+            pairedQuery[pair.Query] = true;
+            pairedListed[pair.Listed] = true;
+        }
+
+        var unalignedQueryIndexes = new List<int>();
+        var unalignedQuery = new List<Token>();
+        for (var i = 0; i < query.Core.Length; i++)
+        {
+            if (!pairedQuery[i])
+            {
+                unalignedQueryIndexes.Add(i);
+                unalignedQuery.Add(query.Core[i]);
+            }
+        }
+
+        var unalignedListed = new List<Token>();
+        for (var j = 0; j < listed.Core.Length; j++)
+        {
+            if (!pairedListed[j])
+            {
+                unalignedListed.Add(listed.Core[j]);
+            }
+        }
+
         explanation.AddRange(unalignedQuery.Select(token => $"{token}: not in the listed name"));
         explanation.AddRange(unalignedListed.Select(token => $"{token}: listed, not entered"));
-        words.AddRange(Enumerable.Range(0, query.Core.Length).Except(pairs.Select(pair => pair.Query)).Select(i => new WordAlignment(i + 1, null, "NotListed")));
+        words.AddRange(unalignedQueryIndexes.Select(i => new WordAlignment(i + 1, null, "NotListed")));
         words.AddRange(unalignedListed.Select(token => new WordAlignment(null, token.Text, "NotEntered")));
 
         // Contained names: every core token of the shorter name (at least 2) aligned, all of them the same word (exactly, transliterated, a spelling pair or a romanisation; not by edits), and the
@@ -271,60 +298,79 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
     /// words never changes the result; names longer than <see cref="MaxExactTokens"/> fall back to best pairs first.</summary>
     private List<(int Query, int Listed, Alignment Alignment)> Align(Token[] query, Token[] listed, Func<Token, double> weight)
     {
-        var alignments = new Alignment[query.Length, listed.Length];
-        var values = new double[query.Length, listed.Length];
+        // Row-major: [i * listed.Length + j] is query token i against listed token j.
+        var alignments = new Alignment[query.Length * listed.Length];
+        var values = new double[query.Length * listed.Length];
+        var usable = new bool[listed.Length];
         for (var i = 0; i < query.Length; i++)
         {
             for (var j = 0; j < listed.Length; j++)
             {
-                alignments[i, j] = comparer.Compare(query[i], listed[j]);
+                var cell = (i * listed.Length) + j;
+                alignments[cell] = comparer.Compare(query[i], listed[j]);
                 // A capped alignment is worth a hair less, so equal totals prefer uncapped pairs.
-                values[i, j] = alignments[i, j].Aligned
-                    ? (alignments[i, j].Similarity * (weight(query[i]) + weight(listed[j]))) - (alignments[i, j].Capped ? 1e-9 : 0)
+                values[cell] = alignments[cell].Aligned
+                    ? (alignments[cell].Similarity * (weight(query[i]) + weight(listed[j]))) - (alignments[cell].Capped ? 1e-9 : 0)
                     : double.NegativeInfinity;
+                usable[j] |= alignments[cell].Aligned;
+            }
+        }
+
+        var columns = new List<int>(listed.Length);
+        for (var j = 0; j < listed.Length; j++)
+        {
+            if (usable[j])
+            {
+                columns.Add(j);
             }
         }
 
         var assignment = listed.Length <= MaxExactTokens && query.Length <= MaxExactTokens
-            ? ExactAssignment(values, query.Length, listed.Length)
+            ? ExactAssignment(values, query.Length, listed.Length, columns)
             : GreedyAssignment(values, query.Length, listed.Length);
-        return [.. assignment.Select(pair => (pair.Query, pair.Listed, alignments[pair.Query, pair.Listed]))];
+        return [.. assignment.Select(pair => (pair.Query, pair.Listed, alignments[(pair.Query * listed.Length) + pair.Listed]))];
     }
 
     private const int MaxExactTokens = 12;
 
-    private static List<(int Query, int Listed)> ExactAssignment(double[,] values, int queryCount, int listedCount)
+    /// <param name="columns">The listed tokens some query token aligns with, in order. The others can never be paired,
+    /// so the search runs over these alone: the same totals and the same pairs as over every listed token (a mask's
+    /// best total never depends on tokens that can't be used, and the pairs are still chosen lowest index first), in
+    /// 2^columns states instead of 2^listed (a 12-word listed name with 2 words in common: 4 states, not 4,096).</param>
+    private static List<(int Query, int Listed)> ExactAssignment(double[] values, int queryCount, int listedCount, List<int> columns)
     {
-        // best[i, mask]: the best total for query tokens i.. with the listed tokens in mask already used.
-        var masks = 1 << listedCount;
-        var best = new double[queryCount + 1, masks];
+        // best[i * masks + mask]: the best total for query tokens i.. with the columns in mask already used.
+        var masks = 1 << columns.Count;
+        var best = new double[(queryCount + 1) * masks];
         for (var i = queryCount - 1; i >= 0; i--)
         {
             for (var mask = 0; mask < masks; mask++)
             {
-                var value = best[i + 1, mask];
-                for (var j = 0; j < listedCount; j++)
+                var value = best[((i + 1) * masks) + mask];
+                for (var c = 0; c < columns.Count; c++)
                 {
-                    if ((mask & (1 << j)) == 0 && !double.IsNegativeInfinity(values[i, j]))
+                    var v = values[(i * listedCount) + columns[c]];
+                    if ((mask & (1 << c)) == 0 && !double.IsNegativeInfinity(v))
                     {
-                        value = Math.Max(value, values[i, j] + best[i + 1, mask | (1 << j)]);
+                        value = Math.Max(value, v + best[((i + 1) * masks) + (mask | (1 << c))]);
                     }
                 }
 
-                best[i, mask] = value;
+                best[(i * masks) + mask] = value;
             }
         }
 
         var pairs = new List<(int, int)>();
         for (int i = 0, used = 0; i < queryCount; i++)
         {
-            for (var j = 0; j < listedCount; j++)
+            for (var c = 0; c < columns.Count; c++)
             {
-                if ((used & (1 << j)) == 0 && !double.IsNegativeInfinity(values[i, j])
-                    && Math.Abs(values[i, j] + best[i + 1, used | (1 << j)] - best[i, used]) < 1e-12)
+                var v = values[(i * listedCount) + columns[c]];
+                if ((used & (1 << c)) == 0 && !double.IsNegativeInfinity(v)
+                    && Math.Abs(v + best[((i + 1) * masks) + (used | (1 << c))] - best[(i * masks) + used]) < 1e-12)
                 {
-                    pairs.Add((i, j));
-                    used |= 1 << j;
+                    pairs.Add((i, columns[c]));
+                    used |= 1 << c;
                     break;
                 }
             }
@@ -333,16 +379,16 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         return pairs;
     }
 
-    private static List<(int Query, int Listed)> GreedyAssignment(double[,] values, int queryCount, int listedCount)
+    private static List<(int Query, int Listed)> GreedyAssignment(double[] values, int queryCount, int listedCount)
     {
         var candidates = new List<(int Query, int Listed, double Value)>();
         for (var i = 0; i < queryCount; i++)
         {
             for (var j = 0; j < listedCount; j++)
             {
-                if (!double.IsNegativeInfinity(values[i, j]))
+                if (!double.IsNegativeInfinity(values[(i * listedCount) + j]))
                 {
-                    candidates.Add((i, j, values[i, j]));
+                    candidates.Add((i, j, values[(i * listedCount) + j]));
                 }
             }
         }
