@@ -184,7 +184,8 @@ on (`Admin:SignInEnabled`): otherwise nobody is signed in, whatever a request sa
 Names known to be legitimate parties that resemble a listed one (owner's decision, 2026-11-06). When the receiver or
 company entered **is** an allow-listed name, word for word as screening reads it (case, punctuation, apostrophes and
 spacing don't matter, but every word does, the legal form included: "Huamei Co., Ltd." is "HUAMEI CO LTD", not
-"Huamei Limited"; Latin and Cyrillic spellings are separate entries), each of its
+"Huamei Limited"; initials are not a word: "A. B. Corp" is not "AB Corp"; Latin and Cyrillic spellings are
+separate entries), each of its
 **possible matches** (Review) is still shown, with its percentage, but marked `allowed`, and doesn't raise the
 outcome. A **Match** is never allowed, the address entry never is, and a name that is itself a Match on a list
 can't be added, nor anything while a list can't be checked (503: loading, or not current). An entry allows that
