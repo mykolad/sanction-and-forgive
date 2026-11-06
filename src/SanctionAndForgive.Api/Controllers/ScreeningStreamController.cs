@@ -59,8 +59,9 @@ public sealed class ScreeningStreamController(ScreeningService screenings, IConf
 
         // One snapshot for the whole stream: every result in it has the versions the header states.
         var lists = screenings.Snapshot;
+        var allowList = screenings.AllowList;
         var now = screenings.Now;
-        await WriteLineAsync(new StreamHeaderLine("header", screenings.MatcherVersion, ScreeningResponse.DisclaimerText, [.. lists.Select(list => ListResponse.From(list, now))], maxRecords, maxSeconds), writing.Token);
+        await WriteLineAsync(new StreamHeaderLine("header", screenings.MatcherVersion, ScreeningResponse.DisclaimerText, [.. lists.Select(list => ListResponse.From(list, now))], maxRecords, maxSeconds, allowList.Version), writing.Token);
 
         using var reader = new BoundedLineReader(new StreamReader(Request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 16 * 1024), MaxLineBytes);
         int line = 0, screened = 0, errors = 0;
@@ -113,7 +114,7 @@ public sealed class ScreeningStreamController(ScreeningService screenings, IConf
                 continue;
             }
 
-            var result = screenings.ScreenForStream(body!, lists);
+            var result = screenings.ScreenForStream(body!, lists, allowList);
             screened++;
             await WriteLineAsync(new StreamResultLine("result", line, body!.Reference!, result.Outcome.ToString(), [.. result.Entries.Select(entry => StreamEntry.From(entry, screenings.Options))]), writing.Token);
         }

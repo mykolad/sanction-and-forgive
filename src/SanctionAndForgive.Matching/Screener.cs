@@ -34,12 +34,16 @@ public enum OverallOutcome
 /// <summary>One list's answer for one entry. Not checked: no percentage and no outcome, never 0%.</summary>
 /// <param name="Best">The best subject on the list, whatever its percentage (the page shows it from 20%).</param>
 /// <param name="Others">Up to four more subjects at Review or above.</param>
-public sealed record Cell(string List, bool Checked, int? Percent, Outcome? Outcome, SubjectMatch? Best, IReadOnlyList<SubjectMatch> Others);
+/// <param name="Allowed">A possible match (Review) on an allow-listed name: shown as allowed, and it doesn't raise
+/// the overall outcome. Never set on a Match.</param>
+public sealed record Cell(string List, bool Checked, int? Percent, Outcome? Outcome, SubjectMatch? Best, IReadOnlyList<SubjectMatch> Others, bool Allowed);
 
 /// <param name="Compared">What was compared, in words: "Name only: no address entered".</param>
-public sealed record Entry(EntryKind Kind, string Input, string Compared, IReadOnlyList<Cell> Cells);
+/// <param name="AllowedBy">The allow-list entry this receiver or company is, if any.</param>
+public sealed record Entry(EntryKind Kind, string Input, string Compared, IReadOnlyList<Cell> Cells, AllowListEntry? AllowedBy);
 
-public sealed record ScreeningResult(OverallOutcome Outcome, string MatcherVersion, IReadOnlyList<Entry> Entries);
+/// <param name="AllowListVersion">The allow-list's version this result used.</param>
+public sealed record ScreeningResult(OverallOutcome Outcome, string MatcherVersion, IReadOnlyList<Entry> Entries, string AllowListVersion);
 
 /// <summary>Screens each entry against each list separately (section 5.7). Deterministic: the same input, lists and
 /// matcher version always give the same result. Nothing here stores or logs the input.</summary>
@@ -57,8 +61,11 @@ public sealed class Screener
     /// <summary>A hash of the dictionaries and the options: changes whenever matching could change.</summary>
     public string MatcherVersion { get; }
 
+    /// <summary>Screens without an allow-list. Throws <see cref="ArgumentException"/> if every field is empty.</summary>
+    public ScreeningResult Screen(ScreeningRequest request, IReadOnlyList<ScreenedList> lists) => Screen(request, lists, AllowList.Empty);
+
     /// <summary>Throws <see cref="ArgumentException"/> if every field is empty.</summary>
-    public ScreeningResult Screen(ScreeningRequest request, IReadOnlyList<ScreenedList> lists)
+    public ScreeningResult Screen(ScreeningRequest request, IReadOnlyList<ScreenedList> lists, AllowList allowList)
     {
         var receiver = Clean(request.ReceiverName);
         var company = Clean(request.CompanyName);
@@ -83,37 +90,41 @@ public sealed class Screener
             var tokens = tokenizer.Tokenize(name, joinInitials: true);
             var prepared = new PreparedName(parser.Entity(tokens), parser.Person(tokens), addressForm);
             var compared = addressForm is null ? "Name only: no address entered" : "Name, with the address where the list has one";
-            entries.Add(new Entry(kind, name, compared, [.. lists.Select(list => ToCell(list, index => index.SearchName(prepared, options)))]));
+            var allowedBy = allowList.Find(tokens);
+            var cells = lists.Select(list => ToCell(list, index => index.SearchName(prepared, options)))
+                .Select(cell => allowedBy is not null && cell.Outcome == Outcome.Review ? cell with { Allowed = true } : cell);
+            entries.Add(new Entry(kind, name, compared, [.. cells], allowedBy));
         }
 
         if (addressForm is not null)
         {
-            entries.Add(new Entry(EntryKind.Address, address!, "Address only", [.. lists.Select(list => ToCell(list, index => index.SearchAddress(addressForm, options)))]));
+            entries.Add(new Entry(EntryKind.Address, address!, "Address only", [.. lists.Select(list => ToCell(list, index => index.SearchAddress(addressForm, options)))], AllowedBy: null));
         }
 
-        return new ScreeningResult(Overall(entries), MatcherVersion, entries);
+        return new ScreeningResult(Overall(entries), MatcherVersion, entries, allowList.Version);
     }
 
     private Cell ToCell(ScreenedList list, Func<ListIndex, List<SubjectMatch>> search)
     {
         if (list.Index is null)
         {
-            return new Cell(list.Code, Checked: false, Percent: null, Outcome: null, Best: null, Others: []);
+            return new Cell(list.Code, Checked: false, Percent: null, Outcome: null, Best: null, Others: [], Allowed: false);
         }
 
         var matches = search(list.Index);
         var best = matches.FirstOrDefault();
         var others = matches.Skip(1).Where(match => match.Outcome != Outcome.NoMatch).Take(options.HitsPerCell - 1).ToList();
         var percent = best?.Percent ?? 0;
-        return new Cell(list.Code, Checked: true, percent, Bands.ToOutcome(percent, options), best, others);
+        return new Cell(list.Code, Checked: true, percent, Bands.ToOutcome(percent, options), best, others, Allowed: false);
     }
 
     private static OverallOutcome Overall(List<Entry> entries)
     {
         // No cell at all (no lists) means nothing was searched: Incomplete, never NoMatch.
         var cells = entries.SelectMany(entry => entry.Cells).ToList();
+        // An allowed possible match doesn't raise the outcome; a Match always does (it's never allowed).
         return cells.Any(cell => cell.Outcome == Outcome.Match) ? OverallOutcome.Match
-            : cells.Any(cell => cell.Outcome == Outcome.Review) ? OverallOutcome.Review
+            : cells.Any(cell => cell.Outcome == Outcome.Review && !cell.Allowed) ? OverallOutcome.Review
             : cells.Count == 0 || cells.Any(cell => !cell.Checked) ? OverallOutcome.Incomplete
             : OverallOutcome.NoMatch;
     }

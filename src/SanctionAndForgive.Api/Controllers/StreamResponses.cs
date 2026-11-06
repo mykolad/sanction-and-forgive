@@ -7,20 +7,23 @@ namespace SanctionAndForgive.Api.Controllers;
 // caller already has its input, keyed by reference, so nothing entered is echoed.
 
 /// <summary>The first line: what every result in this stream was computed with.</summary>
-public sealed record StreamHeaderLine(string Type, string MatcherVersion, string Disclaimer, IReadOnlyList<ListResponse> Lists, int MaxRecords, int MaxSeconds);
+public sealed record StreamHeaderLine(string Type, string MatcherVersion, string Disclaimer, IReadOnlyList<ListResponse> Lists, int MaxRecords, int MaxSeconds, string AllowListVersion);
 
 /// <summary>One record's result. <paramref name="Line"/> is its 1-based line number in the request.</summary>
 public sealed record StreamResultLine(string Type, int Line, string Reference, string Outcome, IReadOnlyList<StreamEntry> Entries);
 
-public sealed record StreamEntry(string Kind, IReadOnlyList<StreamCell> Cells)
+/// <param name="AllowListEntryId">The allow-list entry this receiver or company is, by id (never its name: that's the
+/// input, which a stream doesn't echo).</param>
+public sealed record StreamEntry(string Kind, IReadOnlyList<StreamCell> Cells, int? AllowListEntryId)
 {
     public static StreamEntry From(Entry entry, MatchingOptions options) =>
-        new(entry.Kind.ToString(), [.. entry.Cells.Select(cell => StreamCell.From(cell, options))]);
+        new(entry.Kind.ToString(), [.. entry.Cells.Select(cell => StreamCell.From(cell, options))], entry.AllowedBy?.Id);
 }
 
 /// <param name="State"><c>Checked</c> or <c>NotChecked</c>; Not checked has no percentage and no outcome.</param>
 /// <param name="Best">The best candidate from 20%: enough to find it on the list, and how it aligned.</param>
-public sealed record StreamCell(string List, string State, int? Percent, string? Outcome, StreamCandidate? Best)
+/// <param name="Allowed">A possible match on an allow-listed name: it doesn't raise the outcome. Never a Match.</param>
+public sealed record StreamCell(string List, string State, int? Percent, string? Outcome, StreamCandidate? Best, bool Allowed)
 {
     public static StreamCell From(Cell cell, MatchingOptions options) => new(
         cell.List,
@@ -29,7 +32,8 @@ public sealed record StreamCell(string List, string State, int? Percent, string?
         cell.Outcome?.ToString(),
         cell.Best is { } best && best.Percent >= options.BestCandidateMinPercent
             ? new StreamCandidate(best.Subject.PrimaryName, best.Alias, best.Subject.ExternalId, best.Subject.SourceUrl, best.Percent, best.Words, best.Notes, best.AddressState.ToString())
-            : null);
+            : null,
+        cell.Allowed);
 }
 
 /// <summary>A hit, explained without quoting the entry (a stream never echoes input): <paramref name="Words"/> gives

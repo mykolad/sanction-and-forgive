@@ -2,8 +2,8 @@
 // API or the user goes into the page as text (textContent), never as HTML.
 "use strict";
 
-const LABELS = { Match: "Match", Review: "Possible match", NoMatch: "No match", NotChecked: "Not checked" };
-const SYMBOLS = { Match: "●", Review: "▲", NoMatch: "✓", NotChecked: "–" };
+const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible match, allowed", NoMatch: "No match", NotChecked: "Not checked" };
+const SYMBOLS = { Match: "●", Review: "▲", Allowed: "◇", NoMatch: "✓", NotChecked: "–" };
 const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete" };
 const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address" };
 
@@ -180,7 +180,8 @@ function render(result) {
 }
 
 function cellButton(cell, entry, list) {
-  const state = cell.state === "NotChecked" ? "NotChecked" : cell.outcome;
+  // An allowed possible match (the entry is on the allow-list) keeps its percentage but isn't counted.
+  const state = cell.state === "NotChecked" ? "NotChecked" : cell.allowed ? "Allowed" : cell.outcome;
   const who = cell.bestCandidate ? cell.bestCandidate.listedName : null;
   const label = cell.state === "NotChecked"
     ? `${list.name}: not checked`
@@ -204,9 +205,12 @@ function showDetail(button, cell, entry, list) {
   button.setAttribute("aria-pressed", "true");
   const candidate = cell.bestCandidate;
   const detail = $("detail");
-  detail.replaceChildren(
+  // replaceChildren would show a null as the text "null": only the parts there are.
+  detail.replaceChildren(...[
     el("h3", {}, candidate.listedName),
     el("p", { class: "meta" }, `${list.name} · ${KIND[entry.kind]} “${entry.input}” · ${percentText(candidate.percent)} match likelihood (${LABELS[candidate.outcome]})`),
+    cell.allowed && entry.allowedBy ? el("p", { class: "allowed-note" }, el("strong", {}, "Allowed by the allow-list: "),
+      `“${entry.allowedBy.name}”: ${entry.allowedBy.reason}. This possible match doesn't raise the outcome; a person can still review it.`) : null,
     el("dl", {},
       el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
       el("dt", {}, "Type"), el("dd", {}, candidate.type === "Unknown" ? "Not stated by the list" : candidate.type),
@@ -219,7 +223,8 @@ function showDetail(button, cell, entry, list) {
     el("ul", {}, candidate.alignment.map((line) => el("li", {}, line))),
     cell.otherHits.length ? el("div", { class: "others" },
       el("p", {}, el("strong", {}, `Other possible matches on ${list.name}`)),
-      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, `${hit.listedName} — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null);
+      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, `${hit.listedName} — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null,
+  ].filter(Boolean));
   detail.hidden = false;
 }
 

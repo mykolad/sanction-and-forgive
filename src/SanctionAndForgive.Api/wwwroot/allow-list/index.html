@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allow-list · Sanction &amp; Forgive</title>
+  <meta name="description" content="Names known to be legitimate parties, whose possible matches are shown as allowed.">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23243b6b'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <nav class="menu" aria-label="Site">
+        <a href="/">Screen</a>
+        <a href="/lists">Browse lists</a>
+        <a href="/status">List status</a>
+        <a href="/allow-list" aria-current="page">Allow-list</a>
+        <a href="/admin">Admin</a>
+        <a href="https://github.com/mykolad/sanction-and-forgive/blob/master/docs/api.md">API</a>
+      </nav>
+      <h1>Allow-list</h1>
+      <p class="tagline">Names known to be legitimate parties that resemble a listed one: their possible matches are shown as allowed.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" aria-labelledby="how-title">
+      <h2 id="how-title">What an entry does</h2>
+      <p class="section-note">When the receiver or company entered is an allow-listed name, word for word (case, punctuation and
+        spacing aside, but the legal form counts: “Huamei Co., Ltd.” is “HUAMEI CO LTD”, not “Huamei Limited”; Latin and Cyrillic
+        spellings are separate entries), its <strong>possible matches</strong> are shown as
+        “Possible match, allowed” with the entry's reason, and don't raise the outcome. A <strong>Match</strong> is never allowed,
+        and a name that is itself a match on a list can't be added (nor anything while a list can't be checked). An entry
+        allows that name's possible matches on every list, whichever listed party they point to: read them before adding.
+        Every addition and removal is kept, with who and when.
+        Only administrators can see or change the list: entries can be people's names.</p>
+    </section>
+
+    <section id="state" class="state" aria-live="polite"></section>
+
+    <section class="panel" id="editor" hidden aria-labelledby="add-title">
+      <h2 id="add-title">Add an entry</h2>
+      <form id="add-form" class="allow-form" novalidate>
+        <label class="field">
+          <span class="field-label">Name <span class="hint">exactly as it will be entered</span></span>
+          <input id="name" maxlength="300" autocomplete="off" spellcheck="false" placeholder="Huamei Trading Co., Ltd.">
+        </label>
+        <label class="field">
+          <span class="field-label">Reason <span class="hint">why it isn't the listed party</span></span>
+          <input id="reason" maxlength="500" autocomplete="off" placeholder="Our customer since 2019, not Huawei Technologies">
+        </label>
+        <div class="actions field-wide">
+          <button type="submit" class="primary">Add to the allow-list</button>
+          <span id="add-status" class="review-status" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel" id="entries-panel" hidden aria-labelledby="entries-title">
+      <h2 id="entries-title">Entries</h2>
+      <div class="table-scroll">
+        <table id="entries" class="sources allow">
+          <thead>
+            <tr><th scope="col">Name</th><th scope="col">Reason</th><th scope="col">Added</th><th scope="col">State</th><th scope="col"></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p class="fineprint">A demo list check, not a legal determination. · <a href="https://github.com/mykolad/sanction-and-forgive">Source code</a> (MIT)</p>
+    </div>
+  </footer>
+
+  <script src="/allow-list/allow-list.js"></script>
+</body>
+</html>

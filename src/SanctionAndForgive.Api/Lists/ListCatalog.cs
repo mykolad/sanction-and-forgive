@@ -53,5 +53,12 @@ public sealed class ListCatalog
 
     public void ReplaceHeld(IReadOnlyDictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> latest) => held = latest;
 
+    private volatile AllowList allowList = AllowList.Empty;
+
+    /// <summary>The allow-list in force, as of the last refresh or edit: every screening uses one, whole.</summary>
+    public AllowList AllowList => allowList;
+
+    public void ReplaceAllowList(AllowList latest) => allowList = latest;
+
     private sealed record Snapshot(IReadOnlyList<LoadedList> Lists, bool Ready);
 }

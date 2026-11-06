@@ -54,13 +54,16 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
 
     public string MatcherVersion => screener.MatcherVersion;
 
+    /// <summary>The allow-list as it is now: a stream screens every record against one.</summary>
+    public AllowList AllowList => catalog.AllowList;
+
     /// <summary>Screens a valid request against the current lists and logs the result under its reference.</summary>
-    public ScreeningResponse Screen(ScreeningRequestBody body) => Screen(body, catalog.Lists);
+    public ScreeningResponse Screen(ScreeningRequestBody body) => Screen(body, catalog.Lists, catalog.AllowList);
 
     /// <summary>Screens a valid request against <paramref name="lists"/> (a snapshot) and logs the result.</summary>
-    public ScreeningResponse Screen(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists)
+    public ScreeningResponse Screen(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists, AllowList allowList)
     {
-        var (result, rows, now) = Run(body, lists);
+        var (result, rows, now) = Run(body, lists, allowList);
         return new ScreeningResponse(
             body.Reference!,
             result.Outcome.ToString(),
@@ -68,17 +71,20 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
             ScreeningResponse.DisclaimerText,
             result.MatcherVersion,
             rows,
-            [.. result.Entries.Select(entry => EntryResponse.From(entry, options))]);
+            [.. result.Entries.Select(entry => EntryResponse.From(entry, options))])
+        {
+            AllowListVersion = result.AllowListVersion,
+        };
     }
 
     /// <summary>The screening and its audit line, for a caller that shapes its own response (the stream).</summary>
-    public ScreeningResult ScreenForStream(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists) => Run(body, lists).Result;
+    public ScreeningResult ScreenForStream(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists, AllowList allowList) => Run(body, lists, allowList).Result;
 
-    private (ScreeningResult Result, List<ListResponse> Rows, DateTimeOffset Now) Run(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists)
+    private (ScreeningResult Result, List<ListResponse> Rows, DateTimeOffset Now) Run(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists, AllowList allowList)
     {
         var now = clock.GetUtcNow();
         var screened = lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? list.Index : null)).ToList();
-        var result = screener.Screen(new ScreeningRequest(body.ReceiverName, body.CompanyName, body.Address), screened);
+        var result = screener.Screen(new ScreeningRequest(body.ReceiverName, body.CompanyName, body.Address), screened, allowList);
 
         // Rows with hits first (best percentage across the entries), then the others in their usual order.
         var best = result.Entries.SelectMany(entry => entry.Cells).GroupBy(cell => cell.List).ToDictionary(group => group.Key, group => group.Max(cell => cell.Percent ?? -1));
@@ -99,14 +105,14 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
         var results = new StringBuilder();
         foreach (var entry in result.Entries)
         {
-            results.Append(entry.Kind).Append(": ");
+            results.Append(entry.Kind).Append(entry.AllowedBy is { } allowed ? string.Create(CultureInfo.InvariantCulture, $" (allow-list entry {allowed.Id})") : string.Empty).Append(": ");
             results.AppendJoin("; ", entry.Cells.Select(cell => cell.Checked
-                ? string.Create(CultureInfo.InvariantCulture, $"{cell.List} {cell.Outcome} {cell.Percent}%{(cell.Best is { } match && match.Percent >= options.BestCandidateMinPercent ? $" [{match.Subject.ExternalId}]" : string.Empty)}")
+                ? string.Create(CultureInfo.InvariantCulture, $"{cell.List} {cell.Outcome}{(cell.Allowed ? " allowed" : string.Empty)} {cell.Percent}%{(cell.Best is { } match && match.Percent >= options.BestCandidateMinPercent ? $" [{match.Subject.ExternalId}]" : string.Empty)}")
                 : $"{cell.List} NotChecked"));
             results.Append(" | ");
         }
 
-        logger.LogInformation("Screening {Reference}: {Outcome}; matcher {MatcherVersion}; lists {ListVersions}; {Results}", reference, result.Outcome, result.MatcherVersion, lists, results.ToString().TrimEnd(' ', '|'));
+        logger.LogInformation("Screening {Reference}: {Outcome}; matcher {MatcherVersion}; lists {ListVersions}; allow-list {AllowListVersion}; {Results}", reference, result.Outcome, result.MatcherVersion, lists, result.AllowListVersion, results.ToString().TrimEnd(' ', '|'));
     }
 
     /// <summary>The summary line, worded precisely: never "not sanctioned" or "cleared", always which lists, as of when.</summary>
@@ -115,15 +121,21 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
         var checkedLists = lists.Where(list => list.IsCurrent(now)).Select(list => $"{list.Name}, as of {AsOf(list.LastCheckedAt)}").ToList();
         var notChecked = lists.Where(list => !list.IsCurrent(now)).Select(list => list.Name).ToList();
         var gap = notChecked.Count > 0 ? $" Not checked: {string.Join(", ", notChecked)}." : string.Empty;
-        var hits = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Outcome is Outcome.Match or Outcome.Review)
+        var hits = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Outcome is Outcome.Match or Outcome.Review && !cell.Allowed)
             .Select(cell => lists.First(list => list.Code == cell.List).Name).Distinct().ToList();
+        var allowedOn = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Allowed)
+            .Select(cell => lists.First(list => list.Code == cell.List).Name).Distinct().ToList();
+        var allowed = allowedOn.Count > 0
+            ? $" A possible match on {string.Join(", ", allowedOn)} is allowed by the allow-list ({string.Join("; ", result.Entries.Where(entry => entry.AllowedBy is not null && entry.Cells.Any(cell => cell.Allowed)).Select(entry => $"{entry.AllowedBy!.Name}: {entry.AllowedBy.Reason}"))}); a person can still review it."
+            : string.Empty;
 
         return result.Outcome switch
         {
-            OverallOutcome.Match => $"Possible match on {string.Join(", ", hits)}. A person must review it before anything else happens.{gap}",
-            OverallOutcome.Review => $"Review needed: a similar listed party on {string.Join(", ", hits)}.{gap}",
+            OverallOutcome.Match => $"Possible match on {string.Join(", ", hits)}. A person must review it before anything else happens.{gap}{allowed}",
+            OverallOutcome.Review => $"Review needed: a similar listed party on {string.Join(", ", hits)}.{gap}{allowed}",
             OverallOutcome.Incomplete when checkedLists.Count == 0 => $"Incomplete: no list could be checked.{gap}",
-            OverallOutcome.Incomplete => $"Incomplete. No match found in: {string.Join("; ", checkedLists)}.{gap}",
+            OverallOutcome.Incomplete => $"Incomplete. No match found in: {string.Join("; ", checkedLists)}.{gap}{allowed}",
+            _ when allowed.Length > 0 => $"No match found in: {string.Join("; ", checkedLists)}, apart from what the allow-list allows.{allowed}",
             _ => $"No match found in: {string.Join("; ", checkedLists)}.",
         };
     }

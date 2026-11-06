@@ -20,6 +20,9 @@ public sealed record ScreeningResponse(
     IReadOnlyList<ListResponse> Lists,
     IReadOnlyList<EntryResponse> Entries)
 {
+    /// <summary>The allow-list's version this answer used (with the matcher and list versions, it reproduces it).</summary>
+    public string AllowListVersion { get; init; } = AllowList.Empty.Version;
+
     public const string DisclaimerText =
         "This is a demo list check, not a legal determination. It doesn't cover ownership or control by listed parties, "
         + "or embargoes. A person must review possible matches. The percentage is an estimate that this entry is the "
@@ -35,15 +38,21 @@ public sealed record ListResponse(string Code, string Name, DateTimeOffset? AsOf
         new(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? "Current" : "NotChecked", list.Index is null ? null : list.ActiveImportId, list.RecordCount, SanctionAndForgive.Lists.ListSources.Find(list.Code)?.PublicUrl ?? list.Url);
 }
 
-public sealed record EntryResponse(string Kind, string Input, string Compared, IReadOnlyList<CellResponse> Cells)
+/// <param name="AllowedBy">The allow-list entry this receiver or company is: its possible matches are allowed.</param>
+public sealed record EntryResponse(string Kind, string Input, string Compared, IReadOnlyList<CellResponse> Cells, AllowedByResponse? AllowedBy)
 {
     public static EntryResponse From(Entry entry, MatchingOptions options) =>
-        new(entry.Kind.ToString(), entry.Input, entry.Compared, [.. entry.Cells.Select(cell => CellResponse.From(cell, options))]);
+        new(entry.Kind.ToString(), entry.Input, entry.Compared, [.. entry.Cells.Select(cell => CellResponse.From(cell, options))],
+            entry.AllowedBy is { } allowed ? new AllowedByResponse(allowed.Id, allowed.Name, allowed.Reason) : null);
 }
+
+/// <summary>An allow-list entry: a name known to be a legitimate party, and why (an administrator's note).</summary>
+public sealed record AllowedByResponse(int Id, string Name, string Reason);
 
 /// <param name="State"><c>Checked</c> or <c>NotChecked</c>. Not checked: no percentage, no outcome.</param>
 /// <param name="BestCandidate">Shown from <see cref="MatchingOptions.BestCandidateMinPercent"/> (20%).</param>
-public sealed record CellResponse(string List, string State, int? Percent, string? Outcome, CandidateResponse? BestCandidate, IReadOnlyList<CandidateResponse> OtherHits)
+/// <param name="Allowed">A possible match on an allow-listed name: shown, but it doesn't raise the outcome. Never a Match.</param>
+public sealed record CellResponse(string List, string State, int? Percent, string? Outcome, CandidateResponse? BestCandidate, IReadOnlyList<CandidateResponse> OtherHits, bool Allowed)
 {
     public static CellResponse From(Cell cell, MatchingOptions options) => new(
         cell.List,
@@ -51,7 +60,8 @@ public sealed record CellResponse(string List, string State, int? Percent, strin
         cell.Percent,
         cell.Outcome?.ToString(),
         cell.Best is { } best && best.Percent >= options.BestCandidateMinPercent ? CandidateResponse.From(best) : null,
-        [.. cell.Others.Select(CandidateResponse.From)]);
+        [.. cell.Others.Select(CandidateResponse.From)],
+        cell.Allowed);
 }
 
 public sealed record CandidateResponse(

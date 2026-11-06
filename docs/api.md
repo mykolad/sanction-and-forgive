@@ -178,3 +178,27 @@ on (`Admin:SignInEnabled`): otherwise nobody is signed in, whatever a request sa
   import; 409 `NotPending` (already reviewed, superseded, or held against a list that has changed since). Confirming
   makes it the active list (searched while it's current: the status page shows whether it is) and reloads the lists
   at once; the review is logged with the reviewer's sign-in name.
+
+## The allow-list
+
+Names known to be legitimate parties that resemble a listed one (owner's decision, 2026-11-06). When the receiver or
+company entered **is** an allow-listed name, word for word as screening reads it (case, punctuation, apostrophes and
+spacing don't matter, but every word does, the legal form included: "Huamei Co., Ltd." is "HUAMEI CO LTD", not
+"Huamei Limited"; Latin and Cyrillic spellings are separate entries), each of its
+**possible matches** (Review) is still shown, with its percentage, but marked `allowed`, and doesn't raise the
+outcome. A **Match** is never allowed, the address entry never is, and a name that is itself a Match on a list
+can't be added, nor anything while a list can't be checked (503: loading, or not current). An entry allows that
+name's possible matches on every list, whichever listed party they point to.
+
+- Screening responses: `allowListVersion`; per entry `allowedBy` (`id`, `name`, `reason`); per cell `allowed`. The
+  summary says which possible matches were allowed and why. The audit line has `allow-list <version>`, the entry by
+  id (`(allow-list entry 5)`) and `allowed` on its cells, never the name.
+- Streams: `allowListVersion` in the header; per entry `allowListEntryId` (never the name: that's the input); per
+  cell `allowed`.
+- Administrators only (`/allow-list`, or the API with the `Lists.Admin` role and, for changes, the
+  `X-Requested-By: sanction-and-forgive-admin` header): `GET /api/v1/admin/allow-list` (every entry, newest first,
+  removed ones with who and when), `POST /api/v1/admin/allow-list` `{name, reason}` (1-300 and 1-500 characters; 409
+  if the name is a Match on a list; 503 if a list can't be checked now), `POST /api/v1/admin/allow-list/{id}/remove`.
+  Both answer `{id, reloaded}`: a committed change is reported as such; `reloaded` false means the next refresh, within
+  15 minutes, applies an addition (a removal stops applying at once regardless). An entry is never deleted, so the
+  history stays; the version is the number of additions plus removals.
