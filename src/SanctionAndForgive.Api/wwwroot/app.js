@@ -94,7 +94,10 @@ async function loadExamples() {
 
 async function screen(event) {
   event.preventDefault();
+  // A reference per screening, as an API caller would send its transaction id: shown with the result, and how the
+  // screening is found in the logs. Random, so it says nothing about what was entered.
   const body = {
+    reference: "web-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8),
     receiverName: $("receiverName").value.trim() || null,
     companyName: $("companyName").value.trim() || null,
     address: $("address").value.trim() || null,
@@ -153,7 +156,8 @@ function render(result) {
 
   const summary = $("summary");
   summary.className = `summary ${result.outcome}`;
-  summary.replaceChildren(el("span", { class: "badge" }, OVERALL[result.outcome] || result.outcome), el("span", {}, result.summary));
+  summary.replaceChildren(el("span", { class: "badge" }, OVERALL[result.outcome] || result.outcome), el("span", {}, result.summary,
+    el("span", { class: "reference" }, `Reference ${result.reference}`)));
 
   const table = $("result-table");
   const head = el("tr", {}, el("th", { scope: "col" }, "List"),

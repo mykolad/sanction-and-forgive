@@ -125,7 +125,13 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   database), `GET /readyz` (200 after the first load), `GET /openapi/v1.json`.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
   `X-Forwarded-For` entry the ingress appended (forward limit 1), so clients can't choose their partition.
-- **Input is never stored or logged.** No request logging; validation errors don't echo values.
+- **Input is never stored or logged.** No request logging; validation errors don't echo values. Every screening
+  needs the caller's `reference` (1-64 characters, `[A-Za-z0-9._:/-]`, echoed back), and `ScreeningService` writes one
+  **audit line** per screening: reference, outcome, matcher and list versions, and per entry kind and list the outcome,
+  percentage and best candidate's list id, never the entered text (`docs/api.md`). Logs are JSON, one object per line,
+  outside Development. The website generates a random reference per screening and shows it.
+  **The one exception to "tests check behaviour, not logs":** the audit line is the behaviour, and
+  `Screening_IsLoggedByReference_…` checks every log record for the entered text.
 - **Website** (`wwwroot`, plain JS, no build step): one form (receiver, company, a multi-line address "any format"),
   "Try an example" buttons, a summary line, the table (lists × entries; Match / Possible match / No match / Not checked
   with a symbol each, never colour alone), a detail panel per cell (listed name, alias matched, how it aligned,

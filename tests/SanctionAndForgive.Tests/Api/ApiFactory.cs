@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Testing;
 using Microsoft.Extensions.Time.Testing;
 using SanctionAndForgive.Api.Lists;
 using SanctionAndForgive.Data;
@@ -27,6 +29,9 @@ public sealed class ApiFactory(int rateLimitPerMinute) : WebApplicationFactory<P
 
     public ConnectionCounter Database { get; } = new();
 
+    /// <summary>Every log record the app writes, whatever its category: the privacy tests read them all.</summary>
+    public FakeLogCollector Logs { get; } = new();
+
     public ListCatalog Catalog => Services.GetRequiredService<ListCatalog>();
 
     /// <summary>Puts lists in memory as the loader would after a refresh. A null index means it failed to build.</summary>
@@ -44,6 +49,7 @@ public sealed class ApiFactory(int rateLimitPerMinute) : WebApplicationFactory<P
         builder.UseSetting("Lists:RefreshEnabled", "false");
         builder.UseSetting("RateLimiting:PerMinute", rateLimitPerMinute.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.UseSetting("ConnectionStrings:Lists", "Server=tcp:127.0.0.1,1;Database=none;Connect Timeout=1");
+        builder.ConfigureLogging(logging => logging.AddProvider(new FakeLoggerProvider(Logs)));
         builder.ConfigureTestServices(services =>
         {
             services.AddSingleton<TimeProvider>(Clock);

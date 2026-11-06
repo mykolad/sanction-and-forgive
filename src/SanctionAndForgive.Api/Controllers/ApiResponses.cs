@@ -6,9 +6,13 @@ namespace SanctionAndForgive.Api.Controllers;
 // Every API response is a record here, never an entity or an anonymous object: a field isn't public until it's added
 // here. Nothing the user entered is stored or logged; it only comes back in the response that answers it.
 
-public sealed record ScreeningRequestBody(string? ReceiverName, string? CompanyName, string? Address);
+/// <param name="Reference">The caller's own id for this screening (a transaction id, say): required, 1-64 characters
+/// of letters, digits and <c>. _ : / -</c>. It's echoed back and logged with the results, so a screening can be found
+/// later; never put personal data in it.</param>
+public sealed record ScreeningRequestBody(string? Reference, string? ReceiverName, string? CompanyName, string? Address);
 
 public sealed record ScreeningResponse(
+    string Reference,
     string Outcome,
     string Summary,
     string Disclaimer,

@@ -31,9 +31,12 @@ public sealed class ApiTests : IDisposable
             Feed("uk", "UK", ukStale ? Now.AddHours(-80) : Now.AddHours(-1), Subject("Volga Trade", SubjectKind.Entity)));
     }
 
+    /// <summary>Screens <paramref name="body"/>, adding a reference unless it has one.</summary>
     private async Task<JsonElement> ScreenAsync(object body)
     {
-        using var response = await client.PostAsJsonAsync("/api/v1/screenings", body);
+        var json = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(body))!.AsObject();
+        json.TryAdd("reference", "test-1");
+        using var response = await client.PostAsJsonAsync("/api/v1/screenings", json);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
@@ -44,7 +47,7 @@ public sealed class ApiTests : IDisposable
     [Fact]
     public async Task BeforeTheFirstLoad_ScreeningIs503WarmingUp_LivenessIsUp()
     {
-        using var screening = await client.PostAsJsonAsync("/api/v1/screenings", new { companyName = "Romashka" });
+        using var screening = await client.PostAsJsonAsync("/api/v1/screenings", new { reference = "test-1", companyName = "Romashka" });
         using var ready = await client.GetAsync("/readyz");
         using var health = await client.GetAsync("/healthz");
 
@@ -129,6 +132,25 @@ public sealed class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Screening_IsLoggedByReference_WithEachListsResult_AndNeverTheInput()
+    {
+        LoadStandardLists(ukStale: true);
+
+        var result = await ScreenAsync(new { reference = "TX-2026-0001", receiverName = "Шевченко Т.Г.", companyName = "ТОВ Ромашка", address = "вул. Хрещатик 1, Київ" });
+
+        Assert.Equal("TX-2026-0001", result.GetProperty("reference").GetString());
+        var records = factory.Logs.GetSnapshot();
+        var audit = Assert.Single(records, record => record.Message.Contains("TX-2026-0001", StringComparison.Ordinal));
+        Assert.Contains("Match", audit.Message, StringComparison.Ordinal);
+        Assert.Contains("eu Match", audit.Message, StringComparison.Ordinal);
+        Assert.Contains("uk NotChecked", audit.Message, StringComparison.Ordinal);
+        foreach (var entered in new[] { "Шевченко", "Ромашка", "Хрещатик", "Київ" })
+        {
+            Assert.DoesNotContain(records, record => record.Message.Contains(entered, StringComparison.Ordinal) || (record.Exception?.ToString().Contains(entered, StringComparison.Ordinal) ?? false));
+        }
+    }
+
+    [Fact]
     public async Task ManualSource_AppearsAsARow_WithNoCodeChange()
     {
         var manual = new SanctionAndForgive.Api.Lists.LoadedList("ee-mfa", "Estonia MFA national list", null, null, 7, Now.AddDays(-30), 1,
@@ -156,9 +178,13 @@ public sealed class ApiTests : IDisposable
     }
 
     [Theory]
-    [InlineData("{}")]
-    [InlineData("""{"receiverName":"  ","companyName":"","address":null}""")]
-    public async Task NothingEntered_Is400(string json)
+    [InlineData("""{"reference":"test-1"}""")]
+    [InlineData("""{"reference":"test-1","receiverName":"  ","companyName":"","address":null}""")]
+    [InlineData("""{"companyName":"Romashka"}""")]
+    [InlineData("""{"reference":"Ivan Ivanov","companyName":"Romashka"}""")]
+    [InlineData("""{"reference":"-x","companyName":"Romashka"}""")]
+    [InlineData("""{"reference":"TX-1\n","companyName":"Romashka"}""")]
+    public async Task NothingEntered_OrNoValidReference_Is400(string json)
     {
         LoadStandardLists(ukStale: false);
 
@@ -172,7 +198,7 @@ public sealed class ApiTests : IDisposable
     {
         LoadStandardLists(ukStale: false);
 
-        using var response = await client.PostAsJsonAsync("/api/v1/screenings", new { companyName = new string('a', 301) });
+        using var response = await client.PostAsJsonAsync("/api/v1/screenings", new { reference = "test-1", companyName = new string('a', 301) });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
@@ -216,7 +242,7 @@ public sealed class RateLimitTests
         var statuses = new List<HttpStatusCode>();
         for (var i = 0; i < 3; i++)
         {
-            using var response = await client.PostAsJsonAsync("/api/v1/screenings", new { companyName = "Romashka" });
+            using var response = await client.PostAsJsonAsync("/api/v1/screenings", new { reference = $"test-{i}", companyName = "Romashka" });
             statuses.Add(response.StatusCode);
         }
 

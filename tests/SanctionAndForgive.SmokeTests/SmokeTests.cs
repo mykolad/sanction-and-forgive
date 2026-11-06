@@ -50,7 +50,7 @@ public sealed class SmokeTests : IDisposable
     {
         await WaitForAsync("/readyz", body => body.GetProperty("status").GetString() == "ready");
 
-        using var response = await client.PostAsJsonAsync(new Uri("/api/v1/screenings", UriKind.Relative), new { companyName = "Zephyrine Quillbrook Smoke Test Holding" });
+        using var response = await client.PostAsJsonAsync(new Uri("/api/v1/screenings", UriKind.Relative), new { reference = "smoke-" + Guid.NewGuid().ToString("N")[..12], companyName = "Zephyrine Quillbrook Smoke Test Holding" });
         var result = await response.Content.ReadFromJsonAsync<JsonElement>();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
