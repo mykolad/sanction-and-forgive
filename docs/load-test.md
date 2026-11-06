@@ -108,6 +108,11 @@ report unchanged):
 - Jaro-Winkler is computed only for the edit distances that use it, and both edit-distance functions keep their rows
   on the stack.
 
+On Azure after the deploy (9e8173f, the same replica, the same stream of 1,000 inputs as above): 1,000 in 71 s,
+**14.0 records a second** (6.5 before), no errors, so a 200 s stream covers about 2,800 records and a 50,000-record
+batch about an hour. Concurrent single screenings weren't rerun (that needs the rate limit off again); expect
+roughly twice the 2 a second above.
+
 Left as it is: building every candidate's explanation (about a third of what remains) could wait until a candidate is
 kept, a larger change for perhaps 25% more.
 
