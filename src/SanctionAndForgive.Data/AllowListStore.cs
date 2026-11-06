@@ -42,6 +42,8 @@ public sealed class AllowListStore(ListsDbContext context, TimeProvider clock)
     {
         // Checked and inserted under one lock held to the end of the transaction, so two additions of one name, from
         // any replica, can't both find it absent.
+        var (trimmedName, trimmedReason, addedAt) = (name.Trim(), reason.Trim(), clock.GetUtcNow());
+        var attempt = 0;
         var strategy = context.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
@@ -57,12 +59,21 @@ public sealed class AllowListStore(ListsDbContext context, TimeProvider clock)
                 throw new InvalidOperationException("Another change to the allow-list held its lock for 30 seconds.");
             }
 
-            if (existing((await CurrentAsync(cancellationToken)).Entries) is { } id)
+            var inForce = (await CurrentAsync(cancellationToken)).Entries;
+
+            // A retry after a commit whose acknowledgement was lost finds its own entry: the same name, reason,
+            // administrator and time, set once before the first attempt. That's this addition, not an earlier one.
+            if (++attempt > 1 && inForce.FirstOrDefault(entry => entry.Name == trimmedName && entry.Reason == trimmedReason && entry.AddedBy == addedBy && entry.AddedAt == addedAt) is { } ours)
+            {
+                return new AllowListAddition(ours.Id, null);
+            }
+
+            if (existing(inForce) is { } id)
             {
                 return new AllowListAddition(null, id);
             }
 
-            var item = new AllowListItem { Name = name.Trim(), Reason = reason.Trim(), AddedBy = addedBy, AddedAt = clock.GetUtcNow() };
+            var item = new AllowListItem { Name = trimmedName, Reason = trimmedReason, AddedBy = addedBy, AddedAt = addedAt };
             context.AllowList.Add(item);
             await context.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
