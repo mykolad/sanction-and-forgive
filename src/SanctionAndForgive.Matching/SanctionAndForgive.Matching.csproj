@@ -1,3 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- Pure: no I/O beyond its own embedded dictionaries, no EF, no HTTP, no LLM packages (LlmBoundaryTests). -->
+  <ItemGroup>
+    <EmbeddedResource Include="Data\**\*.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SanctionAndForgive.Tests" />
+  </ItemGroup>
+
 </Project>
