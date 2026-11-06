@@ -235,6 +235,14 @@ table.entries .entry-detail .detail { margin-top: 0; }
 .state-badge.Current { background: var(--clear-bg); color: var(--clear-ink); border-color: var(--clear-edge); }
 .state-badge.Held { background: var(--review-bg); color: var(--review-ink); border-color: var(--review-edge); }
 .held { display: block; margin-top: 8px; }
+
+/* The admin page (/admin). */
+a.button { display: inline-block; text-decoration: none; font-weight: 650; border-radius: 10px; padding: 11px 22px; border: 1.5px solid transparent; }
+a.button.primary { background: var(--brand); color: var(--brand-ink); }
+.held-card { border: 1.5px solid var(--review-edge); border-left-width: 6px; border-radius: 12px; padding: 16px 20px; margin: 14px 0; background: var(--surface-2); }
+.held-card h3 { margin: 0 0 6px; }
+.held-card p { margin: 6px 0; }
+.review-status { font-weight: 650; }
 details.history { border-top: 1px solid var(--border); padding: 10px 0; }
 details.history:first-child { border-top: none; }
 details.history summary { cursor: pointer; padding: 4px 0; }

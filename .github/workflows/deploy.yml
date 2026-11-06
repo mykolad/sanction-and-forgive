@@ -139,6 +139,7 @@ jobs:
         id: app
         env:
           IMAGE_TAG: ${{ needs.build.outputs.sha }}
+          ADMIN_CLIENT_ID: ${{ vars.ADMIN_CLIENT_ID }}
         run: |
           az deployment group create -g "$RESOURCE_GROUP" -n app --parameters infra/app.bicepparam -o none
           echo "url=$(az deployment group show -g "$RESOURCE_GROUP" -n app --query properties.outputs.url.value -o tsv)" >> "$GITHUB_OUTPUT"

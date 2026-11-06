@@ -26,6 +26,9 @@ builder.Services.AddSingleton(AppInfo.From(builder.Configuration));
 builder.Services.AddSingleton<ListCatalog>();
 builder.Services.AddSingleton<ListLoader>();
 builder.Services.AddSingleton<ScreeningService>();
+// Admin: Container Apps' Entra sign-in (off unless the deployment turns it on), and reviewing held updates.
+builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.AdminAccess>();
+builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.IImportReview, SanctionAndForgive.Api.Admin.ImportReview>();
 if (builder.Configuration.GetValue("Lists:RefreshEnabled", true))
 {
     builder.Services.AddHostedService<ListRefreshService>();

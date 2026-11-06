@@ -24,6 +24,11 @@ param rateLimitPerMinute int = 120
 @description('Client IP ranges (CIDR) allowed through the ingress; empty means open. The real ones stay out of the repo.')
 param allowedCidrs array = []
 
+@description('Client id of the admin sign-in app registration (infra/admin-sign-in.ps1). Empty: sign-in stays off.')
+param adminClientId string = ''
+
+var signInEnabled = !empty(adminClientId)
+
 var name = 'sanction-and-forgive'
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' existing = {
@@ -100,6 +105,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'RateLimiting__PerMinute'
               value: string(rateLimitPerMinute)
+            }
+            {
+              // The app trusts the platform's principal header only when this template also turns sign-in on.
+              name: 'Admin__SignInEnabled'
+              value: string(signInEnabled)
             }
           ])
           probes: [
@@ -185,6 +195,35 @@ resource importJob 'Microsoft.App/jobs@2024-03-01' = {
           env: sharedEnv
         }
       ]
+    }
+  }
+}
+
+// Built-in Microsoft Entra ID sign-in, for the admin pages only: unauthenticated requests pass (screening never needs
+// sign-in) and the app decides from the principal header. No client secret: the ID token carries the app roles.
+resource auth 'Microsoft.App/containerApps/authConfigs@2024-03-01' = if (signInEnabled) {
+  parent: app
+  name: 'current'
+  properties: {
+    platform: {
+      enabled: true
+    }
+    globalValidation: {
+      unauthenticatedClientAction: 'AllowAnonymous'
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: adminClientId
+          openIdIssuer: '${az.environment().authentication.loginEndpoint}${tenant().tenantId}/v2.0'
+        }
+        validation: {
+          allowedAudiences: [
+            adminClientId
+          ]
+        }
+      }
     }
   }
 }
