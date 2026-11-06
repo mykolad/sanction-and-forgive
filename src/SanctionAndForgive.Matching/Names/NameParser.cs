@@ -27,6 +27,10 @@ internal sealed class NameParser(MatcherData data)
         Legal,
         AmbiguousLegal,
         Generic,
+
+        /// <summary>One edit from a long generic word (a typo of it, probably): generic, unless it's the last
+        /// distinctive word ("Experts" is also one edit from "exports").</summary>
+        NearGeneric,
         Stop,
         Honorific,
     }
@@ -37,6 +41,10 @@ internal sealed class NameParser(MatcherData data)
             .Select(raw => (raw.Token, Class: Classify(raw.Token, out var legalClass, out var generic), LegalClass: legalClass, Generic: generic))
             .Where(item => item.Class != Kind.Stop)
             .ToList();
+
+        // A probable typo of a generic word counts as generic only while a distinctive word remains.
+        var hasCore = classified.Any(item => item.Class is Kind.Core or Kind.Honorific or Kind.AmbiguousLegal);
+        classified = [.. classified.Select(item => item.Class == Kind.NearGeneric ? item with { Class = hasCore ? Kind.Generic : Kind.Core } : item)];
 
         // Honorifics are dropped only from people's names; in a company name "Dr" is just a word.
 
@@ -144,7 +152,7 @@ internal sealed class NameParser(MatcherData data)
         if (token.Forms.Select(data.NearGeneric).FirstOrDefault(found => found is not null) is { } near)
         {
             generic = near;
-            return Kind.Generic;
+            return Kind.NearGeneric;
         }
 
         if (Keys(token).Any(data.StopWords.Contains))

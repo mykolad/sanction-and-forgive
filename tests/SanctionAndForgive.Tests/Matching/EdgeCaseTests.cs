@@ -149,4 +149,13 @@ public class EdgeCaseTests
 
         AssertBand(cell, Outcome.Match);
     }
+
+    [Fact]
+    public void NearGenericWord_StaysDistinctive_WhenNothingElseIs()
+    {
+        var subject = Subject("Expert Partners", SubjectKind.Entity, null);
+        var cell = Screener.Screen(new ScreeningRequest(null, "Experts Partners", null), [List("eu", subject)]).Entries[0].Cells.Single();
+
+        AssertBand(cell, Outcome.Review);
+    }
 }

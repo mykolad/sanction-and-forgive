@@ -34,7 +34,12 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
             var subjects = await context.Subjects.AsNoTracking().Where(subject => subject.ImportId == source.ActiveImportId)
                 .Include(subject => subject.Names).Include(subject => subject.Addresses).AsSplitQuery().OrderBy(subject => subject.Id)
                 .ToListAsync(cancellationToken);
-            var listed = subjects.Select(SubjectMapper.ToListed).ToList();
+            // Canonical order (by external id, names by spelling): the sample depends on the lists' content, not on
+            // the order rows happen to have in this database.
+            var listed = subjects.Select(SubjectMapper.ToListed)
+                .Select(subject => subject with { Names = [.. subject.Names.OrderBy(name => name.FullName, StringComparer.Ordinal)] })
+                .OrderBy(subject => subject.ExternalId, StringComparer.Ordinal)
+                .ToList();
             lists.Add((source, listed, ListIndex.Build(listed)));
             output.WriteLine($"{source.Code}: {listed.Count} subjects indexed");
         }
@@ -161,8 +166,11 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
                     return null;
                 }
 
-                // The name without its legal words, with a legal form it didn't have.
-                var core = words.Where(w => !LegalWords.Contains(w.Trim('.', ',').ToLowerInvariant())).ToArray();
+                // The name without its legal form (whole phrases first: "Public Joint Stock Company", then single
+                // words), with a legal form it didn't have.
+                var withoutPhrases = LegalPhrases.Aggregate(name, (current, phrase) =>
+                    System.Text.RegularExpressions.Regex.Replace(current, $@"\b{phrase}\b", " ", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+                var core = Words(withoutPhrases).Where(w => !LegalWords.Contains(w.Trim('.', ',').ToLowerInvariant())).ToArray();
                 if (core.Length == 0)
                 {
                     return null;
@@ -196,6 +204,14 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
                 return null;
         }
     }
+
+    /// <summary>Multi-word legal forms as lists write them, longest first, removed as a whole.</summary>
+    private static readonly string[] LegalPhrases =
+    [
+        "public joint[- ]stock company", "open joint[- ]stock company", "closed joint[- ]stock company", "private joint[- ]stock company",
+        "joint[- ]stock company", "limited liability company", "limited liability partnership", "public limited company",
+        "private limited company", "limited partnership",
+    ];
 
     private static readonly string[] ReplacementForms = ["LLC", "Ltd", "JSC", "GmbH"];
 

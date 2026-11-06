@@ -9,13 +9,13 @@ including the three whose terms wait for a decision).
 
 | Measure | Result | Spec target |
 |---|---|---|
-| Perturbed names recalled at Review or above | **97.4%** of 4,988 | at least 95% |
-| Cyrillic aliases found in Latin-only lists | **79.7%** of 1,068 | reported |
-| Made-up names reaching Review | 6.7% (people), 7.7% (companies) | |
+| Perturbed names recalled at Review or above | **97.9%** of 4,969 | at least 95% |
+| Cyrillic aliases found in Latin-only lists | **77.0%** of 1,068 | reported |
+| Made-up names reaching Review | 6.4% (people), 7.7% (companies) | |
 | Made-up names reaching Match | **0%** | |
 
-By perturbation: other romanisation 100%, diacritics dropped 100%, words swapped 99.0%, legal form changed 98.1%,
-typo 95.5%, surname and initials 95.2%. A trial counts only when it really changes the name. Surname and initials are
+By perturbation: legal form changed 100%, diacritics dropped 100%, other romanisation 99.6%, words swapped 99.4%,
+surname and initials 95.6%, typo 95.6%. A trial counts only when it really changes the name (a legal phrase like "Public Joint Stock Company" is replaced whole), and the sample is drawn in a canonical order, so it depends on the lists' content, not the database's row order. Surname and initials are
 tried only where the surname is certain (one word in capitals, as OFAC, the EU and the UK write surnames). With a
 common surname, many listed people score 60-70% and a cell shows the top 5, so the right person is sometimes sixth or
 lower. That's the rule working as designed (section 5.6), and why lowering those percentages for very common
@@ -34,7 +34,8 @@ Fixed because the evaluation found them (golden tests unchanged, all passing, re
   own Latin form, and initials are assigned to given names one-to-one at best (a greedy pass could let `K` take
   `Khasan` and leave `H` with nothing, reading it as a contradiction).
 - **Typos in long generic words:** `Shippig`, `Partnes` and `Sceintific` became distinctive words. A token one edit
-  from a generic word of 7+ letters (same first letter) is now that generic word.
+  from a generic word of 7+ letters (same first letter) is now that generic word, unless it's the last distinctive word
+  ("Experts" is also one edit from "exports").
 - **`liability` is a legal word,** so a mangled "Limited Liability Company" doesn't make it distinctive.
 - **Packed aliases:** Canada separates aliases with semicolons as well as commas (221 records), and the UK joins two
   Cyrillic spellings with ` / `. Both are now split into separate names.
@@ -45,18 +46,18 @@ Each query's best candidate, by its percentage band, and how often it was the ri
 
 | Percent | Best candidates | Right |
 |---|---|---|
-| 0-19 | 80 | 7.5% |
-| 20-49 | 812 | 21.1% |
+| 0-19 | 76 | 15.8% |
+| 20-49 | 819 | 20.6% |
 | 50-59 | 7 | 57.1% |
-| 60-69 | 118 | 71.2% |
-| 70-79 | 1,679 | 95.0% |
+| 60-69 | 118 | 73.7% |
+| 70-79 | 1,613 | 94.3% |
 | 80-89 | 8 | 100.0% |
-| 90-94 | 459 | 98.5% |
-| 95-99 | 3,493 | 98.1% |
+| 90-94 | 464 | 99.4% |
+| 95-99 | 3,532 | 98.2% |
 
 - **Match (90-99) is trustworthy**: right about 98% of the time.
-- **60-69 is about right**: 71%.
-- **70-79 is understated** on this set: right 95% of the time. Those are mostly the fixed 70% for contained names and
+- **60-69 is about right**: 74%.
+- **70-79 is understated** on this set: right 94% of the time. Those are mostly the fixed 70% for contained names and
   two initials, and the 75% caps.
 - But the set is about 90% positives, because it's built from list names. Real screening is the other way round:
   most shipments involve no listed party. With a realistic share of unlisted inputs, the same 70% results would be
