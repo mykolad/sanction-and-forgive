@@ -265,12 +265,14 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                     source.ActiveImportId = previousActive;
                     source.LastCheckedAt = previousChecked;
                     context.Entry(source).State = EntityState.Unchanged;
+
+                    // Failed first (it may already be held), then its records: an interrupted delete leaves a failed
+                    // import for the next cleanup, never a confirmable hold with part of its records.
+                    await context.Imports.Where(i => i.Id == import.Id).ExecuteUpdateAsync(
+                        set => set.SetProperty(i => i.Status, ImportStatus.Failed).SetProperty(i => i.CompletedAt, clock.GetUtcNow()).SetProperty(i => i.Message, exception.GetType().Name), CancellationToken.None);
                     await DeleteImportDataAsync(import.Id, CancellationToken.None);
-                    import.HasData = false;
-                    import.Status = ImportStatus.Failed;
-                    import.CompletedAt = clock.GetUtcNow();
-                    import.Message = exception.GetType().Name;
-                    await context.SaveChangesAsync(CancellationToken.None);
+                    await context.Imports.Where(i => i.Id == import.Id).ExecuteUpdateAsync(set => set.SetProperty(i => i.HasData, false), CancellationToken.None);
+                    context.Entry(import).State = EntityState.Detached;
                     throw;
                 }
 
@@ -280,6 +282,8 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
 
             if (drop is not null)
             {
+                // An older hold this one superseded gives up its records now: repeated short downloads can't pile up.
+                await DeleteOldImportsAsync(source, cancellationToken);
                 return new ImportOutcome(ImportResult.HeldForReview, records.Count, active?.RecordCount, $"{drop} (import {import.Id}); the active list is kept", import.Id);
             }
 
