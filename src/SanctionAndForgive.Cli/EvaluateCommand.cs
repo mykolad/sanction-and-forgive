@@ -170,13 +170,14 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
     private static string OtherRomanisation(string name)
     {
         var builder = new StringBuilder(name);
-        (string From, string To)[] swaps = [("iy", "yi"), ("yy", "yi"), ("kh", "h"), ("Kh", "H"), ("yu", "iu"), ("Yu", "Iu"), ("ya", "ia"), ("Ya", "Ia"), ("ye", "ie"), ("Ye", "E"), ("ff", "v"), ("ts", "tz"), ("ii", "iy")];
+        (string From, string To)[] swaps = [("iy", "yi"), ("yy", "yi"), ("kh", "h"), ("Kh", "H"), ("yu", "iu"), ("Yu", "Iu"), ("ya", "ia"), ("Ya", "Ia"), ("ye", "ie"), ("Ye", "E"), ("ts", "tz"), ("ii", "iy")];
         foreach (var (from, to) in swaps)
         {
             builder.Replace(from, to);
         }
 
-        return builder.ToString();
+        // The old -ff ending (Ivanoff) only at the end of a word: "Officer" isn't a romanisation.
+        return System.Text.RegularExpressions.Regex.Replace(builder.ToString(), @"ov\b", "off");
     }
 
     private static IEnumerable<(string Query, string Kind)> MadeUpNames(Random random)
@@ -294,7 +295,7 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
         md.AppendLine();
         md.AppendLine("| Perturbation | Query | Listed name | Its % |");
         md.AppendLine("|---|---|---|---|");
-        foreach (var miss in positives.Concat(cyrillic).Where(trial => !Recalled(trial)).Take(20))
+        foreach (var miss in positives.Where(trial => !Recalled(trial)).Take(15).Concat(cyrillic.Where(trial => !Recalled(trial)).Take(15)))
         {
             md.AppendLine(CultureInfo.InvariantCulture, $"| {miss.Kind} | {miss.Query} | {miss.Expected} | {miss.FoundPercent?.ToString(CultureInfo.InvariantCulture) ?? "not found"} |");
         }
