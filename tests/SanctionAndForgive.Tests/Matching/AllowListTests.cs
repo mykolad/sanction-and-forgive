@@ -80,6 +80,18 @@ public class AllowListTests
     }
 
     [Fact]
+    public void Without_DropsOneEntry_AndSaysSoInItsVersion()
+    {
+        var list = Allow("AB Corp", "Northwind Freight");
+
+        var without = list.Without(1);
+
+        Assert.Equal((1, "v7-1"), (without.Count, without.Version));
+        Assert.Null(without.Find("AB Corp"));
+        Assert.NotNull(without.Find("Northwind Freight"));
+    }
+
+    [Fact]
     public void OfTwoEntriesForOneName_TheOlderOneIsKept_WhateverTheOrder()
     {
         var list = AllowList.Build([new AllowListEntry(9, "AB Corp", "second"), new AllowListEntry(3, "ab corp.", "first")], "v2");

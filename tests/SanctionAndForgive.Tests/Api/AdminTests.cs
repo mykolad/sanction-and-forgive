@@ -169,6 +169,7 @@ public sealed class AdminTests : IDisposable
     [InlineData("", "A reason", HttpStatusCode.BadRequest)]
     [InlineData("Huamei Trading", "  ", HttpStatusCode.BadRequest)]
     [InlineData("Listed Party LLC", "A reason", HttpStatusCode.Conflict)]
+    [InlineData("While Loading", "A reason", HttpStatusCode.ServiceUnavailable)]
     public async Task AddingAnEntry_NeedsANameAndAReason_AndNeverAListedParty(string name, string reason, HttpStatusCode expected)
     {
         using var client = Client(signInEnabled: true);
@@ -210,22 +211,27 @@ public sealed class AdminTests : IDisposable
         {
             if (name == "Listed Party LLC")
             {
-                return Task.FromResult(new AllowListAddResult(null, "EU: Listed Party LLC"));
+                return Task.FromResult(new AllowListAddResult(null, "EU: Listed Party LLC", Unavailable: false, Reloaded: false));
+            }
+
+            if (name == "While Loading")
+            {
+                return Task.FromResult(new AllowListAddResult(null, null, Unavailable: true, Reloaded: false));
             }
 
             Added.Add((name, reason, addedBy));
-            return Task.FromResult(new AllowListAddResult(Added.Count, null));
+            return Task.FromResult(new AllowListAddResult(Added.Count, null, Unavailable: false, Reloaded: true));
         }
 
-        public Task<bool> RemoveAsync(int id, string removedBy, CancellationToken cancellationToken)
+        public Task<AllowListRemoveResult> RemoveAsync(int id, string removedBy, CancellationToken cancellationToken)
         {
             if (id != 1)
             {
-                return Task.FromResult(false);
+                return Task.FromResult(new AllowListRemoveResult(Removed: false, Reloaded: false));
             }
 
             Removed.Add((id, removedBy));
-            return Task.FromResult(true);
+            return Task.FromResult(new AllowListRemoveResult(Removed: true, Reloaded: true));
         }
     }
 

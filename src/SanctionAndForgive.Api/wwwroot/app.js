@@ -205,7 +205,8 @@ function showDetail(button, cell, entry, list) {
   button.setAttribute("aria-pressed", "true");
   const candidate = cell.bestCandidate;
   const detail = $("detail");
-  detail.replaceChildren(
+  // replaceChildren would show a null as the text "null": only the parts there are.
+  detail.replaceChildren(...[
     el("h3", {}, candidate.listedName),
     el("p", { class: "meta" }, `${list.name} · ${KIND[entry.kind]} “${entry.input}” · ${percentText(candidate.percent)} match likelihood (${LABELS[candidate.outcome]})`),
     cell.allowed && entry.allowedBy ? el("p", { class: "allowed-note" }, el("strong", {}, "Allowed by the allow-list: "),
@@ -222,7 +223,8 @@ function showDetail(button, cell, entry, list) {
     el("ul", {}, candidate.alignment.map((line) => el("li", {}, line))),
     cell.otherHits.length ? el("div", { class: "others" },
       el("p", {}, el("strong", {}, `Other possible matches on ${list.name}`)),
-      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, `${hit.listedName} — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null);
+      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, `${hit.listedName} — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null,
+  ].filter(Boolean));
   detail.hidden = false;
 }
 

@@ -101,11 +101,12 @@ $("add-form").addEventListener("submit", async (event) => {
   try {
     const response = await fetch("/api/v1/admin/allow-list", { method: "POST", headers: HEADERS, body: JSON.stringify({ name, reason }) });
     if (response.ok) {
-      status.textContent = "Added: it applies to the next screening.";
+      const body = await response.json();
+      status.textContent = body.reloaded ? "Added: it applies to the next screening." : "Added: it applies within 15 minutes, at the next refresh.";
       $("name").value = "";
       $("reason").value = "";
       load();
-    } else if (response.status === 409) {
+    } else if (response.status === 409 || response.status === 503) {
       status.textContent = (await response.json()).message;
     } else {
       status.textContent = response.status === 400 ? "Check the name and the reason (at most 300 and 500 characters)." : "That didn't work. Try again in a moment.";

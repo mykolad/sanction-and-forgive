@@ -71,13 +71,18 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
         }
 
         var result = await allowList.AddAsync(body.Name!.Trim(), body.Reason!.Trim(), user!.Name, cancellationToken);
+        if (result.Unavailable)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new AllowListRefusal("A list can't be checked right now (loading, or not current), so the name can't be checked against it. Try again later."));
+        }
+
         if (result.Id is not { } id)
         {
             return Conflict(new AllowListRefusal($"This name is a match on {result.ListedAs}: a listed party can't be allow-listed."));
         }
 
         AllowListChanged(logger, id, "added", user.Name);
-        return Ok(new AllowListAddResponse(id));
+        return Ok(new AllowListChangeResponse(id, result.Reloaded));
     }
 
     /// <summary>Removes an entry (it stays in the history).</summary>
@@ -89,13 +94,14 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
             return refusal;
         }
 
-        if (!await allowList.RemoveAsync(id, user!.Name, cancellationToken))
+        var result = await allowList.RemoveAsync(id, user!.Name, cancellationToken);
+        if (!result.Removed)
         {
             return NotFound();
         }
 
         AllowListChanged(logger, id, "removed", user.Name);
-        return Ok(new AllowListAddResponse(id));
+        return Ok(new AllowListChangeResponse(id, result.Reloaded));
     }
 
     private async Task<IActionResult> ReviewAsync(int importId, bool confirm, CancellationToken cancellationToken)
@@ -164,7 +170,9 @@ public sealed record ReviewResponse(int ImportId, string Result, bool Reloaded);
 
 public sealed record AllowListAddRequest(string? Name, string? Reason);
 
-public sealed record AllowListAddResponse(int Id);
+/// <param name="Reloaded">Whether the allow-list in use was reloaded at once; if not, the change is stored and the next
+/// refresh (within 15 minutes) applies it (a removal applies at once regardless).</param>
+public sealed record AllowListChangeResponse(int Id, bool Reloaded);
 
 public sealed record AllowListRefusal(string Message);
 

@@ -11,7 +11,7 @@ namespace SanctionAndForgive.Api.Lists;
 /// against its import's record count, so a concurrent cleanup can never make half a list searchable; a list that
 /// fails either stays Not checked. If the database is unreachable the catalog keeps serving what it has, and lists
 /// age out.</summary>
-public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, TimeProvider clock, ILogger<ListLoader> logger) : IDisposable
+public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, TimeProvider clock, ILogger<ListLoader> logger) : IDisposable
 {
     /// <summary>How many of each source's latest imports the status page shows.</summary>
     public const int HistoryLength = 10;
@@ -22,12 +22,37 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
 
     public void Dispose() => gate.Dispose();
 
-    /// <summary>Reloads the allow-list only (after an administrator's edit): a small read, no list is rebuilt.</summary>
-    public async Task RefreshAllowListAsync(CancellationToken cancellationToken)
+    /// <summary>Reloads the allow-list only (after an administrator's edit): a small read, no list is rebuilt. Under the
+    /// same gate as a refresh, so an older read can never publish over a newer one. With <paramref name="withoutId"/>
+    /// (a removal), that entry stops applying first, so a reload that fails leaves the list stricter, never looser.
+    /// False if the reload failed (the next refresh retries).</summary>
+    public async Task<bool> ReloadAllowListAsync(int? withoutId, CancellationToken cancellationToken)
     {
-        await using var scope = scopes.CreateAsyncScope();
-        await LoadAllowListAsync(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), cancellationToken);
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (withoutId is { } id)
+            {
+                catalog.ReplaceAllowList(catalog.AllowList.Without(id));
+            }
+
+            await using var scope = scopes.CreateAsyncScope();
+            await LoadAllowListAsync(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), cancellationToken);
+            return true;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            AllowListReloadFailed(logger, exception);
+            return false;
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Reloading the allow-list after an edit failed; the next refresh retries")]
+    private static partial void AllowListReloadFailed(ILogger logger, Exception exception);
 
     private async Task LoadAllowListAsync(ListsDbContext context, CancellationToken cancellationToken)
     {

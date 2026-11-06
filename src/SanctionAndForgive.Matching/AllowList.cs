@@ -8,8 +8,9 @@ public sealed record AllowListEntry(int Id, string Name, string Reason);
 
 /// <summary>Names whose possible matches (Review) are shown as allowed and don't raise the outcome (owner's decision,
 /// 2026-11-06). Only possible matches: a Match is never suppressed, and only when the entered receiver or company is
-/// the allow-listed name itself, compared the way screening reads names (case, punctuation, apostrophes and
-/// legal-form phrases don't matter; Cyrillic and Latin spellings are separate entries). Immutable, with a version
+/// the allow-listed name itself, word for word as screening reads it: case, punctuation, apostrophes and spacing don't
+/// matter, but every word does, the legal form included ("Huamei Co., Ltd." is "HUAMEI CO LTD", not "Huamei Limited");
+/// Cyrillic and Latin spellings are separate entries. Immutable, with a version
 /// that every result carries, so the same input, lists and allow-list always give the same answer.</summary>
 public sealed class AllowList
 {
@@ -45,6 +46,11 @@ public sealed class AllowList
 
         return new AllowList(byKey, version);
     }
+
+    /// <summary>This list without entry <paramref name="id"/>: a removal applies at once, before the stored list is
+    /// read again. Its version says so ("12-5": version 12 without entry 5).</summary>
+    public AllowList Without(int id) =>
+        new(byKey.Where(pair => pair.Value.Id != id).ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal), $"{Version}-{id}");
 
     /// <summary>The entry for exactly this name, if there is one.</summary>
     public AllowListEntry? Find(string name) =>

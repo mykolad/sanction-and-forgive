@@ -76,6 +76,21 @@ public sealed class AllowListApiTests : IDisposable
     }
 
     [Fact]
+    public async Task WhileAListCantBeChecked_NothingIsAdded()
+    {
+        factory.Load(
+            Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity)),
+            Feed("uk", "UK", Now.AddHours(-80), Subject("Volga Trade", SubjectKind.Entity)));
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var result = await admin.AddAsync("Volga Trade", "test", "owner@example.invalid", CancellationToken.None);
+
+        Assert.True(result.Unavailable);
+        Assert.Null(result.Id);
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
     public async Task AListedPartysOwnName_CantBeAllowListed_AndNothingIsWritten()
     {
         var admin = factory.Services.GetRequiredService<IAllowListAdmin>();

@@ -145,7 +145,8 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   allow-listed name (same tokens as screening reads them) has its **Review** cells marked `Allowed`, which don't raise
   the outcome; a Match never is. `Screener.Screen(request, lists, allowList)`; every result carries
   `AllowListVersion` (additions + removals). Entries are removed, never deleted. Adding a name that is a Match on a
-  list is refused. Loaded with the lists (`ListCatalog.AllowList`) and reloaded at once after an edit. Admin only.
+  list is refused, and so is any addition while a list can't be checked. Loaded with the lists (`ListCatalog.AllowList`);
+  an edit reloads it under the refresh gate (a removal drops the entry from memory first: never looser). Admin only.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
   `X-Forwarded-For` entry the ingress appended (forward limit 1), so clients can't choose their partition.
 - **Input is never stored or logged.** No request logging; validation errors don't echo values. Every screening
