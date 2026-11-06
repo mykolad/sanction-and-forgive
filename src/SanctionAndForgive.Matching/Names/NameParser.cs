@@ -18,6 +18,9 @@ internal sealed record NameForm(Token[] Core, string[] Generic, string[] LegalCl
 /// legal form: <c>Шевченко А.О.</c> keeps <c>А.О.</c>).</summary>
 internal sealed class NameParser(MatcherData data)
 {
+    /// <summary>The legal class (legal-forms.json) of sole traders, the only legal form dropped from a person's name.</summary>
+    private const string SoleTraderClass = "SOLE";
+
     private enum Kind
     {
         Core,
@@ -96,8 +99,10 @@ internal sealed class NameParser(MatcherData data)
                 continue;
             }
 
-            var kind = Classify(raw.Token, out _, out _);
-            if (kind is Kind.Stop or Kind.Honorific or Kind.Legal)
+            // Only a sole-trader marker (ФОП, СПД, ИП spelled out) is dropped from a person's name: other legal-form
+            // spellings can be real names ("Pat" is also ПАТ read in Latin).
+            var kind = Classify(raw.Token, out var legalClass, out _);
+            if (kind is Kind.Stop or Kind.Honorific || (kind is Kind.Legal or Kind.AmbiguousLegal && legalClass == SoleTraderClass))
             {
                 continue;
             }

@@ -3,7 +3,7 @@
   "forms": {
     "INC": { "unambiguous": ["inc", "incorporated"] },
     "CORP": { "unambiguous": ["corp", "corporation"] },
-    "LLC": { "unambiguous": ["llc", "ooo", "ооо", "tov", "тов", "too", "тоо"] },
+    "LLC": { "unambiguous": ["llc", "ooo", "ооо", "tov", "тов", "тоо"], "ambiguous": ["too"] },
     "LTD": { "unambiguous": ["ltd", "limited"] },
     "LLP": { "unambiguous": ["llp"] },
     "LP": { "ambiguous": ["lp"] },
@@ -19,8 +19,8 @@
     "APS": { "unambiguous": ["aps"] },
     "KG": { "ambiguous": ["kg"] },
     "JSC": {
-      "unambiguous": ["jsc", "ojsc", "cjsc", "pjsc", "oao", "zao", "pao", "оао", "зао", "пао", "нао", "пат", "прат", "ват", "зат", "pat", "prat", "vat", "zat"],
-      "ambiguous": ["ао", "ат", "ao", "at"]
+      "unambiguous": ["jsc", "ojsc", "cjsc", "pjsc", "oao", "zao", "pao", "оао", "зао", "пао", "нао", "пат", "прат", "ват", "зат"],
+      "ambiguous": ["ао", "ат", "ao", "at", "pat", "prat", "vat", "zat"]
     },
     "SOLE": { "unambiguous": ["фоп", "fop", "спд", "spd", "чп", "пбоюл"], "ambiguous": ["ип", "ip", "пп", "pp"] },
     "STATE": { "unambiguous": ["гуп", "фгуп", "муп", "дп", "кп"], "ambiguous": ["dp"] },

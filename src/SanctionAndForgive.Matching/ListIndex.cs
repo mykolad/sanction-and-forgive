@@ -5,9 +5,10 @@ using SanctionAndForgive.Matching.Text;
 namespace SanctionAndForgive.Matching;
 
 /// <summary>One list's in-memory index (section 5.5): every alias in its entity and/or person reading, the token
-/// weights (inverse document frequency with a floor), and the lookups that find candidates: exact fold keys, a
-/// trigram index over the vocabulary for typos, spelling pairs and cognates. Immutable: a changed list gets a new
-/// index, swapped in whole. Tokens are interned, so a common name part is one object.</summary>
+/// weights (inverse document frequency with a floor), and the lookups that find candidates: exact fold keys, spelling
+/// pairs and cognates, and a <see cref="FuzzyVocabulary"/> for keys within the edit rules. Address words have their
+/// own postings and vocabulary, for address-only screening. Immutable: a changed list gets a new index, swapped in
+/// whole. Tokens are interned, so a common name part is one object.</summary>
 public sealed class ListIndex
 {
     private readonly MatcherData data;
@@ -16,8 +17,9 @@ public sealed class ListIndex
     private readonly AddressForm[][] addresses;
     private readonly Dictionary<string, int> documentFrequency;
     private readonly Dictionary<string, int[]> aliasesByFold;
-    private readonly Dictionary<string, string[]> foldsByTrigram;
+    private readonly FuzzyVocabulary nameVocabulary;
     private readonly Dictionary<string, int[]> subjectsByAddressKey;
+    private readonly FuzzyVocabulary addressVocabulary;
 
     private ListIndex(
         MatcherData data,
@@ -26,7 +28,6 @@ public sealed class ListIndex
         AddressForm[][] addresses,
         Dictionary<string, int> documentFrequency,
         Dictionary<string, int[]> aliasesByFold,
-        Dictionary<string, string[]> foldsByTrigram,
         Dictionary<string, int[]> subjectsByAddressKey)
     {
         this.data = data;
@@ -35,8 +36,9 @@ public sealed class ListIndex
         this.addresses = addresses;
         this.documentFrequency = documentFrequency;
         this.aliasesByFold = aliasesByFold;
-        this.foldsByTrigram = foldsByTrigram;
         this.subjectsByAddressKey = subjectsByAddressKey;
+        nameVocabulary = new FuzzyVocabulary(aliasesByFold.Keys);
+        addressVocabulary = new FuzzyVocabulary(subjectsByAddressKey.Keys.Where(key => !key.StartsWith('#')));
     }
 
     public IReadOnlyList<ListedSubject> Subjects => subjects;
@@ -83,36 +85,17 @@ public sealed class ListIndex
                 documentFrequency[token.Key] = documentFrequency.GetValueOrDefault(token.Key) + 1;
                 foreach (var key in LookupKeys(token))
                 {
-                    if (!aliasesByFold.TryGetValue(key, out var list))
-                    {
-                        aliasesByFold[key] = list = [];
-                    }
-
-                    if (list.Count == 0 || list[^1] != a)
-                    {
-                        list.Add(a);
-                    }
+                    Post(aliasesByFold, key, a);
                 }
             }
         }
 
-        var foldsByTrigram = aliasesByFold.Keys
-            .Where(fold => fold.Length >= 4)
-            .SelectMany(fold => Trigrams(fold).Distinct().Select(trigram => (trigram, fold)))
-            .GroupBy(pair => pair.trigram, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Select(pair => pair.fold).ToArray(), StringComparer.Ordinal);
-
         var subjectsByAddressKey = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         for (var s = 0; s < subjects.Length; s++)
         {
-            foreach (var key in addresses[s].SelectMany(AddressKeys).Distinct())
+            foreach (var key in addresses[s].SelectMany(AddressKeys))
             {
-                if (!subjectsByAddressKey.TryGetValue(key, out var list))
-                {
-                    subjectsByAddressKey[key] = list = [];
-                }
-
-                list.Add(s);
+                Post(subjectsByAddressKey, key, s);
             }
         }
 
@@ -123,7 +106,6 @@ public sealed class ListIndex
             addresses,
             documentFrequency,
             aliasesByFold.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.Ordinal),
-            foldsByTrigram,
             subjectsByAddressKey.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.Ordinal));
     }
 
@@ -168,12 +150,14 @@ public sealed class ListIndex
     }
 
     /// <summary>Address-only screening: listed subjects whose address shares at least 3 parts (a number and a word)
-    /// with the entered one, found through the address words and places.</summary>
+    /// with the entered one, found through the address words (exactly or within the edit rules) and places.</summary>
     internal List<SubjectMatch> SearchAddress(AddressForm entered, MatchingOptions options)
     {
         var comparer = new AddressComparer(new TokenComparer(data), data);
+        var keys = AddressKeys(entered).ToList();
+        keys.AddRange(entered.Words.SelectMany(word => word.Folds).SelectMany(addressVocabulary.Near));
         var votes = new Dictionary<int, int>();
-        foreach (var key in AddressKeys(entered).Distinct())
+        foreach (var key in keys.Distinct())
         {
             foreach (var subject in subjectsByAddressKey.GetValueOrDefault(key) ?? [])
             {
@@ -199,7 +183,7 @@ public sealed class ListIndex
         Math.Max(options.MinTokenWeight, Math.Log((double)Math.Max(aliases.Length, 1) / Math.Max(documentFrequency.GetValueOrDefault(token.Key), 1)));
 
     /// <summary>Aliases sharing a fold key with an entry token, a spelling variant or cognate of one, or a fold key
-    /// one or two edits away (found through shared trigrams, then checked). Most votes first, up to the limit.</summary>
+    /// within the edit rules (<see cref="FuzzyVocabulary"/>). Most votes first, up to the limit.</summary>
     private IEnumerable<int> Candidates(PreparedName query, MatchingOptions options)
     {
         var comparer = new TokenComparer(data);
@@ -232,20 +216,26 @@ public sealed class ListIndex
                 Vote(FoldKey.Of(spelling), 2);
             }
 
-            foreach (var fold in token.Folds.Where(fold => fold.Length >= 4))
+            foreach (var other in token.Folds.SelectMany(nameVocabulary.Near).Distinct())
             {
-                var near = Trigrams(fold).Distinct()
-                    .SelectMany(trigram => foldsByTrigram.GetValueOrDefault(trigram) ?? [])
-                    .Distinct()
-                    .Where(other => other != fold && EditDistance.DamerauLevenshtein(fold, other, 3) <= 2);
-                foreach (var other in near)
-                {
-                    Vote(other, 1);
-                }
+                Vote(other, 1);
             }
         }
 
         return votes.OrderByDescending(vote => vote.Value).Take(options.CandidateLimit).Select(vote => vote.Key);
+    }
+
+    private static void Post(Dictionary<string, List<int>> postings, string key, int id)
+    {
+        if (!postings.TryGetValue(key, out var list))
+        {
+            postings[key] = list = [];
+        }
+
+        if (list.Count == 0 || list[^1] != id)
+        {
+            list.Add(id);
+        }
     }
 
     private static void AddAlias(List<AliasEntry> aliases, AliasEntry alias)
@@ -259,16 +249,9 @@ public sealed class ListIndex
     /// <summary>A token's keys in the fold lookup: its fold keys, or its text if it has no Latin reading.</summary>
     private static IEnumerable<string> LookupKeys(Token token) => token.Folds.Length > 0 ? token.Folds : [token.Text];
 
+    /// <summary>Every word the address parser keeps (two letters and up) and every place.</summary>
     private static IEnumerable<string> AddressKeys(AddressForm address) =>
-        address.Words.Where(word => word.Length >= 3).SelectMany(LookupKeys).Concat(address.Places.Select(place => $"#place:{place}"));
-
-    private static IEnumerable<string> Trigrams(string value)
-    {
-        for (var i = 0; i + 3 <= value.Length; i++)
-        {
-            yield return value.Substring(i, 3);
-        }
-    }
+        address.Words.SelectMany(LookupKeys).Concat(address.Places.Select(place => $"#place:{place}"));
 
     private sealed record AliasEntry(int Subject, string Name, bool IsWeak, NameForm Form);
 }

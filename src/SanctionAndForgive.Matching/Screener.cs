@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using SanctionAndForgive.Matching.Addresses;
@@ -109,10 +110,11 @@ public sealed class Screener
 
     private static OverallOutcome Overall(List<Entry> entries)
     {
+        // No cell at all (no lists) means nothing was searched: Incomplete, never NoMatch.
         var cells = entries.SelectMany(entry => entry.Cells).ToList();
         return cells.Any(cell => cell.Outcome == Outcome.Match) ? OverallOutcome.Match
             : cells.Any(cell => cell.Outcome == Outcome.Review) ? OverallOutcome.Review
-            : cells.Any(cell => !cell.Checked) ? OverallOutcome.Incomplete
+            : cells.Count == 0 || cells.Any(cell => !cell.Checked) ? OverallOutcome.Incomplete
             : OverallOutcome.NoMatch;
     }
 
@@ -120,7 +122,12 @@ public sealed class Screener
 
     private static string ComputeVersion(MatcherData data, MatchingOptions options)
     {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(data.Hash + "|" + options));
+        // Every option by name, formatted invariantly: the version must not depend on the machine's culture.
+        var values = typeof(MatchingOptions).GetProperties()
+            .Where(property => property.GetIndexParameters().Length == 0 && property.Name != nameof(MatchingOptions.Default))
+            .OrderBy(property => property.Name, StringComparer.Ordinal)
+            .Select(property => property.Name + "=" + Convert.ToString(property.GetValue(options), CultureInfo.InvariantCulture));
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(data.Hash + "|" + string.Join(';', values)));
         return Convert.ToHexStringLower(bytes)[..12];
     }
 }

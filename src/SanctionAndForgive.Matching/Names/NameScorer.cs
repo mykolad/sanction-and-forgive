@@ -25,10 +25,20 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             return NameScore.Zero("Nothing distinctive to compare");
         }
 
-        if (query.IsPerson && listed.IsPerson && (query.Initials.Length > 0 || listed.Initials.Length > 0)
-            && ScoreInitials(query, listed, weakAlias) is { } initials)
+        // Initials on either side, or both (partly expanded names): each side with initials is tried as the initials
+        // side, and the better reading wins, so the result doesn't depend on which name is listed.
+        var hasInitials = query.IsPerson && listed.IsPerson && (query.Initials.Length > 0 || listed.Initials.Length > 0);
+        if (hasInitials)
         {
-            return initials;
+            NameScore?[] readings =
+            [
+                query.Initials.Length > 0 ? ScoreInitials(query, listed, weakAlias, queryHasInitials: true) : null,
+                listed.Initials.Length > 0 ? ScoreInitials(listed, query, weakAlias, queryHasInitials: false) : null,
+            ];
+            if (readings.OfType<NameScore>().MaxBy(reading => reading.Percent) is { } initials)
+            {
+                return initials;
+            }
         }
 
         var pairs = Align(query.Core, listed.Core, weight);
@@ -83,6 +93,17 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             caps.Add((options.CappedMethodCap, "A word aligned only approximately"));
         }
 
+        // Initials the initials rule couldn't use (a short surname, an unaligned word) still count as evidence:
+        // never a full match on the surname alone, and a contradiction is a contradiction.
+        if (hasInitials)
+        {
+            caps.Add((options.NotAllAlignedCap, "Initials couldn't be checked against given names"));
+            if (Contradicts(query.Initials, [.. unalignedListed, .. listed.Initials]) || Contradicts(listed.Initials, [.. unalignedQuery, .. query.Initials]))
+            {
+                caps.Add((options.ContradictingInitialsPercent, "An initial contradicts a given name or initial"));
+            }
+        }
+
         foreach (var legal in query.LegalClasses.Union(listed.LegalClasses))
         {
             explanation.Add($"Legal form {legal} not compared");
@@ -91,11 +112,30 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         return Finish(percent, caps, explanation);
     }
 
-    /// <summary>Surname plus initials, in either direction (section 5.6). Null when the full tokens don't support
-    /// it (a full token on the initials side didn't align, or none has 4 letters): then the name is scored as usual.</summary>
-    private NameScore? ScoreInitials(NameForm query, NameForm listed, bool weakAlias)
+    /// <summary>Whether some initial finds no match among <paramref name="candidates"/> while candidates remain.</summary>
+    private bool Contradicts(Token[] initials, List<Token> candidates)
     {
-        var (initialsSide, otherSide, queryHasInitials) = query.Initials.Length > 0 ? (query, listed, true) : (listed, query, false);
+        foreach (var initial in initials)
+        {
+            var found = candidates.FirstOrDefault(candidate => InitialMatches(initial, candidate));
+            if (found is not null)
+            {
+                candidates.Remove(found);
+            }
+            else if (candidates.Count > 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Surname plus initials (section 5.6), with <paramref name="initialsSide"/>'s initials. Null when the full
+    /// tokens don't support it (a full token on the initials side didn't align, or none has 4 letters): then the name
+    /// is scored as usual, with the initials as unverified evidence.</summary>
+    private NameScore? ScoreInitials(NameForm initialsSide, NameForm otherSide, bool weakAlias, bool queryHasInitials)
+    {
         if (initialsSide.Core.Length == 0)
         {
             return null;
