@@ -105,9 +105,60 @@ Shared settings live at the root: `Directory.Build.props` (framework, nullable, 
 
 ## Build and Test (CI)
 
-`.github/workflows/build-and-test.yml` (**Build and Test**, job `build-and-test`, the required check on `master`) runs
-on every PR and push to `master`: build, code style, tests, and `az bicep lint` / `build` on every file in `infra/`.
-To add in Phase 2: the migrations check (`dotnet ef migrations has-pending-model-changes`).
+`.github/workflows/build-and-test.yml` (**Build and Test**) runs on every PR and push to `master`, two jobs, both
+required on `master`:
+
+- `build-and-test`: build, code style, tests, and `az bicep lint` / `build` on every file in `infra/`.
+- `clean-database-migrations`: against a throwaway SQL Server 2022 service container (SQL auth; the password is not a
+  secret), `has-pending-model-changes`, then the migration bundle applied to an empty database, rolled back to `0`
+  and applied again, then the `SqlServerFact` import tests (`Tests.Data`), which are skipped elsewhere unless
+  `SQLSERVER_TEST_CONNECTION` is set.
+
+## Data and import (`SanctionAndForgive.Data`, CLI)
+
+Spec sections 4 ("Import rules") and 6. The database holds parsed lists only, never anything a user enters.
+
+- **Tables:** `Sources` (code, name, URL or null for manual, `MaxAgeHours` or null for manual, `ActiveImportId`,
+  `LastCheckedAt`), `Imports` (status `Running` / `Completed` / `Failed` / `Rejected`, `ContentHash`, `RecordCount`,
+  `Message`), `Subjects`, `SubjectNames` (with `IsWeak` and `Script`), `SubjectAddresses`. Normalised forms are
+  never stored: a dictionary change needs no re-import.
+- **`ImportStore.ImportAsync`:** an application lock per source; the canonical hash (records sorted by external id,
+  generation dates don't count) → `Unchanged` only moves `LastCheckedAt`; the sanity guard (zero records, or a drop of
+  more than 20%; `--force` overrides the drop, never zero) → `Rejected`, old list kept, `LastCheckedAt` not moved, so a
+  persistent problem turns the list stale; otherwise `SqlBulkCopy` in batches of 5,000, then one `SaveChanges` flips
+  `ActiveImportId` (a single SaveChanges is one transaction and works with EF's retrying strategy; a user-started
+  transaction doesn't). The active and the previous import are kept; older ones are deleted in chunks.
+- **Staleness** counts from `LastCheckedAt`, the last successful check, not publication.
+- **CLI commands** (`SanctionAndForgive.Cli`, via `tools/lists.ps1`): `probe`, `import --source <code>|all [--file]
+  [--force]` (`all` = `Active` feeds; naming a `TermsUnclear` feed imports it: naming it is the decision), `status`,
+  `source-add`, `add` (CSV upsert by external id), `remove`. A manual change is a new import too. One failed source
+  doesn't stop the others; any failure or rejection exits 1. Connection string: `ConnectionStrings:Lists` (environment
+  or user secrets, id `sanction-and-forgive-api`, shared with the API).
+- **`tools/lists.ps1`** opens the SQL firewall for your IP, runs the CLI as your `az login`
+  (`Authentication=Active Directory Default`), and closes the firewall. With `$env:ConnectionStrings__Lists` set it
+  uses that database instead and leaves the firewall alone.
+- **Manual CSV:** `external_id,type,name,aliases,address,country,programme,listed_on,remarks` (`ManualCsvReader`).
+
+## EF Core migrations
+
+Always supply `--startup-project` so EF tools use the API's DI (no design-time factory):
+
+```
+dotnet tool restore
+dotnet ef migrations add <Name> --project src/SanctionAndForgive.Data --startup-project src/SanctionAndForgive.Api
+```
+
+Migrations never run on startup: the deploy workflow runs the bundle.
+
+## Local SQL Server
+
+```
+docker run -d --name sanctions-sql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=Throwaway-container-2026!" -p 14333:1433 mcr.microsoft.com/mssql/server:2022-latest
+$env:ConnectionStrings__Lists = "Server=localhost,14333;Database=sanctions_local;User ID=sa;Password=Throwaway-container-2026!;TrustServerCertificate=True"
+dotnet ef database update --project src/SanctionAndForgive.Data --startup-project src/SanctionAndForgive.Api --connection $env:ConnectionStrings__Lists
+./tools/lists.ps1 import -Source all
+$env:SQLSERVER_TEST_CONNECTION = "Server=localhost,14333;User ID=sa;Password=Throwaway-container-2026!;TrustServerCertificate=True"   # runs the SQL tests
+```
 
 ## Azure resources
 

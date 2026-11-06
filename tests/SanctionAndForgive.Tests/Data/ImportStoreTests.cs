@@ -1,0 +1,153 @@
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Time.Testing;
+using SanctionAndForgive.Data;
+
+namespace SanctionAndForgive.Tests.Data;
+
+// The import rules (spec section 4) against a real SQL Server: each test class gets its own database, built by the
+// migrations, and drops it afterwards.
+public sealed class ImportStoreTests : IAsyncLifetime
+{
+    private readonly string connectionString;
+    private readonly FakeTimeProvider clock = new(DateTimeOffset.Parse("2026-11-06T03:30:00Z", System.Globalization.CultureInfo.InvariantCulture));
+
+    public ImportStoreTests()
+    {
+        var server = Environment.GetEnvironmentVariable("SQLSERVER_TEST_CONNECTION") ?? string.Empty;
+        connectionString = new SqlConnectionStringBuilder(server) { InitialCatalog = "import_tests_" + Guid.NewGuid().ToString("N")[..8] }.ConnectionString;
+    }
+
+    public async Task InitializeAsync()
+    {
+        if (Environment.GetEnvironmentVariable("SQLSERVER_TEST_CONNECTION") is { Length: > 0 })
+        {
+            await using var context = CreateContext();
+            await context.Database.MigrateAsync();
+        }
+    }
+
+    public async Task DisposeAsync()
+    {
+        if (Environment.GetEnvironmentVariable("SQLSERVER_TEST_CONNECTION") is { Length: > 0 })
+        {
+            await using var context = CreateContext();
+            await context.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [SqlServerFact]
+    public async Task FirstImport_BecomesActive_WithNamesAndAddresses()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+
+        var outcome = await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+
+        Assert.Equal(ImportResult.Imported, outcome.Result);
+        var active = await store.ActiveSubjectsAsync(source, CancellationToken.None);
+        Assert.Equal(10, active.Count);
+        Assert.All(active, subject => Assert.Equal(2, subject.Names.Count));
+        Assert.Contains(active, subject => subject.Addresses.Any(address => address.CountryCode == "EE"));
+        var status = Assert.Single(await store.StatusAsync(CancellationToken.None));
+        Assert.True(status.Current);
+        Assert.Equal(10, status.RecordCount);
+    }
+
+    [SqlServerFact]
+    public async Task SameContent_IsUnchanged_OnlyLastCheckedMoves()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var firstImport = source.ActiveImportId;
+        clock.Advance(TimeSpan.FromDays(1));
+
+        // The same records in another order: a regenerated file.
+        var outcome = await store.ImportAsync(source, [.. Subjects(10).AsEnumerable().Reverse()], force: false, CancellationToken.None);
+
+        Assert.Equal(ImportResult.Unchanged, outcome.Result);
+        Assert.Equal(firstImport, source.ActiveImportId);
+        Assert.Equal(clock.GetUtcNow(), source.LastCheckedAt);
+        Assert.Equal(1, await context.Imports.CountAsync());
+    }
+
+    [SqlServerFact]
+    public async Task LargeDrop_IsRejected_UnlessForced()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var firstImport = source.ActiveImportId;
+
+        var rejected = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+        Assert.Equal(ImportResult.Rejected, rejected.Result);
+        Assert.Equal(firstImport, source.ActiveImportId);
+        Assert.Equal(10, (await store.ActiveSubjectsAsync(source, CancellationToken.None)).Count);
+
+        var forced = await store.ImportAsync(source, Subjects(7), force: true, CancellationToken.None);
+        Assert.Equal(ImportResult.Imported, forced.Result);
+        Assert.Equal(7, (await store.ActiveSubjectsAsync(source, CancellationToken.None)).Count);
+    }
+
+    [SqlServerFact]
+    public async Task ZeroRecords_IsAlwaysRejected()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+
+        var outcome = await store.ImportAsync(source, [], force: true, CancellationToken.None);
+
+        Assert.Equal(ImportResult.Rejected, outcome.Result);
+        Assert.Null(source.ActiveImportId);
+    }
+
+    [SqlServerFact]
+    public async Task OnlyTheActiveAndThePreviousImportAreKept()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+
+        for (var count = 10; count <= 13; count++)
+        {
+            await store.ImportAsync(source, Subjects(count), force: false, CancellationToken.None);
+        }
+
+        Assert.Equal(2, await context.Imports.CountAsync());
+        Assert.Equal(13 + 12, await context.Subjects.CountAsync());
+        Assert.Equal((13 + 12) * 2, await context.SubjectNames.CountAsync());
+    }
+
+    [SqlServerFact]
+    public async Task StaleSource_IsNotCurrent()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(3), force: false, CancellationToken.None);
+
+        clock.Advance(TimeSpan.FromHours(73));
+
+        Assert.False(Assert.Single(await store.StatusAsync(CancellationToken.None)).Current);
+    }
+
+    private ListsDbContext CreateContext() =>
+        new(new DbContextOptionsBuilder<ListsDbContext>().UseSqlServer(connectionString).Options);
+
+    private static List<Subject> Subjects(int count) =>
+    [
+        .. Enumerable.Range(1, count).Select(i =>
+        {
+            var subject = new Subject { ExternalId = $"X-{i}", Type = SubjectType.Entity, PrimaryName = $"Fictional Company {i}", Programmes = "TEST" };
+            subject.Names.Add(new SubjectName { FullName = $"Fictional Company {i}" });
+            subject.Names.Add(new SubjectName { FullName = $"Вымышленная компания {i}", Script = NameScript.Cyrillic });
+            subject.Addresses.Add(new SubjectAddress { Raw = $"Street {i}, Tallinn", CountryCode = "EE" });
+            return subject;
+        }),
+    ];
+}

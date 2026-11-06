@@ -83,6 +83,7 @@ Token dictionary, fold keys and trigram postings: about 30 MB. **About 130 MB fo
 while the largest list (OFAC SDN) is rebuilt next to its old copy, plus ASP.NET Core's own 60-80 MB: **about 250 MB of
 512 MiB.** Phase 3 measures it.
 
-**Database, against 2 GB.** Per full set of lists: subjects about 45 MB (remarks average about 200 characters), names
-about 20 MB, addresses about 11 MB, indexes about half again: **about 115 MB**. Two imports per list: about 230 MB.
-Briefly three during an import, before the oldest is deleted: about 350 MB. **Well inside 2 GB.** Phase 2 measures it.
+**Database, against 2 GB.** Measured in Phase 2 (local SQL Server 2022, the 9 fetched feeds plus a manual source,
+**two imports each**): **114.5 MB used** (subjects 54.8 MB, names 26.5 MB, addresses 12.4 MB, indexes included).
+Briefly a third import of one list exists during an import, before the oldest is deleted. NSDC will add perhaps
+half as much again. **Well inside 2 GB**; the storage alert fires at 80%.
