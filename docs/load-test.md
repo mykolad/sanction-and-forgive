@@ -24,8 +24,13 @@ Remove-Item Env:RATE_LIMIT_PER_MINUTE
 az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/app.bicepparam
 ```
 
-Report below: the highest step sustained (all its requests under the thresholds), its p95, CPU and memory, and what
-stopped the run.
+Every request is tagged with its step (`step:<rate>`), and each step has its own thresholds, so k6's summary shows
+`http_req_duration{step:N}` and `http_req_failed{step:N}` per plateau, and one bad step can't hide behind good ones.
+The run also stops if k6 itself drops scheduled iterations (`dropped_iterations`): the rate asked for wasn't the rate
+measured. It refuses to start unless the app is ready and at least one list is Current.
+
+Report below: the highest step sustained (its own p95 under 2 s and failures under 2%), its p95, CPU and memory, and
+what stopped the run.
 
 ## Results
 

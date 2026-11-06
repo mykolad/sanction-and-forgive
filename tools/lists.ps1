@@ -40,7 +40,8 @@ $project = Join-Path $root 'src/SanctionAndForgive.Cli'
 
 $cliArgs = @($Command)
 if ($Source) { $cliArgs += @('--source', $Source) }
-if ($File) { $cliArgs += @('--file', [IO.Path]::GetFullPath($File)) }
+# Relative to PowerShell's current location (not the process's), and allowed not to exist yet (load-inputs writes it).
+if ($File) { $cliArgs += @('--file', $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($File)) }
 if ($Force) { $cliArgs += '--force' }
 if ($Code) { $cliArgs += @('--code', $Code) }
 if ($Name) { $cliArgs += @('--name', $Name) }
