@@ -121,6 +121,17 @@ public sealed class BrowseTests : IDisposable
     }
 
     [Fact]
+    public async Task AListWithoutAnIndex_Is503_NeverAnEmptyList()
+    {
+        factory.Load(new SanctionAndForgive.Api.Lists.LoadedList("eu", "EU", null, 72, 5, Now, Now, 6269, Index: null));
+
+        using var response = await client.PostAsJsonAsync("/api/v1/lists/eu/browse", new { offset = 0, limit = 10 });
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal("listNotLoaded", (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+    }
+
+    [Fact]
     public async Task Browsing_NeverTouchesTheDatabase_AndTheFilterIsNeverLogged()
     {
         Load();
@@ -138,6 +149,8 @@ public sealed class BrowseTests : IDisposable
         var home = await client.GetStringAsync(new Uri("/", UriKind.Relative));
 
         Assert.Contains("id=\"entries\"", page, StringComparison.Ordinal);
+        Assert.Contains("Open Government Licence v3.0", page, StringComparison.Ordinal);
+        Assert.Contains("not endorsed or certified by the International Trade Administration", page, StringComparison.Ordinal);
         Assert.Contains("href=\"/lists\" aria-current=\"page\"", page, StringComparison.Ordinal);
         Assert.Contains("href=\"/lists\"", home, StringComparison.Ordinal);
     }

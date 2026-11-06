@@ -76,8 +76,14 @@ public sealed class BrowseController(ListCatalog catalog, TimeProvider clock) : 
             return NotFound();
         }
 
+        // No index: the list is still loading, or its last load failed. Say so, never "no entries".
+        if (list.Index is not { } index)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new WarmingUpResponse("listNotLoaded"));
+        }
+
         var now = clock.GetUtcNow();
-        IEnumerable<Browsable> entries = list.Index is { } index ? Sorted.GetValue(index, InNameOrder) : [];
+        IEnumerable<Browsable> entries = Sorted.GetValue(index, InNameOrder);
         if (kind is { } wanted)
         {
             entries = entries.Where(entry => entry.Subject.Kind == wanted);

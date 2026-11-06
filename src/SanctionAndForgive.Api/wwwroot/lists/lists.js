@@ -80,11 +80,19 @@ async function browse(start) {
       showState("Too many requests from this address. Wait a minute and try again.", true);
       return;
     }
+    if (response.status === 503) {
+      $("results").hidden = true;
+      showState("This list isn't loaded right now (it's loading, or its last load failed), so it can't be browsed. Try again in a few minutes.", true);
+      return;
+    }
     if (!response.ok) {
       showState(response.status === 400 ? "The filter is too long, or not valid." : "The service couldn't answer. Try again in a moment.", true);
       return;
     }
-    render(await response.json());
+    const page = await response.json();
+    // A newer request may have finished while this body was still arriving.
+    if (request !== current) return;
+    render(page);
     showState("");
   } catch {
     if (request === current) showState("The service isn't answering. Try again in a moment.", true);
