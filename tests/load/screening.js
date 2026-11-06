@@ -20,7 +20,13 @@ if (!BASE_URL) throw new Error('Set BASE_URL, e.g. -e BASE_URL=https://sanction-
 const STAGES = (__ENV.STAGES || '1,2,4,6,8,12,16,24,32').split(',').map(Number);
 const STEP = __ENV.STEP || '2m';
 const RAMP = '20s';
-const seconds = value => Number(value.replace(/s$/, '').replace(/m$/, '')) * (value.endsWith('m') ? 60 : 1);
+// A k6 duration ("2m", "90s", "1m30s", "1h") in seconds; anything else stops the run before it starts, since a step
+// tag that matches no threshold would silently bypass them.
+function seconds(value) {
+  const match = /^(?:(\d+)h)?(?:(\d+)m(?!s))?(?:(\d+)s)?$/.exec(value);
+  if (!match || !value) throw new Error(`Unsupported duration ${value}: use h, m and s, e.g. 2m or 1m30s`);
+  return Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0);
+}
 const STEP_SECONDS = seconds(RAMP) + seconds(STEP);
 const VUS = Math.max(20, Math.ceil(Math.max(...STAGES) * 3));
 
@@ -62,14 +68,14 @@ export const options = {
     },
   },
   // Per step (every request is tagged with its step's rate), so one step's p95 and failures are judged on their own,
-  // and the summary reports each plateau. Stop once a step clearly can't keep up (after 30 s, so a step's first
-  // seconds don't decide it), or once k6 itself can't keep the arrival rate (dropped iterations: then what was
-  // measured isn't the rate asked for).
+  // and the summary reports each plateau. Stop once a step clearly can't keep up (judged from 30 s into that step:
+  // delayAbortEval counts from the start of the run, so each step's delay is offset by its own start), or once k6
+  // itself can't keep the arrival rate (dropped iterations: then what was measured isn't the rate asked for).
   thresholds: Object.assign(
     { dropped_iterations: [{ threshold: 'count<10', abortOnFail: true }] },
-    ...STAGES.map(rate => ({
-      [`http_req_duration{step:${rate}}`]: [{ threshold: 'p(95)<2000', abortOnFail: true, delayAbortEval: '30s' }],
-      [`http_req_failed{step:${rate}}`]: [{ threshold: 'rate<0.02', abortOnFail: true, delayAbortEval: '30s' }],
+    ...STAGES.map((rate, i) => ({
+      [`http_req_duration{step:${rate}}`]: [{ threshold: 'p(95)<2000', abortOnFail: true, delayAbortEval: `${i * STEP_SECONDS + 30}s` }],
+      [`http_req_failed{step:${rate}}`]: [{ threshold: 'rate<0.02', abortOnFail: true, delayAbortEval: `${i * STEP_SECONDS + 30}s` }],
     }))),
   summaryTrendStats: ['avg', 'med', 'p(95)', 'p(99)', 'max'],
 };
