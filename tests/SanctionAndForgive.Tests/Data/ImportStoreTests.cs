@@ -174,6 +174,22 @@ public sealed class ImportStoreTests : IAsyncLifetime
     }
 
     [SqlServerFact]
+    public async Task ManualChangeThatChangesNothing_WritesNothing()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("ee-mfa", "Estonia", null, null, CancellationToken.None);
+        await store.ChangeAsync(source, current => [.. current, .. Subjects(2)], CancellationToken.None);
+        var active = source.ActiveImportId;
+
+        var outcome = await store.ChangeAsync(source, current => [.. current.Where(subject => subject.ExternalId != "X-99")], CancellationToken.None);
+
+        Assert.Equal(ImportResult.Unchanged, outcome.Result);
+        Assert.Equal(active, source.ActiveImportId);
+        Assert.Equal(1, await context.Imports.CountAsync());
+    }
+
+    [SqlServerFact]
     public async Task TooLongExternalId_IsRefused_NotTruncated()
     {
         await using var context = CreateContext();
