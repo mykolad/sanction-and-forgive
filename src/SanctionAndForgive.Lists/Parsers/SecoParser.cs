@@ -100,8 +100,8 @@ public sealed class SecoParser : IListParser
                 var parts = name.Els("name-part").OrderBy(part => int.TryParse(part.Attr("order"), out var order) ? order : 0).ToList();
                 builder.AddName(Text.Join(" ", parts.Select(part => part.Val("value"))), isWeak, isPrimary);
 
-                // Each language and script of the spelling variants makes more full names: every combination of the
-                // parts' spellings in it (a part without one keeps its value), up to MaxVariantNames.
+                // Each language and script of the spelling variants makes more full names from the parts' spellings
+                // in it (a part without one keeps its value). No spelling is ever dropped: see FullNames.
                 var languages = parts.SelectMany(part => part.Els("spelling-variant"))
                     .Select(variant => (Lang: variant.Attr("lang"), Script: variant.Attr("script")))
                     .Distinct();
@@ -116,10 +116,10 @@ public sealed class SecoParser : IListParser
                             .Distinct()
                             .ToList();
                         return inLanguage.Count > 0 ? inLanguage : [part.Val("value") ?? string.Empty];
-                    });
-                    foreach (var combination in Combinations(spellings).Take(MaxVariantNames))
+                    }).ToList();
+                    foreach (var fullName in FullNames(spellings))
                     {
-                        builder.AddName(Text.Join(" ", combination), isWeak, isPrimary: false);
+                        builder.AddName(Text.Join(" ", fullName), isWeak, isPrimary: false);
                     }
                 }
             }
@@ -133,18 +133,37 @@ public sealed class SecoParser : IListParser
         return builder.HasNames ? new PendingTarget(builder, addresses) : null;
     }
 
-    /// <summary>Bounds the full names one language's spellings can make, should a name list many per part.</summary>
-    private const int MaxVariantNames = 8;
+    /// <summary>Up to this many combinations, every combination of the parts' spellings becomes a full name.</summary>
+    private const int MaxCombinations = 8;
 
-    private static IEnumerable<List<string>> Combinations(IEnumerable<List<string>> choices)
+    /// <summary>The full names one language's spellings make. Every combination while there are few; beyond
+    /// <see cref="MaxCombinations"/>, the first spelling of every part plus one name per other spelling (with the
+    /// other parts' first spellings), so the count grows linearly and every published spelling still appears.</summary>
+    private static IEnumerable<List<string>> FullNames(List<List<string>> spellings)
     {
-        IEnumerable<List<string>> combinations = [[]];
-        foreach (var choice in choices)
+        var count = spellings.Aggregate(1L, (product, choice) => product * choice.Count);
+        if (count <= MaxCombinations)
         {
-            combinations = combinations.SelectMany(prefix => choice.Select(option => new List<string>(prefix) { option }));
+            IEnumerable<List<string>> combinations = [[]];
+            foreach (var choice in spellings)
+            {
+                combinations = combinations.SelectMany(prefix => choice.Select(option => new List<string>(prefix) { option }));
+            }
+
+            return combinations;
         }
 
-        return combinations;
+        var first = spellings.Select(choice => choice[0]).ToList();
+        var names = new List<List<string>> { first };
+        for (var part = 0; part < spellings.Count; part++)
+        {
+            foreach (var other in spellings[part].Skip(1))
+            {
+                names.Add([.. first.Take(part), other, .. first.Skip(part + 1)]);
+            }
+        }
+
+        return names;
     }
 
     private sealed record PendingTarget(SubjectBuilder Builder, List<(string? Details, string? PlaceId)> Addresses);

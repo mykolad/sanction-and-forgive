@@ -259,6 +259,24 @@ public class ParserTests
     }
 
     [Fact]
+    public void Seco_ManySpellings_EverySpellingStillAppears()
+    {
+        var familyNames = Enumerable.Range(1, 9).Select(i => $"Фамилия{i}").ToList();
+        var variants = string.Concat(familyNames.Select(name => $"""<spelling-variant lang="RUS" script="CYRL">{name}</spelling-variant>"""));
+        var subjects = Parse(new SecoParser(), $"""
+            <swiss-sanctions-list>
+              <target ssid="1"><individual><identity main="true"><name name-type="primary-name">
+                <name-part order="1"><value>Ivan</value><spelling-variant lang="RUS" script="CYRL">Иван</spelling-variant></name-part>
+                <name-part order="2"><value>Familiya</value>{variants}</name-part>
+              </name></identity></individual></target>
+            </swiss-sanctions-list>
+            """);
+
+        var names = Assert.Single(subjects).Names.Select(name => name.FullName).ToList();
+        Assert.All(familyNames, family => Assert.Contains($"Иван {family}", names));
+    }
+
+    [Fact]
     public void RepeatedName_IsStrongIfAnyListingIsStrong()
     {
         var subjects = Parse(new UnParser(), """
