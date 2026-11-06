@@ -2,11 +2,28 @@
 
   <PropertyGroup>
     <UserSecretsId>sanction-and-forgive-api</UserSecretsId>
+    <!-- One replica with 0.25 vCPU and 0.5 GiB: a compact heap matters more than GC throughput. Workstation GC (as a
+         1-core container would pick anyway, made explicit), no background GC, and ConserveMemory, which compacts the
+         large indexes rather than growing the heap (docs/memory.md, Phase 3 measurements). -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
   </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SanctionAndForgive.Matching\SanctionAndForgive.Matching.csproj" />
     <ProjectReference Include="..\SanctionAndForgive.Data\SanctionAndForgive.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SanctionAndForgive.Tests" />
   </ItemGroup>
 
   <ItemGroup>

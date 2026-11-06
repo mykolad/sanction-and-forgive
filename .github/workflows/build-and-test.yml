@@ -138,8 +138,8 @@ jobs:
           ./efbundle 0 --connection "$SQL_SERVER;Database=migrations"
           ./efbundle --connection "$SQL_SERVER;Database=migrations"
 
-      # Bulk copy, application locks and the import rules need SQL Server itself (SqlServerFact tests).
+      # Bulk copy, application locks, the import rules and the snapshot reads need SQL Server itself (SqlServerFact tests).
       - name: Import tests on SQL Server
         env:
           SQLSERVER_TEST_CONNECTION: ${{ env.SQL_SERVER }}
-        run: dotnet test tests/SanctionAndForgive.Tests -c Release --no-build --filter "FullyQualifiedName~SanctionAndForgive.Tests.Data" --logger "console;verbosity=normal"
+        run: dotnet test tests/SanctionAndForgive.Tests -c Release --no-build --filter "FullyQualifiedName~SanctionAndForgive.Tests.Data|FullyQualifiedName~ListLoaderTests" --logger "console;verbosity=normal"

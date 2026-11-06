@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sanction &amp; Forgive</title>
+  <meta name="description" content="A demo of sanctions list screening for shipments: receivers, companies and addresses, in Latin or Cyrillic.">
+  <link rel="stylesheet" href="app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23243b6b'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <h1>Sanction &amp; Forgive</h1>
+      <p class="tagline">Screen a shipment's receiver, company and address against public sanctions lists, in Latin or Cyrillic script.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" aria-labelledby="form-title">
+      <h2 id="form-title" class="visually-hidden">Screen a shipment</h2>
+      <!-- method="post": without JavaScript the form must never put what was typed into the URL. -->
+      <form id="screen-form" method="post" action="/api/v1/screenings" novalidate>
+        <div class="fields">
+          <label class="field">
+            <span class="field-label">Receiver</span>
+            <input id="receiverName" name="receiverName" maxlength="300" autocomplete="off" spellcheck="false" placeholder="Шевченко Т.Г. or Taras Shevchenko">
+          </label>
+          <label class="field">
+            <span class="field-label">Company</span>
+            <input id="companyName" name="companyName" maxlength="300" autocomplete="off" spellcheck="false" placeholder="ТОВ «Ромашка» or Romashka LLC">
+          </label>
+          <label class="field field-wide">
+            <span class="field-label">Address <span class="hint">any format</span></span>
+            <textarea id="address" name="address" maxlength="300" rows="2" spellcheck="false" placeholder="ул. Ленина 5, Москва — or just a city or a country"></textarea>
+          </label>
+        </div>
+        <p class="form-note">Every field is optional; fill in at least one. Nothing you enter is stored.</p>
+        <div class="actions">
+          <button type="submit" class="primary" id="screen-button">Screen</button>
+          <button type="button" class="secondary" id="clear-button">Clear</button>
+          <div class="examples" id="examples" aria-label="Try an example"></div>
+        </div>
+      </form>
+    </section>
+
+    <section id="state" class="state" aria-live="polite"></section>
+
+    <section id="result" class="result" hidden aria-live="polite">
+      <div id="summary" class="summary"></div>
+      <p class="likelihood-note"><strong>Match likelihood</strong> is an estimate that the entry is the listed party, based on the data entered. It isn't the chance that a shipment is lawful.</p>
+      <div class="table-scroll">
+        <table id="result-table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="table-hint">Select a cell to see the listed party and how the names aligned.</p>
+      <aside id="detail" class="detail" hidden></aside>
+      <p id="disclaimer" class="disclaimer"></p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p><strong>Sources.</strong> <span id="sources">Loading the lists…</span></p>
+      <p>Contains public sector information licensed under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">Open Government Licence v3.0</a> (UK Sanctions List).
+        This product uses the International Trade Administration's Data API but is not endorsed or certified by the International Trade Administration.
+        EU data © European Union, reused under the Commission's <a href="https://commission.europa.eu/legal-notice_en">reuse policy</a>.
+        Check any match against the official publication of the list it comes from.</p>
+      <p class="fineprint">A demo list check, not a legal determination. <span id="version"></span> · <a href="https://github.com/mykolad/sanction-and-forgive">Source code</a> (MIT)</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -100,6 +100,39 @@ not break a golden test without the owner's approval.
 Measured on 2026-11-06 with real feeds: OFAC SDN, EU, UK and US export together are 110 MB of managed heap and
 build in about 3 s; a request against all four takes about 20 ms (p50) and 60 ms (p95) on a desktop.
 
+## API and website (`SanctionAndForgive.Api`)
+
+Spec section 7. **A screening never touches the database** (`ApiTests` counts connection attempts).
+
+- **Lists in memory:** `ListCatalog` holds one snapshot of `LoadedList`s (code, name, URL, `MaxAgeHours`, active import,
+  `LastCheckedAt`, count, `ListIndex`), swapped whole. `ListLoader.RefreshAsync` reads `Sources` and rebuilds only the
+  lists whose active import changed (one at a time); `ListRefreshService` runs it at startup in the background and
+  every `Lists:RefreshMinutes` (15). One swap per refresh, every source in it, so a list is never missing from the
+  rows; the first swap makes the API ready. If SQL is down, the catalog keeps serving and lists age out.
+- **Fail closed:** `LoadedList.IsCurrent(now)`: an index, and a last successful check within `MaxAgeHours` (manual
+  sources never age). Otherwise the screener gets no index and the cell is `NotChecked`, with no percentage.
+- **Endpoints** (controllers; every response a record in `Controllers/ApiResponses.cs`): `POST /api/v1/screenings`
+  (`{receiverName, companyName, address}`, each optional up to 300 characters, at least one; 503 `{state:"warmingUp"}`
+  before the first load; rows with hits first; a summary worded "No match found in: EU, as of …; …" and never
+  "not sanctioned"; the disclaimer), `GET /api/v1/status`, `GET /api/v1/examples` (entities from the live lists: a
+  Latin one, a Cyrillic alias, one with an address, one with a typo; cached per snapshot), `GET /healthz` (liveness, no
+  database), `GET /readyz` (200 after the first load), `GET /openapi/v1.json`.
+- **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
+  `X-Forwarded-For` entry the ingress appended (forward limit 1), so clients can't choose their partition.
+- **Input is never stored or logged.** No request logging; validation errors don't echo values.
+- **Website** (`wwwroot`, plain JS, no build step): one form (receiver, company, a multi-line address "any format"),
+  "Try an example" buttons, a summary line, the table (lists × entries; Match / Possible match / No match / Not checked
+  with a symbol each, never colour alone), a detail panel per cell (listed name, alias matched, how it aligned,
+  programme, address, the official record), the disclaimer, and the attribution footer (OGL, trade.gov's notice, EU).
+  `app.js` puts every value in as text, never HTML. Run it from `src/SanctionAndForgive.Api` (the content root holds
+  `wwwroot`).
+- **Memory** (`ServerGarbageCollection` and `ConcurrentGarbageCollection` off, `System.GC.ConserveMemory` 5): with
+  all 10 fetched lists loaded locally, about 320-340 MB private / 400-415 MB working set, also under load. Production
+  has fewer active lists. The 0.5 GiB container is measured in Phase 4; if it doesn't fit, the next step is 0.5 vCPU /
+  1 GiB, but **ask the owner first**.
+- **Tests:** `Api/ApiTests.cs` with `ApiFactory` (the real `Program`, environment `Testing`, refresh off, a fake clock,
+  a database that counts connection attempts).
+
 ## Docker
 
 The image (`Dockerfile`) holds both `SanctionAndForgive.Api.dll` (the entry point) and `SanctionAndForgive.Cli.dll`

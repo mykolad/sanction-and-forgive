@@ -119,4 +119,13 @@ public class EdgeCaseTests
         var listed = query.Contains("Анна", StringComparison.Ordinal) ? "Anna Petrova" : "Ivan Ivanov";
         AssertBand(NameCell(query, Subject(listed, SubjectKind.Individual, null)), expected);
     }
+
+    [Fact]
+    public void ContainedName_NeedsMoreThanApproximateWords()
+    {
+        var subject = Subject("Aviatsionnyi Kompleks im S V Ilyushina", SubjectKind.Entity, null);
+        var cell = Screener.Screen(new ScreeningRequest(null, "ООО Авиационные Системы и Комплексы", null), [List("eu", subject)]).Entries[0].Cells.Single();
+
+        AssertBand(cell, Outcome.NoMatch);
+    }
 }
