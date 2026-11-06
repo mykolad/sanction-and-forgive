@@ -61,9 +61,11 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         explanation.AddRange(unalignedQuery.Select(token => $"{token}: not in the listed name"));
         explanation.AddRange(unalignedListed.Select(token => $"{token}: listed, not entered"));
 
-        // Contained names: every core token of the shorter name (at least 2) aligned, and the longer has more.
+        // Contained names: every core token of the shorter name (at least 2) aligned, all of them the same word (exactly, transliterated, a spelling pair or a romanisation; not by edits), and the
+        // longer has more (a patronymic). Near words don't count: "авиационные … комплексы" isn't
+        // contained in "aviatsionnyi kompleks im. Ilyushina" just because two words are near.
         var shorter = Math.Min(query.Core.Length, listed.Core.Length);
-        if (shorter >= 2 && pairs.Count == shorter && query.Core.Length != listed.Core.Length)
+        if (shorter >= 2 && pairs.Count == shorter && query.Core.Length != listed.Core.Length && pairs.All(pair => pair.Alignment.Method is AlignMethod.Identical or AlignMethod.Transliteration or AlignMethod.SpellingPair or AlignMethod.FoldKey))
         {
             percent = options.ContainedNamePercent;
             explanation.Add("One name contains the other");
