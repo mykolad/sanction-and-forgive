@@ -61,6 +61,20 @@ public sealed class SmokeTests : IDisposable
     }
 
     [Fact]
+    public async Task Stream_AnswersEachLine_ThroughTheIngress()
+    {
+        await WaitForAsync("/readyz", body => body.GetProperty("status").GetString() == "ready");
+        var id = Guid.NewGuid().ToString("N")[..12];
+        using var content = new StringContent($"{{\"reference\":\"smoke-{id}-1\",\"companyName\":\"Zephyrine Quillbrook Smoke Test Holding\"}}\n{{\"reference\":\"smoke-{id}-2\",\"receiverName\":\"Quillon Zephyrsmith\"}}\n", System.Text.Encoding.UTF8, "application/x-ndjson");
+
+        using var response = await client.PostAsync(new Uri("/api/v1/screenings/stream", UriKind.Relative), content);
+        var lines = (await response.Content.ReadAsStringAsync()).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonDocument.Parse(line).RootElement.Clone()).ToList();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(["header", "result", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
+    }
+
+    [Fact]
     public async Task Examples_AndOpenApi_Answer()
     {
         await WaitForAsync("/readyz", body => body.GetProperty("status").GetString() == "ready");

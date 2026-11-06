@@ -9,6 +9,56 @@ Every screening carries the caller's own **`reference`**: a transaction id, say.
 of letters, digits and `. _ : / -`, starting with a letter or digit. It's echoed back in the response, and it is how a
 screening is found in the logs later. **Never put personal data in it**: it's logged as it is.
 
+## Batches: `POST /api/v1/screenings/stream`
+
+For many records at once. The request is **NDJSON**: one screening per line, each the same object as the single
+endpoint takes (`reference`, `receiverName`, `companyName`, `address`), with content type `application/x-ndjson`
+(`application/jsonl` and `text/plain` are accepted too). The response is NDJSON as well, written as each record is
+screened, so a client can read results while it's still sending. Nothing is held but the line in hand, and nothing
+is stored.
+
+```
+POST /api/v1/screenings/stream
+Content-Type: application/x-ndjson
+
+{"reference":"TX-1","companyName":"ТОВ Ромашка"}
+{"reference":"TX-2","receiverName":"Shevchenko T.G.","address":"Kyiv, Ukraine"}
+```
+
+```
+{"type":"header","matcherVersion":"c0d2b94021a5","disclaimer":"…","lists":[…],"maxRecords":50000,"maxSeconds":200}
+{"type":"result","line":1,"reference":"TX-1","outcome":"Match","entries":[{"kind":"Company","cells":[{"list":"eu","state":"Checked","percent":99,"outcome":"Match","best":{"listedName":"…","alias":"…","externalId":"…","sourceUrl":"…"}},{"list":"uk","state":"NotChecked","percent":null,"outcome":null,"best":null}]}]}
+{"type":"result","line":2,"reference":"TX-2","outcome":"Review","entries":[…]}
+{"type":"end","screened":2,"errors":0,"truncated":false,"nextLine":null}
+```
+
+- **`header`** first: the matcher version, the disclaimer, and every list with its version and freshness. Every
+  result in the stream is computed against this one snapshot of the lists.
+- **`result`**, one per record, in order: `line` (its 1-based line number in the request; blank lines are skipped but
+  counted), your `reference`, the overall `outcome`, and per entry (Receiver, Company, Address) one cell per list:
+  `state` (`Checked`, or `NotChecked` with no percentage, never 0%), `percent`, `outcome` (`Match`, `Review`,
+  `NoMatch`) and, from 20%, the `best` candidate: enough to find it on the list. Nothing you sent is echoed back:
+  you have it already, keyed by reference.
+- **`error`** for a record that couldn't be screened (not JSON, a line over 4,096 bytes, a missing reference, nothing
+  entered, a field over 300 characters): `line`, the `reference` if there was one, and `errors` by field. The
+  messages never quote the input. The stream goes on.
+- **`end`** last: how many were screened, how many were errors, and whether it was `truncated`.
+
+**Limits.** A stream stops after **50,000 records** (`Screening:StreamMaxRecords`) or **200 seconds**
+(`Screening:StreamMaxSeconds`), whichever comes first: the Container Apps ingress ends any request at 240 seconds.
+Then `end` says `"truncated":true` and `nextLine`, the first line it didn't read; send the rest from that line in a
+new stream. A client should always check `end`: no `end` line means the connection broke, and the records after the
+last `result` or `error` weren't screened. **One stream at a time** across all clients (`Screening:ConcurrentStreams`):
+a second one gets 429 until the first ends, so a batch can't starve the website on the demo's single small replica.
+
+**Throughput.** Measured on 2026-11-06 on a desktop, against all 10 fetched lists, one stream at a time: about
+**32 records a second** (5,000 in 158 s, 417 MB working set, flat). A record is screened on one core. The
+production container (0.25 vCPU, 6 active lists) will be slower: a 50,000-record batch is several streams and
+tens of minutes there, so it is a job to run in the background, not while someone waits. More CPU is the lever
+(a decision for after the load test).
+
+Each record writes its own audit line, exactly like a single screening (below).
+
 ## What's logged, and what never is
 
 **Nothing entered is stored or logged**: no receiver, company or address, in any log, trace or error. A test checks

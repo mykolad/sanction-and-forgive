@@ -45,11 +45,38 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
         return errors;
     }
 
+    /// <summary>The lists as they are now: a stream screens every record against one snapshot.</summary>
+    public IReadOnlyList<LoadedList> Snapshot => catalog.Lists;
+
+    public DateTimeOffset Now => clock.GetUtcNow();
+
+    public MatchingOptions Options => options;
+
+    public string MatcherVersion => screener.MatcherVersion;
+
     /// <summary>Screens a valid request against the current lists and logs the result under its reference.</summary>
-    public ScreeningResponse Screen(ScreeningRequestBody body)
+    public ScreeningResponse Screen(ScreeningRequestBody body) => Screen(body, catalog.Lists);
+
+    /// <summary>Screens a valid request against <paramref name="lists"/> (a snapshot) and logs the result.</summary>
+    public ScreeningResponse Screen(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists)
+    {
+        var (result, rows, now) = Run(body, lists);
+        return new ScreeningResponse(
+            body.Reference!,
+            result.Outcome.ToString(),
+            Summary(result, lists, now),
+            ScreeningResponse.DisclaimerText,
+            result.MatcherVersion,
+            rows,
+            [.. result.Entries.Select(entry => EntryResponse.From(entry, options))]);
+    }
+
+    /// <summary>The screening and its audit line, for a caller that shapes its own response (the stream).</summary>
+    public ScreeningResult ScreenForStream(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists) => Run(body, lists).Result;
+
+    private (ScreeningResult Result, List<ListResponse> Rows, DateTimeOffset Now) Run(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists)
     {
         var now = clock.GetUtcNow();
-        var lists = catalog.Lists;
         var screened = lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? list.Index : null)).ToList();
         var result = screener.Screen(new ScreeningRequest(body.ReceiverName, body.CompanyName, body.Address), screened);
 
@@ -60,14 +87,7 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
             .ToList();
 
         Audit(body.Reference!, result, rows);
-        return new ScreeningResponse(
-            body.Reference!,
-            result.Outcome.ToString(),
-            Summary(result, lists, now),
-            ScreeningResponse.DisclaimerText,
-            result.MatcherVersion,
-            rows,
-            [.. result.Entries.Select(entry => EntryResponse.From(entry, options))]);
+        return (result, rows, now);
     }
 
     /// <summary>The audit line: the reference, the outcome, the versions that produced it, and per entry kind and list

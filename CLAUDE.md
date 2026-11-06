@@ -120,7 +120,10 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Endpoints** (controllers; every response a record in `Controllers/ApiResponses.cs`): `POST /api/v1/screenings`
   (`{receiverName, companyName, address}`, each optional up to 300 characters, at least one; 503 `{state:"warmingUp"}`
   before the first load; rows with hits first; a summary worded "No match found in: EU, as of …; …" and never
-  "not sanctioned"; the disclaimer), `GET /api/v1/status`, `GET /api/v1/examples` (entities from the live lists: a
+  "not sanctioned"; the disclaimer), `POST /api/v1/screenings/stream` (NDJSON in and out: a header, one result or
+  error line per record as it's screened, an end line; one snapshot per stream; at most `Screening:StreamMaxRecords`
+  (50,000) or `StreamMaxSeconds` (200, under the ingress's 240), then `end` says `nextLine` to resume from; one
+  stream at a time, `Screening:ConcurrentStreams`; never echoes input; `docs/api.md`), `GET /api/v1/status`, `GET /api/v1/examples` (entities from the live lists: a
   Latin one, a Cyrillic alias, one with an address, one with a typo; cached per snapshot), `GET /healthz` (liveness, no
   database), `GET /readyz` (200 after the first load), `GET /openapi/v1.json`.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the

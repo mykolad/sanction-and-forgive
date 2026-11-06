@@ -10,7 +10,10 @@ public static class RateLimits
 {
     public const string Screenings = "screenings";
 
-    public static IServiceCollection AddScreeningRateLimit(this IServiceCollection services, int perMinute)
+    /// <summary>Streams at once, across all clients (`Screening:ConcurrentStreams`, 1): a batch takes the CPU.</summary>
+    public const string Streams = "streams";
+
+    public static IServiceCollection AddScreeningRateLimit(this IServiceCollection services, int perMinute, int concurrentStreams)
     {
         services.Configure<ForwardedHeadersOptions>(options =>
         {
@@ -28,6 +31,9 @@ public static class RateLimits
                 : RateLimitPartition.GetFixedWindowLimiter(
                     context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     _ => new FixedWindowRateLimiterOptions { PermitLimit = perMinute, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            limiter.AddPolicy(Streams, _ => RateLimitPartition.GetConcurrencyLimiter(
+                "streams",
+                _ => new ConcurrencyLimiterOptions { PermitLimit = Math.Max(1, concurrentStreams), QueueLimit = 0 }));
         });
     }
 }
