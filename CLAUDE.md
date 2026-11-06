@@ -213,20 +213,29 @@ required on `master`:
 Spec sections 4 ("Import rules") and 6. The database holds parsed lists only, never anything a user enters.
 
 - **Tables:** `Sources` (code, name, URL or null for manual, `MaxAgeHours` or null for manual, `ActiveImportId`,
-  `LastCheckedAt`), `Imports` (status `Running` / `Completed` / `Failed` / `Rejected`, `ContentHash`, `RecordCount`,
-  `Message`), `Subjects`, `SubjectNames` (with `IsWeak` and `Script`), `SubjectAddresses`. Normalised forms are
+  `LastCheckedAt`), `Imports` (status `Running` / `Completed` / `Failed` / `Rejected` / `PendingReview`, `ContentHash`,
+  `RecordCount`, `Message`, `HasData`, `ReviewedAt`/`ReviewedBy`; every row stays as the list's history), `Subjects`, `SubjectNames` (with `IsWeak` and `Script`), `SubjectAddresses`. Normalised forms are
   never stored: a dictionary change needs no re-import.
 - **`ImportStore.ImportAsync`:** an application lock per source; the canonical hash (records sorted by external id,
-  generation dates don't count) → `Unchanged` only moves `LastCheckedAt`; the sanity guard (zero records, or a drop of
-  more than 20%; `--force` overrides the drop, never zero) → `Rejected`, old list kept, `LastCheckedAt` not moved, so a
-  persistent problem turns the list stale; otherwise `SqlBulkCopy` in batches of 5,000, then one `SaveChanges` flips
-  `ActiveImportId` (a single SaveChanges is one transaction and works with EF's retrying strategy; a user-started
-  transaction doesn't). The active and the previous import are kept; older ones are deleted in chunks.
+  generation dates don't count) → `Unchanged` only moves `LastCheckedAt`; zero records → `Rejected`; a drop of more
+  than 20% (owner's decision, 2026-11-06) → written in full but **held** (`PendingReview`, `ImportResult.HeldForReview`):
+  the old list keeps serving, `LastCheckedAt` doesn't move, so it still ages out after `MaxAgeHours`; the same update
+  again stays held without writing; a later update that needs no review, or the feed returning to the active list,
+  supersedes it (`Rejected`, "superseded"), always in the same transaction as that activation or check (records
+  later). A hold keeps `BasedOnImportId`, the list it was compared with: `ReviewAsync` confirms only while that's still
+  active (never a rollback), in the activation's transaction with the reviewer and `LastCheckedAt` = when it was
+  downloaded; rejecting marks it `Rejected` before deleting its records. `HeldAsync` finds holds however old (the
+  history is bounded); the public history never shows a failure's details or a reviewer's name. `--force` imports past the drop, never zero. Otherwise
+  `SqlBulkCopy` in batches of 5,000, then the conditional flip of `ActiveImportId`. Records are kept for the active
+  import, the one before it and a held one; other imports' records are deleted in chunks (`HasData` false), their rows
+  stay.
 - **Staleness** counts from `LastCheckedAt`, the last successful check, not publication.
 - **CLI commands** (`SanctionAndForgive.Cli`, via `tools/lists.ps1`): `probe`, `import --source <code>|all [--file]
   [--force]` (`all` = `Active` feeds; naming a `TermsUnclear` feed imports it: naming it is the decision), `status`,
+  `history [--source]`, `review`, `confirm --import <id>`, `reject --import <id>` (the reviewer is `SUSER_SNAME()`),
   `source-add`, `add` (CSV upsert by external id), `remove`. A manual change is a new import too. One failed source
-  doesn't stop the others; any failure or rejection exits 1. Connection string: `ConnectionStrings:Lists` (environment
+  doesn't stop the others; any failure, rejection or held update exits 1 (and the import alert matches `FAILED`,
+  `Rejected` and `HeldForReview` in the job's output). Connection string: `ConnectionStrings:Lists` (environment
   or user secrets, id `sanction-and-forgive-api`, shared with the API).
 - **`tools/lists.ps1`** opens the SQL firewall for your IP, runs the CLI as your `az login`
   (`Authentication=Active Directory Default`), and closes the firewall. With `$env:ConnectionStrings__Lists` set it
@@ -270,7 +279,8 @@ be public).
   environment `production`: platform what-if and deploy, firewall open, migrations, firewall closed, app, smoke tests.
   `app.bicepparam` reads `IMAGE_TAG` and `RATE_LIMIT_PER_MINUTE` (120; 0 for a load test only).
 - **Alerts** (all to the subscription's Owner role through the action group): database storage above 80%, an import
-  that failed or was rejected (a log query on the job's console and system logs), and a $20 monthly budget.
+  that failed, was rejected or was held for review (a log query on the job's console and system logs), and a $20
+  monthly budget.
 
 - **Deploy identity** `sanction-and-forgive-github-cd`: Contributor on the resource group only, trusted from the
   GitHub `production` environment only (master). The workflows log in with OIDC using the repository variables

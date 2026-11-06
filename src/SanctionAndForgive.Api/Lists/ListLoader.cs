@@ -11,8 +11,11 @@ namespace SanctionAndForgive.Api.Lists;
 /// against its import's record count, so a concurrent cleanup can never make half a list searchable; a list that
 /// fails either stays Not checked. If the database is unreachable the catalog keeps serving what it has, and lists
 /// age out.</summary>
-public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, ILogger<ListLoader> logger)
+public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, TimeProvider clock, ILogger<ListLoader> logger)
 {
+    /// <summary>How many of each source's latest imports the status page shows.</summary>
+    public const int HistoryLength = 10;
+
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopes.CreateAsyncScope();
@@ -20,6 +23,14 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
         var sources = await context.Sources.AsNoTracking().OrderBy(source => source.Code)
             .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport != null ? source.ActiveImport!.RecordCount : 0, UpdatedAt = source.ActiveImport != null ? source.ActiveImport!.CompletedAt : null })
             .ToListAsync(cancellationToken);
+
+        // The history first: a small read, and the status page shows a held update even while lists rebuild.
+        var store = new ImportStore(context, clock);
+        var history = await store.HistoryAsync(code: null, HistoryLength, cancellationToken);
+        catalog.ReplaceHeld((await store.HeldAsync(cancellationToken)).GroupBy(entry => entry.SourceCode, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
+        catalog.ReplaceHistory(history.GroupBy(entry => entry.SourceCode, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<ImportHistoryEntry>)[.. group], StringComparer.Ordinal));
 
         var current = catalog.Lists.ToDictionary(list => list.Code, StringComparer.Ordinal);
         var lists = new LoadedList[sources.Count];

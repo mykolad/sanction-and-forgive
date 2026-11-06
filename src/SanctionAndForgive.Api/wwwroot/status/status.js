@@ -70,11 +70,50 @@ function searchedRow(list, now) {
     listCell(list),
     el("td", {},
       el("span", { class: `state-badge ${list.state}` }, el("span", { "aria-hidden": "true" }, state.symbol), " ", state.label),
-      list.reason ? el("span", { class: "sub" }, list.reason) : null),
+      list.reason ? el("span", { class: "sub" }, list.reason) : null,
+      list.held ? held(list) : null),
     el("td", { class: "num" }, list.recordCount.toLocaleString()),
     el("td", {}, when(list.lastCheckedAt, now), list.maxAgeHours ? el("span", { class: "sub" }, `allowed age ${list.maxAgeHours} h`) : null),
     el("td", {}, when(list.updatedAt, now)),
     el("td", { class: "links" }, links(list)));
+}
+
+// An update held for review: the list above still serves; a person confirms or rejects it.
+function held(list) {
+  return el("span", { class: "held" },
+    el("span", { class: "state-badge Held" }, el("span", { "aria-hidden": "true" }, "!"), " Update held for review"),
+    el("span", { class: "sub" },
+      `${list.held.recordCount.toLocaleString()} records downloaded ${utc(list.held.downloadedAt)}, against ${list.recordCount.toLocaleString()} now. `,
+      "Screenings keep using the list above while it's current (it still turns Not checked after its allowed age) until an administrator confirms or rejects the update."));
+}
+
+const RESULTS = {
+  Active: "The list in use",
+  Replaced: "Replaced by a later update",
+  HeldForReview: "Held for review",
+  Rejected: "Rejected",
+  Failed: "Failed",
+  Running: "Running",
+};
+
+function historyBlock(list, now) {
+  const rows = list.history.map((entry) => el("tr", {},
+    el("td", {}, when(entry.startedAt, now)),
+    el("td", {}, el("span", { class: `update-result ${entry.result}` }, RESULTS[entry.result] ?? entry.result), entry.reviewed ? el("span", { class: "sub" }, "after review") : null),
+    el("td", { class: "num" }, entry.result === "Failed" ? "" : entry.recordCount.toLocaleString()),
+    el("td", { class: "note" }, entry.note ?? "")));
+  const last = list.history.find((entry) => entry.result === "Active" || entry.result === "Replaced");
+  return el("details", { class: "history" },
+    el("summary", {}, el("span", { class: "list-title" }, list.name),
+      el("span", { class: "muted" }, list.history.length
+        ? ` · the latest ${list.history.length} ${list.history.length === 1 ? "update" : "updates"}${last ? `; current list from ${utc(list.updatedAt ?? last.completedAt)}` : ""}`
+        : " · no updates recorded"),
+      list.held ? el("span", { class: "state-badge Held" }, " ! held for review") : null),
+    list.history.length
+      ? el("div", { class: "table-scroll" }, el("table", { class: "sources" },
+        el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "When"), el("th", { scope: "col" }, "Result"), el("th", { scope: "col", class: "num" }, "Records"), el("th", { scope: "col" }, "Note"))),
+        el("tbody", {}, rows)))
+      : el("p", { class: "muted" }, "Nothing recorded yet."));
 }
 
 function notImportedRow(list) {
@@ -99,6 +138,7 @@ async function load() {
     const current = searched.filter((list) => list.state === "Current");
     $("sources-table").tBodies[0].replaceChildren(...searched.map((list) => searchedRow(list, now)));
     $("not-imported-table").tBodies[0].replaceChildren(...body.lists.filter((list) => list.state === "NotImported").map(notImportedRow));
+    $("history").replaceChildren(...searched.map((list) => historyBlock(list, now)));
     const records = current.reduce((sum, list) => sum + list.recordCount, 0);
     stateBox.textContent = `${current.length} of ${searched.length} lists searched now: ${records.toLocaleString()} records.`;
     stateBox.classList.remove("error");

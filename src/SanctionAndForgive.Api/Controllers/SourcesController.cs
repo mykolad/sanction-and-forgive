@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SanctionAndForgive.Api.Lists;
+using SanctionAndForgive.Data;
 using SanctionAndForgive.Lists;
 
 namespace SanctionAndForgive.Api.Controllers;
@@ -24,7 +25,15 @@ public sealed class SourcesController(ListCatalog catalog, TimeProvider clock) :
 
         var now = clock.GetUtcNow();
         var loaded = catalog.Lists;
-        var searched = loaded.Select(list => SourceResponse.From(list, ListSources.Find(list.Code), now));
+        var history = catalog.History;
+        var heldUpdates = catalog.Held;
+        var searched = loaded.Select(list => SourceResponse.From(list, ListSources.Find(list.Code), now) with
+        {
+            Held = heldUpdates.GetValueOrDefault(list.Code) is { } held
+                ? new HeldUpdateResponse(held.Id, held.RecordCount, held.StartedAt, held.Message)
+                : null,
+            History = [.. (history.GetValueOrDefault(list.Code) ?? []).Select(HistoryEntryResponse.From)],
+        });
         var notImported = ListSources.All
             .Where(source => !loaded.Any(list => string.Equals(list.Code, source.Code, StringComparison.OrdinalIgnoreCase)))
             .Select(SourceResponse.NotImported);
@@ -57,6 +66,12 @@ public sealed record SourceResponse(
     string? FileUrl,
     string? TermsUrl)
 {
+    /// <summary>An update held for review (a drop of more than 20%), if one is waiting: the list above still serves.</summary>
+    public HeldUpdateResponse? Held { get; init; }
+
+    /// <summary>The latest imports, newest first: changes, failures, held and rejected updates.</summary>
+    public IReadOnlyList<HistoryEntryResponse> History { get; init; } = [];
+
     public static SourceResponse From(LoadedList list, ListSource? source, DateTimeOffset now)
     {
         var current = list.IsCurrent(now);
@@ -94,4 +109,31 @@ public sealed record SourceResponse(
         source.Homepage,
         FileUrl: null,
         source.TermsUrl);
+}
+
+/// <summary>An update held for review: what was downloaded, and why it's held. Confirming or rejecting it takes an
+/// administrator (<c>tools/lists.ps1 confirm|reject -Import</c>).</summary>
+public sealed record HeldUpdateResponse(int ImportId, int RecordCount, DateTimeOffset DownloadedAt, string? Reason);
+
+/// <param name="Result"><c>Active</c> (the list in use: searched while it's current), <c>Replaced</c> (an earlier
+/// list), <c>HeldForReview</c>, <c>Rejected</c>, <c>Failed</c> or <c>Running</c>.</param>
+/// <param name="Note">Why it was held or rejected. For a failure, only that it failed: its details (an exception, a
+/// path on the operator's machine) stay in <c>tools/lists.ps1 history</c>.</param>
+/// <param name="Reviewed">Whether a person confirmed or rejected it (who, isn't public).</param>
+public sealed record HistoryEntryResponse(int ImportId, string Result, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, int RecordCount, string? Note, bool Reviewed)
+{
+    public static HistoryEntryResponse From(ImportHistoryEntry entry) => new(
+        entry.Id,
+        entry.Active ? "Active"
+            : entry.Status switch
+            {
+                ImportStatus.Completed => "Replaced",
+                ImportStatus.PendingReview => "HeldForReview",
+                _ => entry.Status.ToString(),
+            },
+        entry.StartedAt,
+        entry.CompletedAt,
+        entry.RecordCount,
+        entry.Status == ImportStatus.Failed ? "The download or the parse failed." : entry.Message,
+        entry.ReviewedAt is not null);
 }

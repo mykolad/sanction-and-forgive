@@ -29,11 +29,29 @@ public sealed class ListCatalog
 {
     private volatile Snapshot snapshot = new([], Ready: false);
 
+    private volatile IReadOnlyDictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>> history =
+        new Dictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>>();
+
     public bool IsReady => snapshot.Ready;
 
     public IReadOnlyList<LoadedList> Lists => snapshot.Lists;
 
     public void Replace(IReadOnlyList<LoadedList> lists) => snapshot = new Snapshot(lists, Ready: true);
+
+    /// <summary>Each source's latest imports, newest first, as of the last refresh: for the status page, so it never
+    /// reads the database either.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>> History => history;
+
+    public void ReplaceHistory(IReadOnlyDictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>> latest) => history = latest;
+
+    private volatile IReadOnlyDictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> held =
+        new Dictionary<string, SanctionAndForgive.Data.ImportHistoryEntry>();
+
+    /// <summary>Each source's update held for review (the newest, if any), read on its own: it shows however many
+    /// checks came after it, not only while it's within <see cref="History"/>.</summary>
+    public IReadOnlyDictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> Held => held;
+
+    public void ReplaceHeld(IReadOnlyDictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> latest) => held = latest;
 
     private sealed record Snapshot(IReadOnlyList<LoadedList> Lists, bool Ready);
 }

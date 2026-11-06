@@ -67,6 +67,59 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
         return 0;
     }
 
+    /// <summary>Each source's latest imports, newest first: changes, failures, held and rejected updates.</summary>
+    public async Task<int> HistoryAsync(string? code, CancellationToken cancellationToken)
+    {
+        var history = await store.HistoryAsync(code, perSource: 20, cancellationToken);
+        output.WriteLine("source     import  started (UTC)     status         records  note");
+        foreach (var entry in history)
+        {
+            var status = entry.Active ? "Active" : entry.Status.ToString();
+            var reviewed = entry.ReviewedBy is { } by ? string.Create(CultureInfo.InvariantCulture, $" (reviewed by {by}, {entry.ReviewedAt:yyyy-MM-dd HH:mm})") : string.Empty;
+            output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                $"{entry.SourceCode,-10} {entry.Id,6}  {entry.StartedAt:yyyy-MM-dd HH:mm}  {status,-13} {entry.RecordCount,8:N0}  {entry.Message}{reviewed}"));
+        }
+
+        return 0;
+    }
+
+    /// <summary>Updates held for review, with what they would replace. Confirm or reject each by its import id.</summary>
+    public async Task<int> ReviewListAsync(CancellationToken cancellationToken)
+    {
+        var statuses = await store.StatusAsync(cancellationToken);
+        var held = await store.HeldAsync(cancellationToken);
+        if (held.Count == 0)
+        {
+            output.WriteLine("No updates are held for review.");
+            return 0;
+        }
+
+        foreach (var entry in held)
+        {
+            var status = statuses.First(status => status.Code == entry.SourceCode);
+            output.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                $"{entry.SourceCode}: import {entry.Id}, downloaded {entry.StartedAt:yyyy-MM-dd HH:mm} UTC, {entry.RecordCount:N0} records; active list {status.RecordCount:N0} records. {entry.Message}"));
+        }
+
+        output.WriteLine("Check the publisher's site, then: confirm -Import <id>, or reject -Import <id>.");
+        return 0;
+    }
+
+    /// <summary>Confirms or rejects a held update, recording the reviewer: the database login (your az login
+    /// through tools/lists.ps1).</summary>
+    public async Task<int> ReviewAsync(int importId, bool confirm, CancellationToken cancellationToken)
+    {
+        var result = await store.ReviewAsync(importId, confirm, await store.CurrentLoginAsync(cancellationToken), cancellationToken);
+        output.WriteLine(result switch
+        {
+            ReviewResult.Confirmed => $"Import {importId} confirmed: it's the active list now. The API picks it up within its refresh interval.",
+            ReviewResult.Rejected => $"Import {importId} rejected: its records are deleted; the active list is unchanged.",
+            ReviewResult.NotFound => $"There's no import {importId}.",
+            _ => $"Import {importId} isn't held for review (see history).",
+        });
+        return result is ReviewResult.Confirmed or ReviewResult.Rejected ? 0 : 1;
+    }
+
     /// <summary>Creates (or renames) a manual source. Codes are lower-case letters, digits and hyphens, so a padded or
     /// differently cased code can't reach a feed's row (SQL Server compares them as equal).</summary>
     public async Task<int> SourceAddAsync(string code, string name, CancellationToken cancellationToken)
@@ -171,8 +224,14 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
             }
 
             var outcome = await store.ImportAsync(record, subjects, force, cancellationToken);
+            // "Rejected" and "HeldForReview" in this line are what the import alert looks for (infra/platform.bicep).
             output.WriteLine($"{source.Code}: {outcome.Result}, {outcome.RecordCount} records (was {outcome.PreviousCount?.ToString(CultureInfo.InvariantCulture) ?? "none"}). {outcome.Message}");
-            return outcome.Result != ImportResult.Rejected;
+            if (outcome.Result == ImportResult.HeldForReview)
+            {
+                output.WriteLine($"{source.Code}: check the publisher's site, then confirm -Import {outcome.ImportId} or reject -Import {outcome.ImportId}.");
+            }
+
+            return outcome.Result is not (ImportResult.Rejected or ImportResult.HeldForReview);
         }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutException or IOException or ListFormatException or System.Xml.XmlException
             or System.Text.Json.JsonException or Microsoft.Data.SqlClient.SqlException or Microsoft.EntityFrameworkCore.DbUpdateException or Microsoft.EntityFrameworkCore.Storage.RetryLimitExceededException

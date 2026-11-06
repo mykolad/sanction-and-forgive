@@ -233,6 +233,18 @@ table.entries .entry-detail .detail { margin-top: 0; }
 .pager button:disabled { opacity: 0.45; cursor: default; }
 .state-badge { display: inline-block; font-weight: 700; border-radius: 8px; padding: 2px 10px; border: 1.5px solid; white-space: nowrap; }
 .state-badge.Current { background: var(--clear-bg); color: var(--clear-ink); border-color: var(--clear-edge); }
+.state-badge.Held { background: var(--review-bg); color: var(--review-ink); border-color: var(--review-edge); }
+.held { display: block; margin-top: 8px; }
+details.history { border-top: 1px solid var(--border); padding: 10px 0; }
+details.history:first-child { border-top: none; }
+details.history summary { cursor: pointer; padding: 4px 0; }
+details.history summary .state-badge { margin-left: 8px; font-size: 0.85rem; }
+details.history table { margin-top: 8px; }
+details.history .note { color: var(--muted); font-size: 0.9rem; }
+.update-result { font-weight: 650; }
+.update-result.HeldForReview { color: var(--review-ink); }
+.held .sub { max-width: 34ch; }
+.update-result.Failed, .update-result.Rejected { color: var(--match-ink); }
 .state-badge.NotChecked, .state-badge.NotImported { background: var(--gap-bg); color: var(--gap-ink); border-color: var(--gap-edge); border-style: dashed; }
 
 @media (max-width: 720px) {

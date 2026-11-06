@@ -30,6 +30,9 @@ namespace SanctionAndForgive.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("BasedOnImportId")
+                        .HasColumnType("int");
+
                     b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -37,6 +40,9 @@ namespace SanctionAndForgive.Data.Migrations
                         .HasMaxLength(64)
                         .IsUnicode(false)
                         .HasColumnType("varchar(64)");
+
+                    b.Property<bool>("HasData")
+                        .HasColumnType("bit");
 
                     b.Property<string>("Message")
                         .HasMaxLength(1000)
@@ -47,6 +53,13 @@ namespace SanctionAndForgive.Data.Migrations
 
                     b.Property<int>("RecordCount")
                         .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ReviewedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<int>("SourceId")
                         .HasColumnType("int");
@@ -62,7 +75,7 @@ namespace SanctionAndForgive.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("SourceId");
+                    b.HasIndex("SourceId", "Status");
 
                     b.ToTable("Imports");
                 });

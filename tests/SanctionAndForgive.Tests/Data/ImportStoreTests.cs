@@ -75,22 +75,170 @@ public sealed class ImportStoreTests : IAsyncLifetime
     }
 
     [SqlServerFact]
-    public async Task LargeDrop_IsRejected_UnlessForced()
+    public async Task LargeDrop_IsHeldForReview_WrittenButNotActive_UnlessForced()
     {
         await using var context = CreateContext();
         var store = new ImportStore(context, clock);
         var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
         await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
-        var firstImport = source.ActiveImportId;
+        var (firstImport, checkedAt) = (source.ActiveImportId, source.LastCheckedAt);
+        clock.Advance(TimeSpan.FromDays(1));
 
-        var rejected = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
-        Assert.Equal(ImportResult.Rejected, rejected.Result);
-        Assert.Equal(firstImport, source.ActiveImportId);
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+        Assert.Equal(ImportResult.HeldForReview, held.Result);
+        Assert.Equal((firstImport, checkedAt), (source.ActiveImportId, source.LastCheckedAt));
         Assert.Equal(10, (await store.ActiveSubjectsAsync(source, CancellationToken.None)).Count);
+        var import = await context.Imports.AsNoTracking().SingleAsync(i => i.Id == held.ImportId);
+        Assert.Equal((ImportStatus.PendingReview, true, 7), (import.Status, import.HasData, await context.Subjects.CountAsync(s => s.ImportId == import.Id)));
+        Assert.Equal(import.Id, Assert.Single(await store.StatusAsync(CancellationToken.None)).HeldImportId);
 
         var forced = await store.ImportAsync(source, Subjects(7), force: true, CancellationToken.None);
         Assert.Equal(ImportResult.Imported, forced.Result);
         Assert.Equal(7, (await store.ActiveSubjectsAsync(source, CancellationToken.None)).Count);
+    }
+
+    [SqlServerFact]
+    public async Task TheSameHeldUpdateAgain_StaysHeld_WritesNothing_AndTheListAgesOut()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var first = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+        clock.Advance(TimeSpan.FromDays(4));
+
+        var again = await store.ImportAsync(source, [.. Subjects(7).AsEnumerable().Reverse()], force: false, CancellationToken.None);
+
+        Assert.Equal((ImportResult.HeldForReview, first.ImportId), (again.Result, again.ImportId));
+        Assert.Equal(2, await context.Imports.CountAsync());
+        Assert.False(Assert.Single(await store.StatusAsync(CancellationToken.None)).Current);
+    }
+
+    [SqlServerFact]
+    public async Task ConfirmingAHeldUpdate_MakesItActive_CheckedWhenItWasDownloaded_ByTheReviewer()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        clock.Advance(TimeSpan.FromHours(1));
+        var downloadedAt = clock.GetUtcNow();
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+        clock.Advance(TimeSpan.FromHours(5));
+
+        var result = await store.ReviewAsync(held.ImportId!.Value, confirm: true, "owner@example.invalid", CancellationToken.None);
+
+        Assert.Equal(ReviewResult.Confirmed, result);
+        await context.Entry(source).ReloadAsync();
+        Assert.Equal((held.ImportId, downloadedAt), (source.ActiveImportId, source.LastCheckedAt));
+        Assert.Equal(7, (await store.ActiveSubjectsAsync(source, CancellationToken.None)).Count);
+        var entry = (await store.HistoryAsync("eu", perSource: 10, CancellationToken.None))[0];
+        Assert.Equal((held.ImportId!.Value, true, "owner@example.invalid", clock.GetUtcNow()), (entry.Id, entry.Active, entry.ReviewedBy, entry.ReviewedAt));
+        Assert.Equal(ReviewResult.NotPending, await store.ReviewAsync(held.ImportId.Value, confirm: false, "owner@example.invalid", CancellationToken.None));
+        Assert.Equal(ReviewResult.NotFound, await store.ReviewAsync(999_999, confirm: true, "owner@example.invalid", CancellationToken.None));
+    }
+
+    [SqlServerFact]
+    public async Task AHold_IsSupersededWithTheActivation_AndAStaleOneCanNeverRollTheListBack()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+
+        var forced = await store.ImportAsync(source, Subjects(12), force: true, CancellationToken.None);
+        Assert.Equal(ImportStatus.Rejected, (await context.Imports.AsNoTracking().SingleAsync(i => i.Id == held.ImportId)).Status);
+
+        // As if the superseding had been lost: the hold looks pending again, still with its records.
+        await context.Imports.Where(i => i.Id == held.ImportId).ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, ImportStatus.PendingReview).SetProperty(i => i.HasData, true));
+        var result = await store.ReviewAsync(held.ImportId!.Value, confirm: true, "owner@example.invalid", CancellationToken.None);
+
+        Assert.Equal(ReviewResult.NotPending, result);
+        await context.Entry(source).ReloadAsync();
+        Assert.Equal(forced.ImportId, source.ActiveImportId);
+        Assert.Equal(12, (await store.ActiveSubjectsAsync(source, CancellationToken.None)).Count);
+    }
+
+    [SqlServerFact]
+    public async Task ANewerShortUpdate_ReplacesTheHold_AndTheOldHoldsRecordsAreDeleted()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var first = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+
+        var second = await store.ImportAsync(source, Subjects(6), force: false, CancellationToken.None);
+
+        Assert.Equal(ImportResult.HeldForReview, second.Result);
+        Assert.NotEqual(first.ImportId, second.ImportId);
+        var old = await context.Imports.AsNoTracking().SingleAsync(i => i.Id == first.ImportId);
+        Assert.Equal((ImportStatus.Rejected, false), (old.Status, old.HasData));
+        Assert.Equal(0, await context.Subjects.CountAsync(s => s.ImportId == first.ImportId));
+        Assert.Equal(second.ImportId, Assert.Single(await store.HeldAsync(CancellationToken.None)).Id);
+    }
+
+    [SqlServerFact]
+    public async Task AHeldUpdate_StaysFindable_AfterManyLaterChecks()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+        for (var i = 0; i < 25; i++)
+        {
+            await store.RecordFailureAsync(source, "HttpRequestException: 503", CancellationToken.None);
+        }
+
+        Assert.DoesNotContain(await store.HistoryAsync("eu", perSource: 20, CancellationToken.None), entry => entry.Id == held.ImportId);
+        Assert.Equal(held.ImportId, Assert.Single(await store.HeldAsync(CancellationToken.None)).Id);
+    }
+
+    [SqlServerFact]
+    public async Task RejectingAHeldUpdate_DeletesItsRecords_KeepsItInTheHistory()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var active = source.ActiveImportId;
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+
+        Assert.Equal(ReviewResult.Rejected, await store.ReviewAsync(held.ImportId!.Value, confirm: false, "owner@example.invalid", CancellationToken.None));
+
+        await context.Entry(source).ReloadAsync();
+        Assert.Equal(active, source.ActiveImportId);
+        Assert.Equal(0, await context.Subjects.CountAsync(s => s.ImportId == held.ImportId));
+        var entry = (await store.HistoryAsync("eu", perSource: 10, CancellationToken.None))[0];
+        Assert.Equal(ImportStatus.Rejected, entry.Status);
+        Assert.Contains("rejected on review", entry.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AHeldUpdate_IsSuperseded_WhenTheFeedReturnsToTheActiveList_OrALaterUpdateNeedsNoReview(bool laterUpdate)
+    {
+        if (Environment.GetEnvironmentVariable("SQLSERVER_TEST_CONNECTION") is not { Length: > 0 })
+        {
+            return;
+        }
+
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var held = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+
+        var outcome = await store.ImportAsync(source, Subjects(laterUpdate ? 11 : 10), force: false, CancellationToken.None);
+
+        Assert.Equal(laterUpdate ? ImportResult.Imported : ImportResult.Unchanged, outcome.Result);
+        var superseded = await context.Imports.AsNoTracking().SingleAsync(i => i.Id == held.ImportId);
+        Assert.Equal((ImportStatus.Rejected, false), (superseded.Status, superseded.HasData));
+        Assert.Contains("superseded", superseded.Message, StringComparison.Ordinal);
+        Assert.Equal(0, await context.Subjects.CountAsync(s => s.ImportId == held.ImportId));
     }
 
     [SqlServerFact]
@@ -107,7 +255,7 @@ public sealed class ImportStoreTests : IAsyncLifetime
     }
 
     [SqlServerFact]
-    public async Task OnlyTheActiveAndThePreviousImportAreKept()
+    public async Task OnlyTheActiveAndThePreviousImportKeepTheirRecords_EveryImportStaysInTheHistory()
     {
         await using var context = CreateContext();
         var store = new ImportStore(context, clock);
@@ -118,9 +266,12 @@ public sealed class ImportStoreTests : IAsyncLifetime
             await store.ImportAsync(source, Subjects(count), force: false, CancellationToken.None);
         }
 
-        Assert.Equal(2, await context.Imports.CountAsync());
         Assert.Equal(13 + 12, await context.Subjects.CountAsync());
         Assert.Equal((13 + 12) * 2, await context.SubjectNames.CountAsync());
+        var history = await store.HistoryAsync("eu", perSource: 10, CancellationToken.None);
+        Assert.Equal([13, 12, 11, 10], history.Select(entry => entry.RecordCount));
+        Assert.Equal([true, false, false, false], history.Select(entry => entry.Active));
+        Assert.Equal(2, await context.Imports.CountAsync(i => i.HasData));
     }
 
     [SqlServerFact]
@@ -153,7 +304,7 @@ public sealed class ImportStoreTests : IAsyncLifetime
         // 15 is fine against the stale 10, but more than a 20% drop from the real 20.
         var outcome = await staleStore.ImportAsync(stale, Subjects(15), force: false, CancellationToken.None);
 
-        Assert.Equal(ImportResult.Rejected, outcome.Result);
+        Assert.Equal(ImportResult.HeldForReview, outcome.Result);
         Assert.Equal(20, (await staleStore.ActiveSubjectsAsync(stale, CancellationToken.None)).Count);
     }
 

@@ -13,6 +13,10 @@ touched.
 ./tools/lists.ps1 import -Source all                      # every active feed, or any single feed code
 ./tools/lists.ps1 import -Source eu -File .\eu.xml        # import a file already downloaded
 ./tools/lists.ps1 import -Source un -Force                # import even if unchanged, or past the sanity guard
+./tools/lists.ps1 history -Source eu                      # the latest updates: new lists, failures, held, rejected
+./tools/lists.ps1 review                                  # updates held for review (a drop of more than 20%)
+./tools/lists.ps1 confirm -Import 123                     # make a held update the active list
+./tools/lists.ps1 reject -Import 123                      # discard a held update
 ./tools/lists.ps1 source-add -Code ee-mfa -Name "Estonia MFA national list"
 ./tools/lists.ps1 add -Source ee-mfa -File .\records.csv  # upsert by external_id
 ./tools/lists.ps1 remove -Source ee-mfa -ExternalId EE-12
@@ -21,7 +25,7 @@ touched.
 #>
 param(
     [Parameter(Mandatory, Position = 0)]
-    [ValidateSet('status', 'import', 'source-add', 'add', 'remove', 'probe', 'load-inputs')]
+    [ValidateSet('status', 'history', 'review', 'confirm', 'reject', 'import', 'source-add', 'add', 'remove', 'probe', 'load-inputs')]
     [string] $Command,
     [string] $Source,
     [string] $File,
@@ -29,6 +33,7 @@ param(
     [string] $Code,
     [string] $Name,
     [string] $ExternalId,
+    [int] $Import,
     [string] $ResourceGroup = 'sanction-and-forgive-rg',
     [string] $Server = 'sanction-and-forgive-sql',
     [string] $Database = 'sanction-and-forgive-db'
@@ -46,6 +51,7 @@ if ($Force) { $cliArgs += '--force' }
 if ($Code) { $cliArgs += @('--code', $Code) }
 if ($Name) { $cliArgs += @('--name', $Name) }
 if ($ExternalId) { $cliArgs += @('--external-id', $ExternalId) }
+if ($Import) { $cliArgs += @('--import', $Import) }
 
 function Invoke-Cli {
     dotnet run --project $project -c Release -- @cliArgs

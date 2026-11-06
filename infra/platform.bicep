@@ -227,7 +227,7 @@ resource importFailed 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
   name: '${name}-import-failed'
   location: location
   properties: {
-    description: 'The daily list import failed or rejected a source.'
+    description: 'The daily list import failed, rejected a source, or held an update for review.'
     severity: 2
     enabled: true
     scopes: [
@@ -244,7 +244,7 @@ union isfuzzy=true
   (datatable(Log_s: string) []),
   (ContainerAppConsoleLogs_CL
     | where tostring(column_ifexists("ContainerGroupName_s", "")) startswith "__JOB__"
-    | where tostring(column_ifexists("Log_s", "")) has_any ("FAILED", "Rejected")),
+    | where tostring(column_ifexists("Log_s", "")) has_any ("FAILED", "Rejected", "HeldForReview")),
   (ContainerAppSystemLogs_CL
     | where tostring(column_ifexists("JobName_s", "")) == "__JOB__"
     | where tostring(column_ifexists("Reason_s", "")) has_any ("Failed", "BackoffLimitExceeded", "DeadlineExceeded"))

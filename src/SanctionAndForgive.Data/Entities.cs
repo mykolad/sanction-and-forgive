@@ -34,8 +34,14 @@ public enum ImportStatus
     /// <summary>The download or the parse failed. Its subjects (if any) are deleted.</summary>
     Failed,
 
-    /// <summary>The sanity guard refused it: zero records, or a drop of more than 20%. Kept for diagnosis only.</summary>
+    /// <summary>Refused: zero records, refused on review, or superseded while held. Its records (if any) are
+    /// deleted; the row stays in the history with the reason.</summary>
     Rejected,
+
+    /// <summary>A drop of more than 20%: written in full but not active, until someone confirms or rejects it. The
+    /// active list keeps serving meanwhile (and ages out as usual). Superseded if the feed returns to the active list
+    /// or a later update needs no review.</summary>
+    PendingReview,
 }
 
 /// <summary>One import of one source: its own complete copy of the subjects.</summary>
@@ -63,6 +69,20 @@ public sealed class Import
 
     /// <summary>Why a failed or rejected import didn't become active. No input data: lists only.</summary>
     public string? Message { get; set; }
+
+    /// <summary>Whether its subject rows still exist. Every import's row stays as the list's history; the records
+    /// are kept only for the active import, the one before it, and one held for review.</summary>
+    public bool HasData { get; set; }
+
+    /// <summary>For an import held for review: the active import it was compared against. Confirming it is refused if
+    /// the source has moved on from that list since, so a stale hold can never roll a list back.</summary>
+    public int? BasedOnImportId { get; set; }
+
+    /// <summary>When a held import was confirmed or rejected, and by whom (the reviewer's sign-in name). Not shown
+    /// on the public pages.</summary>
+    public DateTimeOffset? ReviewedAt { get; set; }
+
+    public string? ReviewedBy { get; set; }
 }
 
 public enum SubjectType : byte

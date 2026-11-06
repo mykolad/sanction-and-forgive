@@ -127,6 +127,15 @@ Every list a screening searches, then every known feed that isn't imported, with
   the owner), `NeedsAccess` (an API key, or a site that refuses automated clients), or `Manual` (kept by hand).
 - `lastCheckedAt`: the last successful check, changed or not; freshness counts from it. `updatedAt`: when the
   list's content last changed here. `version`: the active import's id, as in the screening responses.
+- `held`: an update held for review, if one is waiting (`importId`, `recordCount`, `downloadedAt`, `reason`), however
+  many checks came after it. An update with more than 20% fewer records than the list it would replace is written but
+  not searched. Screenings keep using the active list while it's current; it still turns Not checked after its
+  allowed age. An administrator confirms or rejects the held one (`tools/lists.ps1 confirm|reject -Import <id>`).
+- `history`: the latest 10 updates, newest first, as of the API's last refresh (every 15 minutes): `importId`,
+  `result` (`Active`: the list in use; `Replaced`, `HeldForReview`, `Rejected`, `Failed`, `Running`), `startedAt`,
+  `completedAt`, `recordCount`, `note` (why it was held or rejected; a failure says only that the download or parse
+  failed, as the details stay in `tools/lists.ps1 history`) and `reviewed` (whether a person confirmed or rejected
+  it; who, isn't public).
 
 ## Browsing a list: `POST /api/v1/lists/{code}/browse` and `/lists`
 
