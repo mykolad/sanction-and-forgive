@@ -158,6 +158,38 @@ public sealed class StreamTests : IDisposable
     }
 
     [Fact]
+    public async Task AListedInitial_SaysWhichEnteredWordItMatched()
+    {
+        factory.Load(Feed("eu", "EU", Now, new ListedSubject("X-1", SubjectKind.Individual, "Шевченко Т.Г.", [new ListedName("Шевченко Т.Г.", IsWeak: false)], [], "TEST", null)));
+        using var client = factory.CreateClient();
+
+        var lines = await StreamAsync(client, """{"reference":"TX-1","receiverName":"Taras Shevchenko"}""");
+
+        var words = lines[1].GetProperty("entries")[0].GetProperty("cells")[0].GetProperty("best").GetProperty("words").EnumerateArray()
+            .Select(word => (word.GetProperty("entered").ValueKind == JsonValueKind.Null ? (int?)null : word.GetProperty("entered").GetInt32(), word.GetProperty("listed").GetString(), word.GetProperty("how").GetString())).ToList();
+        Assert.Contains((2, "шевченко", "Transliterated"), words);
+        Assert.Contains((1, "т", "Initial"), words);
+        Assert.Contains((null, "г", "InitialUnchecked"), words);
+    }
+
+    [Fact]
+    public async Task AnAddressOnlyHit_SaysWhichListedPartsAligned_WithoutTheEnteredText()
+    {
+        factory.Load(Feed("eu", "EU", Now, new ListedSubject("X-2", SubjectKind.Entity, "Northwind Shipping LLC", [new ListedName("Northwind Shipping LLC", IsWeak: false)], [new ListedAddress("ул. Ленина 5, Москва", "RU")], "TEST", null)));
+        using var client = factory.CreateClient();
+
+        var lines = await StreamAsync(client, """{"reference":"TX-1","address":"Lenina 5, Moskva"}""");
+
+        var best = lines[1].GetProperty("entries")[0].GetProperty("cells")[0].GetProperty("best");
+        var how = best.GetProperty("words").EnumerateArray().Select(word => word.GetProperty("how").GetString()).ToList();
+        Assert.Contains("SameNumber", how);
+        Assert.True(how.Count >= 3, string.Join(", ", how));
+        Assert.Contains(best.GetProperty("notes").EnumerateArray(), note => note.GetString()!.StartsWith("Address only:", StringComparison.Ordinal));
+        Assert.DoesNotContain("Lenina", best.GetRawText(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Moskva", best.GetRawText(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task AStalledUpload_StopsAtTheTimeLimit_WithAnEndLine()
     {
         // Real Kestrel: the in-memory test server only hands the app a request once its body is complete.
@@ -178,27 +210,67 @@ public sealed class StreamTests : IDisposable
             $"POST /api/v1/screenings/stream HTTP/1.1\r\nHost: {server.Authority}\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n{bodyBytes:x}\r\n{body}\r\n"));
         await connection.FlushAsync();
 
-        // Read the answer as it comes; once record 1 is answered, the time runs out with line 2 half sent.
-        var received = new StringBuilder();
+        // Read the answer as it comes, decoding the chunked body, until a complete end line has arrived; once record 1
+        // is answered, the time runs out with line 2 half sent.
+        var received = new List<byte>();
         var buffer = new byte[4096];
         var advanced = false;
+        List<JsonElement> lines = [];
         using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        while (!received.ToString().Contains("\"type\":\"end\"", StringComparison.Ordinal))
+        while (lines.Count == 0 || lines[^1].GetProperty("type").GetString() != "end")
         {
             var read = await connection.ReadAsync(buffer, patience.Token);
             Assert.NotEqual(0, read);
-            received.Append(Encoding.UTF8.GetString(buffer, 0, read));
-            if (!advanced && received.ToString().Contains("\"type\":\"result\"", StringComparison.Ordinal))
+            received.AddRange(buffer.AsSpan(0, read));
+            lines = CompleteLines(DechunkedBody([.. received]));
+            if (!advanced && lines.Any(line => line.GetProperty("type").GetString() == "result"))
             {
                 advanced = true;
                 kestrel.Clock.Advance(TimeSpan.FromSeconds(201));
             }
         }
 
-        var lines = received.ToString().Split('\n').Where(line => line.TrimStart().StartsWith("{\"type\"", StringComparison.Ordinal))
-            .Select(line => JsonDocument.Parse(line.Trim()).RootElement.Clone()).ToList();
         Assert.Equal(["header", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
         Assert.True(lines[^1].GetProperty("truncated").GetBoolean());
         Assert.Equal(2, lines[^1].GetProperty("nextLine").GetInt32());
+    }
+
+    /// <summary>The body of a chunked HTTP/1.1 response received so far: the complete chunks after the headers.</summary>
+    private static byte[] DechunkedBody(byte[] response)
+    {
+        var start = response.AsSpan().IndexOf("\r\n\r\n"u8);
+        if (start < 0)
+        {
+            return [];
+        }
+
+        var body = new List<byte>();
+        var position = start + 4;
+        while (true)
+        {
+            var sizeEnd = response.AsSpan(position).IndexOf("\r\n"u8);
+            if (sizeEnd < 0)
+            {
+                return [.. body];
+            }
+
+            var size = Convert.ToInt32(Encoding.ASCII.GetString(response, position, sizeEnd), 16);
+            var dataStart = position + sizeEnd + 2;
+            if (size == 0 || dataStart + size + 2 > response.Length)
+            {
+                return [.. body];
+            }
+
+            body.AddRange(response.AsSpan(dataStart, size));
+            position = dataStart + size + 2;
+        }
+    }
+
+    /// <summary>The NDJSON lines that have arrived whole (ended by a line break).</summary>
+    private static List<JsonElement> CompleteLines(byte[] body)
+    {
+        var text = Encoding.UTF8.GetString(body);
+        var end = text.LastIndexOf('\n');
+        return end < 0 ? [] : [.. text[..end].Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonDocument.Parse(line).RootElement.Clone())];
     }
 }

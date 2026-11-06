@@ -5,8 +5,8 @@ namespace SanctionAndForgive.Matching.Names;
 
 /// <summary>A name's percentage against one listed alias, and why. <paramref name="Ceiling"/> is the lowest cap that
 /// applied (or none): a later adjustment, such as a corroborating address, never lifts the result above it.
-/// <paramref name="Words"/> and <paramref name="Caps"/> say the same without quoting the entry.</summary>
-internal sealed record NameScore(int Percent, List<string> Explanation, int Ceiling, List<WordAlignment> Words, List<string> Caps)
+/// <paramref name="Words"/> and <paramref name="Notes"/> say the same without quoting the entry.</summary>
+internal sealed record NameScore(int Percent, List<string> Explanation, int Ceiling, List<WordAlignment> Words, List<string> Notes)
 {
     public static NameScore Zero(string reason) => new(0, [reason], 0, [], [reason]);
 }
@@ -188,8 +188,11 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
                 ? new WordAlignment(pair.Query + 1, otherSide.Core[pair.Listed].Text, How(pair.Alignment.Method))
                 : new WordAlignment(pair.Listed + 1, initialsSide.Core[pair.Query].Text, How(pair.Alignment.Method)))
             .ToList();
-        var candidates = Enumerable.Range(0, otherSide.Core.Length).Except(pairs.Select(pair => pair.Listed))
-            .Select(i => otherSide.Core[i]).Concat(otherSide.Initials).ToList();
+        var unpaired = Enumerable.Range(0, otherSide.Core.Length).Except(pairs.Select(pair => pair.Listed)).ToList();
+        var candidates = unpaired.Select(i => otherSide.Core[i]).Concat(otherSide.Initials).ToList();
+        // Each candidate's 1-based word position on its side (null for an initial): when the entry is the other side,
+        // that's the entered word an initial matched.
+        int? CandidatePosition(int candidate) => candidate < unpaired.Count ? unpaired[candidate] + 1 : null;
         var matches = MatchInitials(initialsSide.Initials, candidates);
         var leftOver = Enumerable.Range(0, candidates.Count).Except(matches.Values).Select(i => candidates[i]).ToList();
         int matched = matches.Count, contradicted = 0;
@@ -200,7 +203,9 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             if (matches.TryGetValue(i, out var candidate))
             {
                 explanation.Add($"Initial {initial} matches {candidates[candidate]}");
-                words.Add(new WordAlignment(null, queryHasInitials ? candidates[candidate].Text : initialsSide.Initials[i].Text, "Initial"));
+                words.Add(queryHasInitials
+                    ? new WordAlignment(null, candidates[candidate].Text, "Initial")
+                    : new WordAlignment(CandidatePosition(candidate), initialsSide.Initials[i].Text, "Initial"));
             }
             else if (leftOver.Count > 0)
             {
@@ -371,7 +376,8 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         _ => $"{query} ≠ {listed}",
     };
 
-    private static string How(AlignMethod method) => method switch
+    /// <summary>A method's name in <see cref="WordAlignment.How"/>.</summary>
+    internal static string How(AlignMethod method) => method switch
     {
         AlignMethod.Identical => "Same",
         AlignMethod.Transliteration => "Transliterated",

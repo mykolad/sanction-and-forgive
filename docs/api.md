@@ -27,7 +27,7 @@ Content-Type: application/x-ndjson
 
 ```
 {"type":"header","matcherVersion":"c0d2b94021a5","disclaimer":"…","lists":[…],"maxRecords":50000,"maxSeconds":200}
-{"type":"result","line":1,"reference":"TX-1","outcome":"Match","entries":[{"kind":"Company","cells":[{"list":"eu","state":"Checked","percent":99,"outcome":"Match","best":{"listedName":"…","alias":"…","externalId":"…","sourceUrl":"…","percent":99,"words":[{"entered":1,"listed":"romashka","how":"Transliterated"}],"caps":[],"addressState":"NotCompared"}},{"list":"uk","state":"NotChecked","percent":null,"outcome":null,"best":null}]}]}
+{"type":"result","line":1,"reference":"TX-1","outcome":"Match","entries":[{"kind":"Company","cells":[{"list":"eu","state":"Checked","percent":99,"outcome":"Match","best":{"listedName":"…","alias":"…","externalId":"…","sourceUrl":"…","percent":99,"words":[{"entered":1,"listed":"romashka","how":"Transliterated"}],"notes":[],"addressState":"NotCompared"}},{"list":"uk","state":"NotChecked","percent":null,"outcome":null,"best":null}]}]}
 {"type":"result","line":2,"reference":"TX-2","outcome":"Review","entries":[…]}
 {"type":"end","screened":2,"errors":0,"truncated":false,"nextLine":null}
 ```
@@ -42,8 +42,10 @@ Content-Type: application/x-ndjson
   `words` has, per entered word (1-based, among the words compared: legal forms, generic words and honorifics
   aside), the listed word it aligned with and `how` (`Same`, `Transliterated`, `SpellingVariant`, `Romanisation`,
   `Cognate`, `OneLetterDiffers`, `TwoLettersDiffer`; `NotListed` for an entered word with no partner, `NotEntered` for
-  a listed one; `Initial`, `InitialContradicts`, `InitialUnchecked` for initials). `caps` says why a percentage was
-  capped. The single endpoint gives the same explanation in plain words. Matching is deterministic, so screening
+  a listed one; `Initial`, `InitialContradicts`, `InitialUnchecked` for initials, with the entered word's position
+  when the initial is the listed one). An address-only hit lists the address parts that aligned the same way, plus
+  `SamePlace` and `SameNumber`. `notes` says the rest: why a percentage was capped, or how many address parts
+  aligned. The single endpoint gives the same explanation in plain words. Matching is deterministic, so screening
   one record again with the same list versions gives the same answer.
 - **`error`** for a record that couldn't be screened (not JSON, a line over 4,096 bytes, a missing reference, nothing
   entered, a field over 300 characters): `line`, the `reference` if there was one, and `errors` by field. The

@@ -29,20 +29,27 @@ internal sealed class AddressComparer(TokenComparer comparer, MatcherData data)
     }
 
     /// <summary>Address-only screening: at least 3 tokens align, with a number and a word, and the countries don't
-    /// conflict. Returns the number of aligned tokens, and whether the rule is met.</summary>
-    public (int Aligned, bool Matches, string Explanation) CompareAddressOnly(AddressForm entered, AddressForm listed)
+    /// conflict. Returns the number of aligned tokens, whether the rule is met, and the listed parts that aligned
+    /// (input-free: <see cref="WordAlignment"/>). The explanation gives counts only, never the entered text.</summary>
+    public (int Aligned, bool Matches, string Explanation, List<WordAlignment> Words) CompareAddressOnly(AddressForm entered, AddressForm listed)
     {
         if (entered.EffectiveCountry is { } a && listed.EffectiveCountry is { } b && a != b)
         {
-            return (0, false, $"Countries differ: {a}, {b}");
+            return (0, false, "Address only: the countries differ", []);
         }
 
-        var places = entered.Places.Intersect(listed.Places).Count();
-        var words = AlignedWords(entered.Words, listed.Words).Count;
-        var numbers = entered.Numbers.Select(number => number.Text).Intersect(listed.Numbers.Select(number => number.Text)).Count();
-        var aligned = places + words + numbers;
-        var matches = aligned >= 3 && numbers >= 1 && places + words >= 1;
-        return (aligned, matches, $"Address only: {aligned} parts align ({places + words} words or places, {numbers} numbers)");
+        var places = entered.Places.Intersect(listed.Places).ToList();
+        var words = AlignedWords(entered.Words, listed.Words);
+        var numbers = entered.Numbers.Select(number => number.Text).Intersect(listed.Numbers.Select(number => number.Text)).ToList();
+        var aligned = places.Count + words.Count + numbers.Count;
+        var matches = aligned >= 3 && numbers.Count >= 1 && places.Count + words.Count >= 1;
+        List<WordAlignment> parts =
+        [
+            .. places.Select(place => new WordAlignment(null, PlaceName(place), "SamePlace")),
+            .. words.Select(pair => new WordAlignment(Array.IndexOf(entered.Words, pair.Entered) + 1, pair.Listed.Text, NameScorer.How(comparer.Compare(pair.Entered, pair.Listed).Method))),
+            .. numbers.Select(number => new WordAlignment(null, number, "SameNumber")),
+        ];
+        return (aligned, matches, $"Address only: {aligned} parts align ({places.Count + words.Count} words or places, {numbers.Count} numbers)", parts);
     }
 
     private AddressComparison CompareOne(AddressForm entered, AddressForm listed)
