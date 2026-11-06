@@ -10,6 +10,7 @@
 // Report the last step it sustained, with its p95, in docs/load-test.md.
 import http from 'k6/http';
 import { check } from 'k6';
+import exec from 'k6/execution';
 import { SharedArray } from 'k6/data';
 
 const BASE_URL = (__ENV.BASE_URL || '').replace(/\/$/, '');
@@ -18,6 +19,15 @@ if (!BASE_URL) throw new Error('Set BASE_URL, e.g. -e BASE_URL=https://sanction-
 // Screenings per second, step by step. STAGES='1,2,4' overrides; STEP is each step's length.
 const STAGES = (__ENV.STAGES || '1,2,4,6,8,12,16,24,32').split(',').map(Number);
 const STEP = __ENV.STEP || '2m';
+const RAMP = '20s';
+// A k6 duration ("2m", "90s", "1m30s", "1h") in seconds; anything else stops the run before it starts, since a step
+// tag that matches no threshold would silently bypass them.
+function seconds(value) {
+  const match = /^(?:(\d+)h)?(?:(\d+)m(?!s))?(?:(\d+)s)?$/.exec(value);
+  if (!match || !value) throw new Error(`Unsupported duration ${value}: use h, m and s, e.g. 2m or 1m30s`);
+  return Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0);
+}
+const STEP_SECONDS = seconds(RAMP) + seconds(STEP);
 const VUS = Math.max(20, Math.ceil(Math.max(...STAGES) * 3));
 
 // receiverName,companyName,address,kind: every field quoted or empty (load-inputs writes it that way).
@@ -51,24 +61,37 @@ export const options = {
       preAllocatedVUs: VUS,
       maxVUs: VUS,
       stages: STAGES.flatMap(rate => [
-        { target: rate, duration: '20s' },
+        { target: rate, duration: RAMP },
         { target: rate, duration: STEP },
       ]),
       gracefulStop: '30s',
     },
   },
-  thresholds: {
-    // Stop once the app clearly can't keep up (after a minute, so a cold start doesn't count).
-    http_req_duration: [{ threshold: 'p(95)<2000', abortOnFail: true, delayAbortEval: '1m' }],
-    http_req_failed: [{ threshold: 'rate<0.02', abortOnFail: true, delayAbortEval: '1m' }],
-  },
+  // Per step (every request is tagged with its step's rate), so one step's p95 and failures are judged on their own,
+  // and the summary reports each plateau. Stop once a step clearly can't keep up (judged from 30 s into that step:
+  // delayAbortEval counts from the start of the run, so each step's delay is offset by its own start), or once k6
+  // itself can't keep the arrival rate (dropped iterations: then what was measured isn't the rate asked for).
+  thresholds: Object.assign(
+    { dropped_iterations: [{ threshold: 'count<10', abortOnFail: true }] },
+    ...STAGES.map((rate, i) => ({
+      [`http_req_duration{step:${rate}}`]: [{ threshold: 'p(95)<2000', abortOnFail: true, delayAbortEval: `${i * STEP_SECONDS + 30}s` }],
+      [`http_req_failed{step:${rate}}`]: [{ threshold: 'rate<0.02', abortOnFail: true, delayAbortEval: `${i * STEP_SECONDS + 30}s` }],
+    }))),
   summaryTrendStats: ['avg', 'med', 'p(95)', 'p(99)', 'max'],
 };
 
 export function setup() {
   const status = http.get(`${BASE_URL}/api/v1/status`).json();
   if (status.state !== 'ready') throw new Error(`The app isn't ready: ${status.state}`);
+  // Lists that aren't Current are Not checked: every screening would answer without matching anything.
+  if (!status.lists.some(list => list.state === 'Current')) throw new Error('No list is Current: import the lists first.');
   console.log(`Lists: ${status.lists.map(list => `${list.code} ${list.state} ${list.recordCount}`).join(', ')}`);
+}
+
+// The step this moment belongs to (its rate), from the time into the test.
+function currentStep() {
+  const elapsed = exec.instance.currentTestRunDuration / 1000;
+  return STAGES[Math.min(STAGES.length - 1, Math.floor(elapsed / STEP_SECONDS))];
 }
 
 export default function () {
@@ -79,7 +102,7 @@ export default function () {
     address: input.address,
   }), {
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    tags: { name: 'screening', kind: input.kind },
+    tags: { name: 'screening', kind: input.kind, step: String(currentStep()) },
   });
   check(response, {
     'screening 200': r => r.status === 200,

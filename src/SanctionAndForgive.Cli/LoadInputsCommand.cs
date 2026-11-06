@@ -11,6 +11,9 @@ namespace SanctionAndForgive.Cli;
 /// and initials rows use them. Deterministic: the same lists and seed give the same file. Reads lists only.</summary>
 internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter output)
 {
+    /// <summary>The screening API's per-field limit (ScreeningsController.MaxFieldLength).</summary>
+    private const int MaxField = 300;
+
     private static readonly string[] CommonSurnames =
     [
         "Ivanov", "Petrov", "Smirnov", "Kuznetsov", "Popov", "Sokolov", "Kovalenko", "Shevchenko", "Bondarenko", "Tkachenko",
@@ -43,11 +46,11 @@ internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter outpu
         var cyrillicNames = subjects.SelectMany(subject => subject.Names.Where(name => name.Script == NameScript.Cyrillic).Select(name => (subject, name.FullName))).ToList();
         var withAddress = subjects.Where(subject => subject.Addresses.Count > 0).ToList();
         var rows = new List<(string? Receiver, string? Company, string? Address, string Kind)>(count);
-        for (var i = 0; i < count; i++)
+        while (rows.Count < count)
         {
             var roll = random.Next(100);
             var subject = subjects[random.Next(subjects.Count)];
-            rows.Add(roll switch
+            var row = roll switch
             {
                 < 30 => Named(subject, subject.Names.Count > 0 ? subject.Names[random.Next(subject.Names.Count)].FullName : subject.PrimaryName, "listed"),
                 < 50 => Named(subject, NearMiss(subject.PrimaryName, random), "near-miss"),
@@ -57,7 +60,14 @@ internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter outpu
                 _ => random.Next(2) == 0 && withAddress.Count > 0
                     ? WithAddress(withAddress[random.Next(withAddress.Count)])
                     : (Initials(random), null, null, "initials"),
-            });
+            };
+
+            // The API refuses fields over its limit (400 before any matching): such a row would measure nothing. Draw
+            // again for the same kind of row, so the mix stays as intended.
+            if (new[] { row.Item1, row.Item2, row.Item3 }.All(field => field is null || field.Length <= MaxField))
+            {
+                rows.Add(row);
+            }
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
