@@ -14,26 +14,26 @@ other hits); **top** when it is the best candidate.
 
 | Perturbation | Queries | Recalled (≥ Review) | Match (≥ 90%) | Top |
 |---|---|---|---|---|
-| typo | 1742 | 95.8% | 46.1% | 96.4% |
-| diacritics dropped | 33 | 97.0% | 97.0% | 100.0% |
-| words swapped | 1765 | 99.3% | 95.9% | 97.6% |
-| legal form changed | 841 | 98.5% | 80.5% | 94.8% |
-| other romanisation | 241 | 100.0% | 44.0% | 98.3% |
-| surname and initials | 950 | 88.8% | 0.0% | 77.2% |
-| **All** | 5572 | **96.3%** | 59.4% | 93.4% |
+| typo | 1734 | 95.4% | 45.3% | 96.0% |
+| diacritics dropped | 39 | 100.0% | 100.0% | 100.0% |
+| words swapped | 1766 | 99.0% | 94.7% | 97.1% |
+| legal form changed | 838 | 98.2% | 78.0% | 94.2% |
+| other romanisation | 234 | 100.0% | 41.0% | 98.3% |
+| surname and initials | 957 | 89.2% | 0.0% | 80.6% |
+| **All** | 5568 | **96.2%** | 58.3% | 93.5% |
 
 | List | Queries | Recalled |
 |---|---|---|
 | ca-sema | 644 | 99.2% |
-| ch-seco | 662 | 97.1% |
+| ch-seco | 652 | 96.5% |
 | ee-mfa | 3 | 100.0% |
-| eu | 639 | 97.0% |
-| ofac-cons | 602 | 93.0% |
-| ofac-sdn | 613 | 96.1% |
-| ua-sfms | 590 | 94.2% |
-| uk | 628 | 97.0% |
-| un | 580 | 93.3% |
-| us-export | 611 | 99.2% |
+| eu | 641 | 94.9% |
+| ofac-cons | 601 | 93.0% |
+| ofac-sdn | 613 | 97.4% |
+| ua-sfms | 586 | 93.9% |
+| uk | 628 | 97.1% |
+| un | 588 | 94.4% |
+| us-export | 612 | 98.7% |
 
 ## Cyrillic aliases against Latin-only lists
 
@@ -42,15 +42,15 @@ with every Cyrillic name removed, so only transliteration can connect them. This
 
 | List | Queries | Recalled (≥ Review) | Match | Top |
 |---|---|---|---|---|
-| ca-sema | 200 | 68.0% | 52.0% | 80.5% |
-| ch-seco | 200 | 75.5% | 65.0% | 80.0% |
-| eu | 200 | 86.0% | 75.0% | 92.0% |
-| ofac-cons | 24 | 79.2% | 70.8% | 75.0% |
-| ofac-sdn | 200 | 85.0% | 72.5% | 88.5% |
-| ua-sfms | 32 | 62.5% | 43.8% | 90.6% |
-| uk | 200 | 89.5% | 77.5% | 95.5% |
+| ca-sema | 200 | 72.0% | 55.5% | 86.5% |
+| ch-seco | 200 | 71.0% | 59.5% | 84.0% |
+| eu | 200 | 80.5% | 73.0% | 90.0% |
+| ofac-cons | 24 | 83.3% | 62.5% | 75.0% |
+| ofac-sdn | 200 | 87.0% | 71.0% | 90.5% |
+| ua-sfms | 32 | 65.6% | 46.9% | 81.3% |
+| uk | 200 | 89.0% | 77.0% | 94.5% |
 | un | 12 | 66.7% | 50.0% | 75.0% |
-| **All** | 1068 | **80.1%** | 67.5% | 87.0% |
+| **All** | 1068 | **79.4%** | 66.3% | 88.4% |
 
 ## Made-up names (false positives)
 
@@ -58,25 +58,25 @@ with every Cyrillic name removed, so only transliteration can connect them. This
 
 | Kind | Names | Review or above | Match |
 |---|---|---|---|
-| person | 395 | 4.6% | 0.0% |
-| company | 205 | 6.8% | 0.0% |
+| person | 398 | 5.3% | 0.0% |
+| company | 202 | 6.9% | 0.0% |
 
 The highest-scoring made-up names, to see what the false positives look like:
 
 | Query | Best listed match | % |
 |---|---|---|
 | Володимир Олейник | Volodymyr Mykolayovych OLIYNYK | 75 |
+| Андрей Сергеевич Мельниченко | Andrei Siarheevich PALCHIK | 70 |
 | ТОВ «Северный Ветер» | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | Николай Петрович Кудрявцев | Nikolay Kudryavtsev | 70 |
 | ООО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | Северный Ветер Trading Ltd | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
+| Андрей Александрович Рудницкий | Andrey Alexandrovich USTINSKY | 70 |
 | Белоусов Н.М. | Mikhail Nikolayevich BELOUSOV | 70 |
 | ООО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | ТОВ «Северный Ветер» | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | ООО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | АО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
-| АО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
-| Комаров А.А. | Artem Andreyevich KOMAROV | 70 |
 
 ## Calibration
 
@@ -86,14 +86,14 @@ and negatives is arbitrary, so the absolute rates depend on it: read the trend, 
 
 | Percent | Best candidates | Right | Share right |
 |---|---|---|---|
-| 0-19 | 77 | 13 | 16.9% |
-| 20-49 | 858 | 149 | 17.4% |
-| 50-59 | 4 | 1 | 25.0% |
-| 60-69 | 264 | 192 | 72.7% |
-| 70-79 | 1996 | 1808 | 90.6% |
-| 80-89 | 3 | 1 | 33.3% |
-| 90-94 | 447 | 443 | 99.1% |
-| 95-99 | 3591 | 3524 | 98.1% |
+| 0-19 | 74 | 10 | 13.5% |
+| 20-49 | 879 | 174 | 19.8% |
+| 50-59 | 7 | 2 | 28.6% |
+| 60-69 | 297 | 242 | 81.5% |
+| 70-79 | 2018 | 1831 | 90.7% |
+| 80-89 | 3 | 2 | 66.7% |
+| 90-94 | 409 | 406 | 99.3% |
+| 95-99 | 3549 | 3485 | 98.2% |
 
 Queries the matcher missed, a sample:
 
@@ -104,28 +104,28 @@ Queries the matcher missed, a sample:
 | surname and initials | Soe K.M. | Khin Maung Soe | not found |
 | surname and initials | Asl G.M. | Gholamhossein Mohammadi Asl | 29 |
 | typo | RSB Grroup | RSB Group | 36 |
-| typo | Souruh Comany | Souruh Company | 38 |
-| typo | VMK Limited Liabliity Company | VMK Limited Liability Company | 35 |
-| typo | Mohammad AbdulS-attar Al Sayed Dr. | Mohammad Abdul-Sattar Al Sayed Dr. | not found |
-| surname and initials | Dr. M.A. | Mohammad Abdul-Sattar Al Sayed Dr. | not found |
-| diacritics dropped | Suvari Global Endustriyel Ekipmanlar Ithalat Ihracat Ticaret Limited Sirketi | Suvari Global Endustriyel Ekipmanlar İthalat İhracat Ticaret Limited Şirketi | 39 |
-| surname and initials | Win S. | Sein Win | not found |
-| surname and initials | Hossein H. | Hemsi Hossein | not found |
-| surname and initials | Vladimirovich S.A. | Sitnikov Aleksey Vladimirovich | not found |
-| typo | Limited Liabiliyt Company “Finko” | Limited Liability Company “Finko” | 37 |
-| surname and initials | Hossein T. | Tala Hossein | not found |
-| Cyrillic alias | Акционерное общество «Завод «Пластмасс» | Plastmass Plant JSC (also known as Joint Stock Company “Zavod Plastmass”) | 21 |
-| Cyrillic alias | LLC “AVTOTECH”; OOO AVTOTECH; ООО "АВТОТЕХ" ; Общество С Ограниченной Ответственностью "Автономные Технологии" | Autonomous Technologies LLC | not found |
-| Cyrillic alias | Сергей Александрович КОВАЛЬЧУК / Сергiй Олександрович КОВАЛЬЧУК | Sergey Alexandrovich KOVALCHUK | 35 |
-| Cyrillic alias | ОРЛОВ | Artur Valeriyevich ORLOV | not found |
-| Cyrillic alias | Акционерное Общество "Специализированное Конструкторско-Технологическое Бюро Электронных Систем" | Specialized Engineering and Design Bureau of Electronic Systems Joint Stock Company | not found |
-| Cyrillic alias | Акционерное общество «Опытно-конструкторское бюро «Электроавтоматика» имени П.А.Ефимова» | Experimental Design Bureau “Electroautomatics” Named After P.A. Efimov JSC (also known as Joint Stock Company Experimental-Design Bureau Elektroavtomatika in the Name of P.A. Efimov) | not found |
-| Cyrillic alias | АО « Объединенная Двигателестроительная Корпорация» | United Engine Corporation | not found |
-| Cyrillic alias | Акционерное общество «Государственный ракетный центр имени академика В.П. Макеева» | Academician V.P. Makeyev State Rocket Centre JSC | not found |
-| Cyrillic alias | Управление Делами Президента Российской Федерации | Federal State Budgetary Enterprise of the Administration of the President of Russia | not found |
+| typo | Limited Liabiilty Company CMRBank | Limited Liability Company CMRBank | not found |
+| typo | Irkut Corporatiion | Irkut Corporation | 35 |
+| surname and initials | Vladimirovich K.A. | Korotkiy Alexander Vladimirovich | not found |
+| typo | TAMAS Compay | TAMAS Company | 38 |
+| typo | Habib Ben Ahmed Al-oLubiri | Habib Ben Ahmed Al-Loubiri | not found |
+| typo | LLC Rama Grouup | LLC Rama Group | 38 |
+| surname and initials | Oleg K. | Kryuchkov Oleg | not found |
+| typo | Abd AlR-ahman Ould Muhammad Al-Husayn Ould Muhammad Salim | Abd Al-Rahman Ould Muhammad Al-Husayn Ould Muhammad Salim | not found |
+| typo | DAV Group Compny Ltd. | DAV Group Company Ltd. | 36 |
+| typo | JSC Moscow MachineB-uilding Plant “Vpered” | JSC Moscow Machine-Building Plant “Vpered” | 43 |
 | Cyrillic alias | Акционерное общество «Дукс» | Dux JSC (also known as Duks) | 24 |
-| Cyrillic alias | Акционерное общество«Радиотехнический институт имениакадемика А.Л. Минца» | Academician A.L. Mints Radiotechnical Institute Joint Stock Company | 29 |
-| Cyrillic alias | Александр Павлович КУРЕНКОВ / Олександр Павлович КУРЄНКОВ | Alexander Pavlovich KURENKOV | 38 |
-| Cyrillic alias | Федеральное государственное бюджетное учреждение «Специальный летный отряд «Россия» | Federal State Budgetary Institution “Special Flight Detachment ‘Russia’” | not found |
-| Cyrillic alias | VimpelCom; Public Joint Stock Company “Vimpel-communications”; билайн; Вымпелком; Публичное Акционерное Общество "Вымпел-Коммуникации" | Beeline | not found |
-| Cyrillic alias | OOO "CHGLM"; Общество С Ограниченной Ответственностью "Чартер Грин Лайт Москва" | Charter Green Light Moscow | not found |
+| Cyrillic alias | Акционерное общество «Концерн воздушно-космической обороны «Алмаз - Антей» | “Almaz-Antey” Air and Space Defence Corporation, JSC | not found |
+| Cyrillic alias | Росфинмониторинг | Federal Financial Monitoring Service of the Russian Federation | not found |
+| Cyrillic alias | Евтюхова Елена Александровна | Elena Alexandranova EVTYUKHOVA | 37 |
+| Cyrillic alias | Акционерное общество «Научно-производственный комплекс «ЭЛАРА» имени Г.А. Ильенко» | The Ilyenko ELARA Research and Production Complex, JSC (also known as Open Joint Stock Company Ilyenko Elara Research and Production Complex) | 18 |
+| Cyrillic alias | Публичное Акционерное Общество "Одк-Сатурн" | UEC-Saturn | 28 |
+| Cyrillic alias | Акционерное Общество «Научно-исследовательский центр электронной вычислительной техники» | Electronic Computing Technology Scientific Research Centre JSC | not found |
+| Cyrillic alias | Акционерное общество «Государственный Рязанский приборный завод» | Ryazan State Instrument Making Enterprise JSC | not found |
+| Cyrillic alias | Федеральное государственное бюджетное учреждение науки "Федеральный исследовательский центр "Институт катализа им. Г. К. Борескова Сибирского отделения Российской академии наук Институт катализа СО РАН | Federal Research Center Boreskov Institute of Catalysis | not found |
+| Cyrillic alias | Акционерное общество «Государственный ракетный центр имени академика В.П. Макеева» | Academician V.P. Makeyev State Rocket Centre JSC | not found |
+| Cyrillic alias | Страховое акционерное общество «ВСК» Россия | VSK Insurance House | not found |
+| Cyrillic alias | Акционерное общество «Раменский приборостроительный завод» | Ramensky Instrument Engineering Plant | 26 |
+| Cyrillic alias | Андрей Сергеевич ВОРОШИЛОВ / Андрiй Сергiйович ВОРОШИЛОВ | Andrey Sergeevich VOROSHILOV | 35 |
+| Cyrillic alias | Управление Делами Президента Российской Федерации | Federal State Budgetary Enterprise of the Administration of the President of Russia | not found |
+| Cyrillic alias | Адкрытае акцыянернае таварыства "Гомельскае канструктарскае бюро «Прамень» | Gomel Design Bureau Luch OJSC | not found |

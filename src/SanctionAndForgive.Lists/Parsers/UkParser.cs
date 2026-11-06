@@ -48,9 +48,13 @@ public sealed class UkParser : IListParser
             builder.AddName(fullName, isWeak, name.Val("NameType") == "Primary Name");
         }
 
+        // Two spellings sometimes share one entry ("Сергей … / Сергiй …"): each is a name of its own.
         foreach (var name in designation.El("NonLatinNames")?.Els("NonLatinName") ?? [])
         {
-            builder.AddName(name.Val("NameNonLatinScript"), isWeak: false, isPrimary: false);
+            foreach (var spelling in name.Val("NameNonLatinScript")?.Split(" / ") ?? [])
+            {
+                builder.AddName(spelling, isWeak: false, isPrimary: false);
+            }
         }
 
         foreach (var address in designation.El("Addresses")?.Els("Address") ?? [])
