@@ -132,6 +132,8 @@ public class EdgeCaseTests
     [Theory]
     [InlineData("NESTEROV O.Y.", "Oleg Yuryevich NESTEROV")]
     [InlineData("TATRIEV K.K.", "Khasan Kureyshevich TATRIEV")]
+    [InlineData("TATRIEV K.H.", "Khasan Kureyshevich TATRIEV")]
+    [InlineData("TATRIEV K.H.", "Kureyshevich Khasan TATRIEV")]
     public void LatinInitials_MatchTheNamesOwnFirstLetter(string query, string listed)
     {
         AssertBand(NameCell(query, Subject(listed, SubjectKind.Individual, null)), Outcome.Review);

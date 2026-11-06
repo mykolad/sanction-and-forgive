@@ -115,23 +115,46 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         return Finish(percent, caps, explanation);
     }
 
-    /// <summary>Whether some initial finds no match among <paramref name="candidates"/> while candidates remain.</summary>
+    /// <summary>Whether, in the best assignment, some initial matches nothing while a candidate is left over.</summary>
     private bool Contradicts(Token[] initials, List<Token> candidates)
     {
-        foreach (var initial in initials)
+        var matches = MatchInitials(initials, candidates);
+        return matches.Count < initials.Length && matches.Count < candidates.Count;
+    }
+
+    /// <summary>The largest one-to-one assignment of initials to candidates (Kuhn's augmenting paths: a handful of
+    /// tokens). A greedy pass could let one initial take the only name another could match, and then call that a
+    /// contradiction. Returns initial index → candidate index.</summary>
+    private Dictionary<int, int> MatchInitials(Token[] initials, List<Token> candidates)
+    {
+        var fits = initials.Select(initial => candidates.Select(candidate => InitialMatches(initial, candidate)).ToArray()).ToArray();
+        var owner = new int[candidates.Count];
+        Array.Fill(owner, -1);
+
+        bool Augment(int initial, bool[] seen)
         {
-            var found = candidates.FirstOrDefault(candidate => InitialMatches(initial, candidate));
-            if (found is not null)
+            for (var candidate = 0; candidate < candidates.Count; candidate++)
             {
-                candidates.Remove(found);
+                if (fits[initial][candidate] && !seen[candidate])
+                {
+                    seen[candidate] = true;
+                    if (owner[candidate] < 0 || Augment(owner[candidate], seen))
+                    {
+                        owner[candidate] = initial;
+                        return true;
+                    }
+                }
             }
-            else if (candidates.Count > 0)
-            {
-                return true;
-            }
+
+            return false;
         }
 
-        return false;
+        for (var initial = 0; initial < initials.Length; initial++)
+        {
+            Augment(initial, new bool[candidates.Count]);
+        }
+
+        return Enumerable.Range(0, candidates.Count).Where(candidate => owner[candidate] >= 0).ToDictionary(candidate => owner[candidate], candidate => candidate);
     }
 
     /// <summary>Surname plus initials (section 5.6), with <paramref name="initialsSide"/>'s initials. Null when the full
@@ -157,24 +180,24 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             .ToList();
         var candidates = Enumerable.Range(0, otherSide.Core.Length).Except(pairs.Select(pair => pair.Listed))
             .Select(i => otherSide.Core[i]).Concat(otherSide.Initials).ToList();
-        int matched = 0, contradicted = 0;
-        foreach (var initial in initialsSide.Initials)
+        var matches = MatchInitials(initialsSide.Initials, candidates);
+        var leftOver = Enumerable.Range(0, candidates.Count).Except(matches.Values).Select(i => candidates[i]).ToList();
+        int matched = matches.Count, contradicted = 0;
+        for (var i = 0; i < initialsSide.Initials.Length; i++)
         {
-            var found = candidates.FirstOrDefault(candidate => InitialMatches(initial, candidate));
-            if (found is not null)
+            var initial = initialsSide.Initials[i].Text.ToUpperInvariant();
+            if (matches.TryGetValue(i, out var candidate))
             {
-                matched++;
-                candidates.Remove(found);
-                explanation.Add($"Initial {initial.Text.ToUpperInvariant()} matches {found}");
+                explanation.Add($"Initial {initial} matches {candidates[candidate]}");
             }
-            else if (candidates.Count > 0)
+            else if (leftOver.Count > 0)
             {
                 contradicted++;
-                explanation.Add($"Initial {initial.Text.ToUpperInvariant()} doesn't match {string.Join(", ", candidates)}");
+                explanation.Add($"Initial {initial} doesn't match {string.Join(", ", leftOver)}");
             }
             else
             {
-                explanation.Add($"Initial {initial.Text.ToUpperInvariant()}: nothing to compare with");
+                explanation.Add($"Initial {initial}: nothing to compare with");
             }
         }
 

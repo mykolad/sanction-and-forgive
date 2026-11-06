@@ -70,7 +70,16 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
             var withBoth = subjects.Where(subject => subject.Names.Any(name => HasCyrillic(name.FullName)) && subject.Names.Any(name => IsLatin(name.FullName))).ToList();
             if (withBoth.Count > 0)
             {
-                var latinOnly = ListIndex.Build(subjects.Select(subject => subject with { Names = [.. subject.Names.Where(name => !HasCyrillic(name.FullName))] }));
+                // The primary name is indexed too: a Cyrillic primary takes the first Latin name's place, and a subject
+                // with no Latin name left is left out.
+                var latinOnly = ListIndex.Build(subjects
+                    .Select(subject => (Subject: subject, Latin: subject.Names.Where(name => !HasCyrillic(name.FullName)).ToList()))
+                    .Where(item => item.Latin.Count > 0)
+                    .Select(item => item.Subject with
+                    {
+                        Names = item.Latin,
+                        PrimaryName = HasCyrillic(item.Subject.PrimaryName) ? item.Latin[0].FullName : item.Subject.PrimaryName,
+                    }));
                 var latinList = list with { Index = latinOnly };
                 foreach (var subject in withBoth.OrderBy(_ => random.Next()).Take(SamplePerSource))
                 {
@@ -125,13 +134,22 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
                 }
 
                 var at = 1 + random.Next(word.Length - 2);
-                words[longest] = random.Next(3) switch
+                var edit = random.Next(3);
+
+                // Swapping two equal letters ("Shipping") changes nothing: drop one instead.
+                if (edit == 2 && word[at] == word[at + 1])
+                {
+                    edit = 0;
+                }
+
+                words[longest] = edit switch
                 {
                     0 => word.Remove(at, 1),
                     1 => word.Insert(at, word[at].ToString()),
                     _ => string.Concat(word.AsSpan(0, at), word[at + 1].ToString(), word[at].ToString(), word.AsSpan(at + 2)),
                 };
-                return string.Join(' ', words);
+                var typo = string.Join(' ', words);
+                return typo == name ? null : typo;
             case "diacritics dropped":
                 var stripped = StripDiacritics(name);
                 return stripped == name ? null : stripped;
@@ -143,8 +161,17 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
                     return null;
                 }
 
+                // The name without its legal words, with a legal form it didn't have.
                 var core = words.Where(w => !LegalWords.Contains(w.Trim('.', ',').ToLowerInvariant())).ToArray();
-                return core.Length == 0 || core.Length == words.Length && random.Next(2) == 0 ? $"{string.Join(' ', core)} Ltd" : $"{string.Join(' ', core)} LLC";
+                if (core.Length == 0)
+                {
+                    return null;
+                }
+
+                var had = words.Select(w => w.Trim('.', ',').ToLowerInvariant()).ToHashSet();
+                var form = ReplacementForms.First(candidate => !had.Contains(candidate.ToLowerInvariant()));
+                var changed = $"{string.Join(' ', core)} {form}";
+                return changed == name ? null : changed;
             case "other romanisation":
                 var flipped = OtherRomanisation(name);
                 return flipped == name ? null : flipped;
@@ -154,14 +181,23 @@ internal sealed class EvaluateCommand(ListsDbContext context, MatchingOptions op
                     return null;
                 }
 
-                // Lists write surnames in capitals or first ("IVANOV, Ivan"); otherwise the last word.
-                var surname = words.FirstOrDefault(w => w.Length > 2 && w.All(c => !char.IsLetter(c) || char.IsUpper(c))) ?? words[^1];
+                // Only where the surname is certain: exactly one word in capitals among mixed-case ones ("Ivan IVANOV",
+                // as OFAC, the EU and the UK write it). All capitals (UN) or no capitals (SECO) leave the order unknown.
+                var capitals = words.Where(w => w.Count(char.IsLetter) > 1 && w.All(c => !char.IsLetter(c) || char.IsUpper(c))).ToList();
+                if (capitals.Count != 1 || capitals.Count == words.Length)
+                {
+                    return null;
+                }
+
+                var surname = capitals[0];
                 var initials = string.Concat(words.Where(w => w != surname && w.Length > 0 && char.IsLetter(w[0])).Take(2).Select(w => char.ToUpperInvariant(w[0]) + "."));
                 return initials.Length == 0 ? null : $"{surname.Trim(',')} {initials}";
             default:
                 return null;
         }
     }
+
+    private static readonly string[] ReplacementForms = ["LLC", "Ltd", "JSC", "GmbH"];
 
     private static readonly HashSet<string> LegalWords = ["llc", "ltd", "limited", "inc", "corp", "corporation", "jsc", "ojsc", "cjsc", "pjsc", "plc", "gmbh", "co", "company", "ooo", "oao", "zao", "pao", "ao", "sa", "ag", "ab", "oy", "bv", "llp"];
 

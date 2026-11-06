@@ -14,26 +14,26 @@ other hits); **top** when it is the best candidate.
 
 | Perturbation | Queries | Recalled (≥ Review) | Match (≥ 90%) | Top |
 |---|---|---|---|---|
-| typo | 1734 | 95.4% | 45.3% | 96.0% |
-| diacritics dropped | 39 | 100.0% | 100.0% | 100.0% |
-| words swapped | 1766 | 99.0% | 94.7% | 97.1% |
-| legal form changed | 838 | 98.2% | 78.0% | 94.2% |
-| other romanisation | 234 | 100.0% | 41.0% | 98.3% |
-| surname and initials | 957 | 89.2% | 0.0% | 80.6% |
-| **All** | 5568 | **96.2%** | 58.3% | 93.5% |
+| typo | 1737 | 95.5% | 43.5% | 96.5% |
+| diacritics dropped | 37 | 100.0% | 100.0% | 100.0% |
+| words swapped | 1772 | 99.0% | 94.8% | 97.1% |
+| legal form changed | 844 | 98.1% | 79.0% | 94.4% |
+| other romanisation | 225 | 100.0% | 41.3% | 98.7% |
+| surname and initials | 373 | 95.2% | 0.0% | 92.2% |
+| **All** | 4988 | **97.4%** | 64.8% | 96.2% |
 
 | List | Queries | Recalled |
 |---|---|---|
-| ca-sema | 644 | 99.2% |
-| ch-seco | 652 | 96.5% |
-| ee-mfa | 3 | 100.0% |
-| eu | 641 | 94.9% |
-| ofac-cons | 601 | 93.0% |
-| ofac-sdn | 613 | 97.4% |
-| ua-sfms | 586 | 93.9% |
-| uk | 628 | 97.1% |
-| un | 588 | 94.4% |
-| us-export | 612 | 98.7% |
+| ca-sema | 599 | 99.3% |
+| ch-seco | 551 | 96.0% |
+| ee-mfa | 2 | 100.0% |
+| eu | 591 | 97.6% |
+| ofac-cons | 593 | 94.4% |
+| ofac-sdn | 589 | 97.6% |
+| ua-sfms | 436 | 97.5% |
+| uk | 575 | 97.4% |
+| un | 442 | 97.5% |
+| us-export | 610 | 98.9% |
 
 ## Cyrillic aliases against Latin-only lists
 
@@ -42,15 +42,15 @@ with every Cyrillic name removed, so only transliteration can connect them. This
 
 | List | Queries | Recalled (≥ Review) | Match | Top |
 |---|---|---|---|---|
-| ca-sema | 200 | 72.0% | 55.5% | 86.5% |
-| ch-seco | 200 | 71.0% | 59.5% | 84.0% |
-| eu | 200 | 80.5% | 73.0% | 90.0% |
-| ofac-cons | 24 | 83.3% | 62.5% | 75.0% |
-| ofac-sdn | 200 | 87.0% | 71.0% | 90.5% |
-| ua-sfms | 32 | 65.6% | 46.9% | 81.3% |
-| uk | 200 | 89.0% | 77.0% | 94.5% |
-| un | 12 | 66.7% | 50.0% | 75.0% |
-| **All** | 1068 | **79.4%** | 66.3% | 88.4% |
+| ca-sema | 200 | 71.0% | 56.5% | 83.5% |
+| ch-seco | 200 | 78.0% | 66.0% | 87.5% |
+| eu | 200 | 79.5% | 65.5% | 93.0% |
+| ofac-cons | 24 | 79.2% | 70.8% | 75.0% |
+| ofac-sdn | 200 | 87.0% | 73.5% | 91.5% |
+| ua-sfms | 32 | 56.3% | 31.3% | 87.5% |
+| uk | 200 | 87.0% | 76.0% | 92.0% |
+| un | 12 | 75.0% | 58.3% | 83.3% |
+| **All** | 1068 | **79.7%** | 66.4% | 89.0% |
 
 ## Made-up names (false positives)
 
@@ -58,25 +58,25 @@ with every Cyrillic name removed, so only transliteration can connect them. This
 
 | Kind | Names | Review or above | Match |
 |---|---|---|---|
-| person | 398 | 5.3% | 0.0% |
-| company | 202 | 6.9% | 0.0% |
+| person | 405 | 6.7% | 0.0% |
+| company | 195 | 7.7% | 0.0% |
 
 The highest-scoring made-up names, to see what the false positives look like:
 
 | Query | Best listed match | % |
 |---|---|---|
 | Володимир Олейник | Volodymyr Mykolayovych OLIYNYK | 75 |
+| ООО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
+| Северный Ветер LLC | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
+| АО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
+| Филатов Е.А. | Alla Evgenyevna FILATOVA | 70 |
+| Николай Александрович Кудрявцев | Nikolay Kudryavtsev | 70 |
+| Северный Ветер Trading Ltd | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | Андрей Сергеевич Мельниченко | Andrei Siarheevich PALCHIK | 70 |
 | ТОВ «Северный Ветер» | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | Николай Петрович Кудрявцев | Nikolay Kudryavtsev | 70 |
 | ООО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 | Северный Ветер Trading Ltd | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
-| Андрей Александрович Рудницкий | Andrey Alexandrovich USTINSKY | 70 |
-| Белоусов Н.М. | Mikhail Nikolayevich BELOUSOV | 70 |
-| ООО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
-| ТОВ «Северный Ветер» | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
-| ООО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
-| АО Северный Ветер | SEVERNYI VETER - TB LIMITED LIABILITY COMPANY | 70 |
 
 ## Calibration
 
@@ -86,46 +86,46 @@ and negatives is arbitrary, so the absolute rates depend on it: read the trend, 
 
 | Percent | Best candidates | Right | Share right |
 |---|---|---|---|
-| 0-19 | 74 | 10 | 13.5% |
-| 20-49 | 879 | 174 | 19.8% |
-| 50-59 | 7 | 2 | 28.6% |
-| 60-69 | 297 | 242 | 81.5% |
-| 70-79 | 2018 | 1831 | 90.7% |
-| 80-89 | 3 | 2 | 66.7% |
-| 90-94 | 409 | 406 | 99.3% |
-| 95-99 | 3549 | 3485 | 98.2% |
+| 0-19 | 80 | 6 | 7.5% |
+| 20-49 | 812 | 171 | 21.1% |
+| 50-59 | 7 | 4 | 57.1% |
+| 60-69 | 118 | 84 | 71.2% |
+| 70-79 | 1679 | 1595 | 95.0% |
+| 80-89 | 8 | 8 | 100.0% |
+| 90-94 | 459 | 452 | 98.5% |
+| 95-99 | 3493 | 3427 | 98.1% |
 
 Queries the matcher missed, a sample:
 
 | Perturbation | Query | Listed name | Its % |
 |---|---|---|---|
-| surname and initials | Bo M. | Maung Bo | 43 |
 | surname and initials | SUK V.A. | Vitaliy Aleksandrovich SUK | 37 |
-| surname and initials | Soe K.M. | Khin Maung Soe | not found |
-| surname and initials | Asl G.M. | Gholamhossein Mohammadi Asl | 29 |
 | typo | RSB Grroup | RSB Group | 36 |
-| typo | Limited Liabiilty Company CMRBank | Limited Liability Company CMRBank | not found |
-| typo | Irkut Corporatiion | Irkut Corporation | 35 |
-| surname and initials | Vladimirovich K.A. | Korotkiy Alexander Vladimirovich | not found |
-| typo | TAMAS Compay | TAMAS Company | 38 |
-| typo | Habib Ben Ahmed Al-oLubiri | Habib Ben Ahmed Al-Loubiri | not found |
-| typo | LLC Rama Grouup | LLC Rama Group | 38 |
-| surname and initials | Oleg K. | Kryuchkov Oleg | not found |
-| typo | Abd AlR-ahman Ould Muhammad Al-Husayn Ould Muhammad Salim | Abd Al-Rahman Ould Muhammad Al-Husayn Ould Muhammad Salim | not found |
-| typo | DAV Group Compny Ltd. | DAV Group Company Ltd. | 36 |
-| typo | JSC Moscow MachineB-uilding Plant “Vpered” | JSC Moscow Machine-Building Plant “Vpered” | 43 |
-| Cyrillic alias | Акционерное общество «Дукс» | Dux JSC (also known as Duks) | 24 |
-| Cyrillic alias | Акционерное общество «Концерн воздушно-космической обороны «Алмаз - Антей» | “Almaz-Antey” Air and Space Defence Corporation, JSC | not found |
-| Cyrillic alias | Росфинмониторинг | Federal Financial Monitoring Service of the Russian Federation | not found |
-| Cyrillic alias | Евтюхова Елена Александровна | Elena Alexandranova EVTYUKHOVA | 37 |
-| Cyrillic alias | Акционерное общество «Научно-производственный комплекс «ЭЛАРА» имени Г.А. Ильенко» | The Ilyenko ELARA Research and Production Complex, JSC (also known as Open Joint Stock Company Ilyenko Elara Research and Production Complex) | 18 |
-| Cyrillic alias | Публичное Акционерное Общество "Одк-Сатурн" | UEC-Saturn | 28 |
-| Cyrillic alias | Акционерное Общество «Научно-исследовательский центр электронной вычислительной техники» | Electronic Computing Technology Scientific Research Centre JSC | not found |
-| Cyrillic alias | Акционерное общество «Государственный Рязанский приборный завод» | Ryazan State Instrument Making Enterprise JSC | not found |
-| Cyrillic alias | Федеральное государственное бюджетное учреждение науки "Федеральный исследовательский центр "Институт катализа им. Г. К. Борескова Сибирского отделения Российской академии наук Институт катализа СО РАН | Federal Research Center Boreskov Institute of Catalysis | not found |
-| Cyrillic alias | Акционерное общество «Государственный ракетный центр имени академика В.П. Макеева» | Academician V.P. Makeyev State Rocket Centre JSC | not found |
-| Cyrillic alias | Страховое акционерное общество «ВСК» Россия | VSK Insurance House | not found |
-| Cyrillic alias | Акционерное общество «Раменский приборостроительный завод» | Ramensky Instrument Engineering Plant | 26 |
-| Cyrillic alias | Андрей Сергеевич ВОРОШИЛОВ / Андрiй Сергiйович ВОРОШИЛОВ | Andrey Sergeevich VOROSHILOV | 35 |
-| Cyrillic alias | Управление Делами Президента Российской Федерации | Federal State Budgetary Enterprise of the Administration of the President of Russia | not found |
-| Cyrillic alias | Адкрытае акцыянернае таварыства "Гомельскае канструктарскае бюро «Прамень» | Gomel Design Bureau Luch OJSC | not found |
+| typo | OOO ZAVOD “OKOL” ZAO “SAZ” | OOO ZAVOD “SOKOL” ZAO “SAZ” | 36 |
+| typo | Nchala | Nachala | 47 |
+| typo | Pejman Industrial Services Corporatoin | Pejman Industrial Services Corporation | 38 |
+| typo | Public Joint Stock Company YUG-Invvest Bank | Public Joint Stock Company YUG-Invest Bank | not found |
+| words swapped | Bank YUG-Invest Company Stock Joint Public | Public Joint Stock Company YUG-Invest Bank | not found |
+| legal form changed | Public Joint Stock YUG-Invest Bank LLC | Public Joint Stock Company YUG-Invest Bank | not found |
+| typo | Limited Liabillity Company “TRIMIX” | Limited Liability Company “TRIMIX” | 37 |
+| words swapped | “Peleng” Company Stock Joint Open | Open Joint Stock Company “Peleng” | not found |
+| legal form changed | Open Joint Stock “Peleng” LLC | Open Joint Stock Company “Peleng” | not found |
+| typo | LIMITED LIABILITY PAARTNERSHIP KAZSTANEX | LIMITED LIABILITY PARTNERSHIP KAZSTANEX | 36 |
+| words swapped | KAZSTANEX PARTNERSHIP LIABILITY LIMITED | LIMITED LIABILITY PARTNERSHIP KAZSTANEX | 36 |
+| legal form changed | LIABILITY PARTNERSHIP KAZSTANEX LLC | LIMITED LIABILITY PARTNERSHIP KAZSTANEX | 36 |
+| typo | LLC R-TSROY | LLC R-STROY | not found |
+| Cyrillic alias | ЗАО «МНИТИ» | JSC “MNITI” (also known as Moscow Scientific Research Television Institute and ZAO MNITI) | 17 |
+| Cyrillic alias | Министерство внутренних дел (МВД) | Ministry of Internal Affairs of the Russian Federation | not found |
+| Cyrillic alias | Открытое акционерное общество "АЛЕВКУРП"/ ОАО "АЛЕВКУРП | ALEVKURP OJSC | 37 |
+| Cyrillic alias | РХБЗ | Nuclear, Chemical and Biological Defence Troops of the Ministry of Defence of the Russian Federation | not found |
+| Cyrillic alias | Дмитрий Александрович ОГИЛЕЦ / Дмитро Олександрович ОГIЛЕЦЬ | Dmitry Alexandrovich OGILETS | 36 |
+| Cyrillic alias | Воронежский опытный завод программной продукции | VOZPP JSC | not found |
+| Cyrillic alias | Юлия Александровна Матвиенко | Julia Alexandrovna MATVIYENKO | 36 |
+| Cyrillic alias | Общество с ограниченной ответственностью «Автономные системы» | Limited Liability Company “Autonomous Systems” | not found |
+| Cyrillic alias | Крокус Нано Электроникс | Crocus Nano Electronics | 35 |
+| Cyrillic alias | Государственный научный центр Российской Федерации Акционерное общество «Концерн «Морское подводное оружие–Гидроприбор» | Concern ‘MPO – Gidropribor’ | not found |
+| Cyrillic alias | Общество с ограничченной ответственностью «НТЦ Метротек» | Metrotek Ltd. (also known as NTC Metrotek) | not found |
+| Cyrillic alias | Акционерное Общество "Азимут" | Rostekh – Azimuth | 37 |
+| Cyrillic alias | Акционерное Общество «Корпорация «Московский Институт Теплотехники» | Corporation Moscow Institute of Heat Technology JSC | not found |
+| Cyrillic alias | Открытое акционерное общество (ОАО) Капитал Банк Центральной Азии or Капитал Банк | Capital Bank of Central Asia, OJSC | not found |
+| Cyrillic alias | Акционерное общество «Машиностроительноеконструкторское бюро «Факел» имени академикаП.Д. Грушина» | Engineering Design Bureau “Fakel” JSC (also known as Joint Stock Company Machine-Building Engineering Office Fakel named after Akademika P. D. Grushina) | 17 |
