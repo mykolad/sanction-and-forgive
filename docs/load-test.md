@@ -82,6 +82,47 @@ Every one of the 10 fetched lists loaded (more than production's active ones), t
 |---|---|---|---|---|---|---|
 | Up to 20/s for 20 s, after 5/s | 809 | 20 ms | 126 ms | 283 ms | 0 | 415 MB working set, 327 MB private |
 
+## Profiling (2026-11-06)
+
+After the Azure run: production's six lists from a local copy of the database, the same 2,000 inputs, one thread,
+the API's GC settings, and `dotnet-trace`. A screening never touches the database; it's all CPU.
+
+| | Before | After (#23) |
+|---|---|---|
+| Mean per screening, one desktop core | 21.8 ms | 9.3 ms |
+| p50 / p95 / p99 | 11.2 / 80 / 179 ms | 5.8 / 28 / 62 ms |
+| Screenings a second on one core | 46 | 108 |
+| Allocated per screening | 22 MB | 8 MB |
+
+Where the time went: scoring about 1,560 candidate aliases per screening (up to 2,000 a list, six lists), each
+aligned word by word; finding the candidates was about 1 ms. The changes, each leaving every result identical (a full
+dump of the 2,000 results, every percentage, alignment and explanation, compared byte for byte, and the evaluation
+report unchanged):
+
+- The best one-to-one word pairing searched every subset of the listed name's words (up to 4,096 states, in a new
+  two-dimensional array per candidate: 58% of the time). It now searches only the listed words that can pair with an
+  entered word at all, which gives the same pairs.
+- A search compares the same entered words with the same listed words (an index interns its tokens) many times: each
+  pair is compared once per search (23,000 comparisons a screening, a third of them distinct), and each word's
+  spelling and cognate groups, and its weight, are looked up once.
+- Jaro-Winkler is computed only for the edit distances that use it, and both edit-distance functions keep their rows
+  on the stack.
+
+Left as it is: building every candidate's explanation (about a third of what remains) could wait until a candidate is
+kept, a larger change for perhaps 25% more.
+
+**Combining lists into one index** (the owner's question): many listed parties appear on several lists, so one index
+with each entry referring to its lists would hold fewer names.
+
+- Overlap, by primary name: 37,362 subjects, 32,202 distinct names, 5,160 rows (14%) repeating a name another list
+  has. ua-sfms 95% (mostly UN, EU and UK entries), uk 46%, ofac-cons 33%, eu 24%, ofac-sdn 13%, us-export 8%. Of all
+  114,723 names and aliases, 21% repeat.
+- So at most about 15-20% less memory (of 128 MB) and fewer aliases to score, but not for free: each list's index
+  weights a word by how rare it is in that list, so one index would change every percentage (a calibration change,
+  the golden tests and evaluation to redo, the owner's approval), and a list that's stale must still be Not checked on
+  its own, so each candidate would carry its lists. The speed-up above was larger and changed nothing; combining stays
+  an option if more lists are added and memory runs short.
+
 A screening is CPU-bound and never touches the database, so on 0.25 vCPU expect roughly a quarter of one core's
 throughput: the Azure run is the number that counts. Memory is the other limit to watch: if the replica restarts
 for memory (Container App → Revisions → restarts, or `OOMKilled` in the system logs), that's the cap before CPU, and

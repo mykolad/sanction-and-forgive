@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using SanctionAndForgive.Matching.Text;
 
 namespace SanctionAndForgive.Matching.Names;
@@ -32,7 +33,25 @@ internal readonly record struct Alignment(double Similarity, AlignMethod Method)
 /// <c>northwind</c> and <c>southwind</c> don't align.</summary>
 internal sealed class TokenComparer(MatcherData data)
 {
+    // One comparer serves one search, on one thread. A search compares the same few entered tokens with the same listed
+    // tokens (an index interns its tokens) thousands of times, so each pair is compared once, and each token's groups
+    // are looked up once. By reference: a cached answer is the answer for those very tokens, so nothing changes but time.
+    private readonly Dictionary<(Token Query, Token Listed), Alignment> compared = new(TokenPairComparer.Instance);
+    private readonly Dictionary<Token, HashSet<int>> spellingGroups = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<Token, HashSet<int>> cognateGroups = new(ReferenceEqualityComparer.Instance);
+
     public Alignment Compare(Token query, Token listed)
+    {
+        if (!compared.TryGetValue((query, listed), out var alignment))
+        {
+            alignment = CompareOnce(query, listed);
+            compared[(query, listed)] = alignment;
+        }
+
+        return alignment;
+    }
+
+    private Alignment CompareOnce(Token query, Token listed)
     {
         if (query.Text == listed.Text)
         {
@@ -70,15 +89,20 @@ internal sealed class TokenComparer(MatcherData data)
     }
 
     /// <summary>The cognate groups a token belongs to, through any of its fold keys.</summary>
-    public HashSet<int> CognateGroups(Token token)
+    public IReadOnlySet<int> CognateGroups(Token token)
     {
-        var groups = new HashSet<int>();
-        foreach (var fold in token.Folds)
+        if (!cognateGroups.TryGetValue(token, out var groups))
         {
-            if (data.CognateGroups.TryGetValue(fold, out var found))
+            groups = [];
+            foreach (var fold in token.Folds)
             {
-                groups.UnionWith(found);
+                if (data.CognateGroups.TryGetValue(fold, out var found))
+                {
+                    groups.UnionWith(found);
+                }
             }
+
+            cognateGroups[token] = groups;
         }
 
         return groups;
@@ -89,16 +113,32 @@ internal sealed class TokenComparer(MatcherData data)
 
     private HashSet<int> SpellingGroups(Token token)
     {
-        var groups = new HashSet<int>();
-        foreach (var form in token.Forms)
+        if (!spellingGroups.TryGetValue(token, out var groups))
         {
-            if (data.SpellingGroups.TryGetValue(form, out var group))
+            groups = [];
+            foreach (var form in token.Forms)
             {
-                groups.Add(group);
+                if (data.SpellingGroups.TryGetValue(form, out var group))
+                {
+                    groups.Add(group);
+                }
             }
+
+            spellingGroups[token] = groups;
         }
 
         return groups;
+    }
+
+    private sealed class TokenPairComparer : IEqualityComparer<(Token Query, Token Listed)>
+    {
+        public static TokenPairComparer Instance { get; } = new();
+
+        public bool Equals((Token Query, Token Listed) x, (Token Query, Token Listed) y) =>
+            ReferenceEquals(x.Query, y.Query) && ReferenceEquals(x.Listed, y.Listed);
+
+        public int GetHashCode((Token Query, Token Listed) obj) =>
+            HashCode.Combine(RuntimeHelpers.GetHashCode(obj.Query), RuntimeHelpers.GetHashCode(obj.Listed));
     }
 
     private static Alignment CompareEdits(Token query, Token listed)
@@ -115,6 +155,12 @@ internal sealed class TokenComparer(MatcherData data)
                 }
 
                 var edits = EditDistance.DamerauLevenshtein(queryForm, listedForm, 3) + (queryForm[0] == listedForm[0] ? 0 : 1);
+                if (edits is not (1 or 2))
+                {
+                    // No rule below aligns any other distance, whatever the Jaro-Winkler similarity: don't compute it.
+                    continue;
+                }
+
                 var jaroWinkler = EditDistance.JaroWinkler(queryForm, listedForm);
                 var alignment = (edits, shorter) switch
                 {
@@ -147,9 +193,11 @@ internal static class EditDistance
             return limit;
         }
 
-        var previous2 = new int[b.Length + 1];
-        var previous = new int[b.Length + 1];
-        var current = new int[b.Length + 1];
+        // Three rows on the stack for a word (a name token is short); a long string gets them on the heap.
+        var width = b.Length + 1;
+        Span<int> previous2 = width <= MaxStackWidth ? stackalloc int[width] : new int[width];
+        Span<int> previous = width <= MaxStackWidth ? stackalloc int[width] : new int[width];
+        Span<int> current = width <= MaxStackWidth ? stackalloc int[width] : new int[width];
         for (var j = 0; j <= b.Length; j++)
         {
             previous[j] = j;
@@ -177,11 +225,16 @@ internal static class EditDistance
                 return limit;
             }
 
-            (previous2, previous, current) = (previous, current, previous2);
+            var oldest = previous2;
+            previous2 = previous;
+            previous = current;
+            current = oldest;
         }
 
         return Math.Min(previous[b.Length], limit);
     }
+
+    private const int MaxStackWidth = 128;
 
     public static double JaroWinkler(string a, string b)
     {
@@ -191,8 +244,8 @@ internal static class EditDistance
         }
 
         var window = Math.Max(0, (Math.Max(a.Length, b.Length) / 2) - 1);
-        var aMatched = new bool[a.Length];
-        var bMatched = new bool[b.Length];
+        Span<bool> aMatched = a.Length <= MaxStackWidth ? stackalloc bool[a.Length] : new bool[a.Length];
+        Span<bool> bMatched = b.Length <= MaxStackWidth ? stackalloc bool[b.Length] : new bool[b.Length];
         var matches = 0;
         for (var i = 0; i < a.Length; i++)
         {
