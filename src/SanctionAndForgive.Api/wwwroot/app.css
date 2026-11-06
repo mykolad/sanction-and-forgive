@@ -76,6 +76,8 @@ a { color: var(--brand); }
 .menu a { color: var(--brand-ink); opacity: 0.85; text-decoration: none; padding: 4px 0; border-bottom: 2px solid transparent; }
 .menu a:hover { opacity: 1; border-bottom-color: color-mix(in srgb, var(--brand-ink) 50%, transparent); }
 .menu a[aria-current="page"] { opacity: 1; font-weight: 700; border-bottom-color: var(--brand-ink); }
+/* On the masthead the page's focus colour can equal the background (dark mode): outline in the ink colour. */
+.menu a:focus-visible { opacity: 1; outline-color: var(--brand-ink); }
 .tagline { margin: 6px 0 0; font-size: 1.05rem; opacity: 0.9; }
 
 .panel, .result, .state:not(:empty) {
