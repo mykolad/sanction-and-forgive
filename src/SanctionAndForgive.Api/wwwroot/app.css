@@ -210,6 +210,27 @@ table.sources .list-title { font-weight: 650; }
 table.sources .sub { display: block; color: var(--muted); font-size: 0.85rem; }
 table.sources .links { white-space: nowrap; }
 .muted { color: var(--muted); }
+
+/* The list browser (/lists). */
+select {
+  font: inherit;
+  font-size: 1.05rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 12px;
+  width: 100%;
+}
+select:focus { border-color: var(--focus); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent); }
+.browse-fields { grid-template-columns: 2fr 1fr; }
+table.entries .entry-name { background: none; border: none; padding: 0; color: var(--brand); text-align: left; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }
+table.entries .entry-name[aria-expanded="true"]::after { content: " ▾"; text-decoration: none; }
+table.entries .id { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); font-size: 0.9rem; }
+table.entries .entry-detail td { padding-top: 0; }
+table.entries .entry-detail .detail { margin-top: 0; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.pager button:disabled { opacity: 0.45; cursor: default; }
 .state-badge { display: inline-block; font-weight: 700; border-radius: 8px; padding: 2px 10px; border: 1.5px solid; white-space: nowrap; }
 .state-badge.Current { background: var(--clear-bg); color: var(--clear-ink); border-color: var(--clear-edge); }
 .state-badge.NotChecked, .state-badge.NotImported { background: var(--gap-bg); color: var(--gap-ink); border-color: var(--gap-edge); border-style: dashed; }

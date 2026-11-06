@@ -127,3 +127,27 @@ Every list a screening searches, then every known feed that isn't imported, with
   the owner), `NeedsAccess` (an API key, or a site that refuses automated clients), or `Manual` (kept by hand).
 - `lastCheckedAt`: the last successful check, changed or not; freshness counts from it. `updatedAt`: when the
   list's content last changed here. `version`: the active import's id, as in the screening responses.
+
+## Browsing a list: `POST /api/v1/lists/{code}/browse` and `/lists`
+
+A page of one loaded list's entries, as the demo holds them and screens against: from memory, never the database.
+The website's **Browse lists** page (`/lists`, or `/lists?list=eu` to open one) uses it. The filter is in the body,
+never the URL, and is neither stored nor logged, like a screening's input.
+
+```
+POST /api/v1/lists/eu/browse
+Content-Type: application/json
+
+{"query":"romashka","type":"Entity","offset":0,"limit":50}
+```
+
+- `query` (optional, up to 100 characters): text found in any of an entry's names, ignoring case, accents and extra
+  spaces (Cyrillic stays Cyrillic: this is a text filter, not matching), or an entry's exact id.
+- `type` (optional): `Individual`, `Entity` or `Unknown` (the list doesn't say, as in the US export list).
+- `offset`, `limit`: paging, 1 to 100 entries a page.
+
+The answer has the `list` (as in the other responses: version, freshness, state), the `total` that match, and the
+`entries` on that page in name order (leading quotes ignored), each with its id, type, primary name, every `names`
+entry (`isWeak` where the list marks an alias as low quality), `addresses`, `programme` and `sourceUrl` (the
+official record). A list that is Not checked can still be browsed; its `state` says so. 404 for an unknown list code,
+503 before the lists have loaded, 400 for a bad filter or page, and the per-minute limit applies as for screenings.
