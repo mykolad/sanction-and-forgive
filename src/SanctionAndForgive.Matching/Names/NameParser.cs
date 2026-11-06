@@ -140,6 +140,13 @@ internal sealed class NameParser(MatcherData data)
             }
         }
 
+        // A typo in a long generic word ("Shippig", "Partnes") is still that word, not a distinctive one.
+        if (token.Forms.Select(data.NearGeneric).FirstOrDefault(found => found is not null) is { } near)
+        {
+            generic = near;
+            return Kind.Generic;
+        }
+
         if (Keys(token).Any(data.StopWords.Contains))
         {
             return Kind.Stop;

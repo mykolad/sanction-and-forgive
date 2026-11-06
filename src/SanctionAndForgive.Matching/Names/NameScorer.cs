@@ -201,13 +201,17 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
     /// initial on the other side.</summary>
     private bool InitialMatches(Token initial, Token candidate)
     {
+        // The initial's own Latin letter (Y. for Yuryevich, K. for Khasan) or its fold key (Г for Hryhorii, Ю for Iurii).
+        static bool Starts(IEnumerable<string> names, IEnumerable<string> prefixes) =>
+            names.Any(name => prefixes.Any(prefix => prefix.Length > 0 && name.StartsWith(prefix, StringComparison.Ordinal)));
+
         if (candidate.Length == 1)
         {
-            return initial.Folds.Intersect(candidate.Folds).Any();
+            return initial.Folds.Intersect(candidate.Folds).Any() || initial.Forms.Intersect(candidate.Forms).Any();
         }
 
-        var candidateFolds = candidate.Folds.Concat(comparer.CognateGroups(candidate).SelectMany(comparer.CognateFoldsOf));
-        return candidateFolds.Any(fold => initial.Folds.Any(initialFold => initialFold.Length > 0 && fold.StartsWith(initialFold, StringComparison.Ordinal)));
+        var cognateFolds = comparer.CognateGroups(candidate).SelectMany(comparer.CognateFoldsOf);
+        return Starts(candidate.Forms, initial.Forms) || Starts(candidate.Folds.Concat(cognateFolds), initial.Folds);
     }
 
     private static NameScore Finish(int percent, List<(int Cap, string Reason)> caps, List<string> explanation)
