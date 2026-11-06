@@ -27,6 +27,10 @@ public sealed record ListSource(string Code, string Name, string? Url, int MaxAg
     /// <summary>The terms the list is reused under, or the terms that stop it being reused (docs/sources.md).</summary>
     public string? TermsUrl { get; init; }
 
+    /// <summary>The file's address as anyone may use it: the EU's with its public token, never a configured one.
+    /// (The database keeps the URL with the token replaced by an ellipsis.)</summary>
+    public string? PublicUrl => Url?.Replace("{token}", ListSources.EuPublicToken, StringComparison.Ordinal);
+
     /// <summary>Why a feed that isn't <see cref="FeedStatus.Active"/> isn't imported, in a sentence for the status
     /// page.</summary>
     public string? Note { get; init; }
@@ -34,6 +38,9 @@ public sealed record ListSource(string Code, string Name, string? Url, int MaxAg
 
 public static class ListSources
 {
+    /// <summary>The EU's published public token for the FSF files (<c>LISTS_EU_TOKEN</c> overrides it for imports).</summary>
+    public const string EuPublicToken = "dG9rZW4tMjAxNw";
+
     /// <summary>Daily feeds may miss a day (a failed import, a late publication) before turning stale.</summary>
     private const int DailyMaxAge = 72;
 
@@ -85,7 +92,7 @@ public static class ListSources
         new("au-dfat", "Australia consolidated list", null, DailyMaxAge, FeedStatus.NeedsAccess, CreateParser: null)
         {
             Homepage = "https://www.dfat.gov.au/international-relations/security/sanctions/consolidated-list",
-            Note = "The publisher's site refuses automated downloads from a client that identifies itself honestly. It can be imported from a file downloaded by hand.",
+            Note = "The publisher's site refuses automated downloads from a client that identifies itself honestly, so its file and format couldn't be checked, and there is no parser for it yet.",
         },
         new("ua-nsdc", "Ukraine NSDC State Register of Sanctions", "https://api-drs.nsdc.gov.ua/v2/subjects", DailyMaxAge, FeedStatus.NeedsAccess, CreateParser: null)
         {
