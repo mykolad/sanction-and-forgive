@@ -24,7 +24,7 @@ public class CanonicalHashTests
 
         var merged = Assert.Single(ImportStore.Deduplicate([first, second]));
 
-        Assert.Equal(["Alpha", "Alfa"], merged.Names.Select(name => name.FullName));
+        Assert.Equal(["Alfa", "Alpha"], merged.Names.Select(name => name.FullName));
     }
 
     [Fact]
@@ -40,6 +40,16 @@ public class CanonicalHashTests
 
         Assert.False(Assert.Single(merged.Names).IsWeak);
         Assert.Equal([null, "EE"], merged.Addresses.Select(address => address.CountryCode));
+    }
+
+    [Fact]
+    public void RepeatedExternalId_SameResultInAnyOrder()
+    {
+        var forward = ImportStore.Deduplicate([Company("A", "Alpha"), Company("A", "Alfa")]);
+        var backward = ImportStore.Deduplicate([Company("A", "Alfa"), Company("A", "Alpha")]);
+
+        Assert.Equal(ImportStore.CanonicalHash(forward), ImportStore.CanonicalHash(backward));
+        Assert.Equal("Alfa", Assert.Single(forward).PrimaryName);
     }
 
     private static Subject Company(string id, string name)

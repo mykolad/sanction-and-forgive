@@ -37,6 +37,12 @@ public static class ManualCsvReader
                 continue;
             }
 
+            // More fields than the header means an unquoted comma: "Northwind, Inc" would lose its ", Inc".
+            if (row.Count > header.Count)
+            {
+                throw new ListFormatException($"Line {line + 1} has {row.Count} fields but the header has {header.Count}: quote any value containing a comma.");
+            }
+
             string? Field(string column) => index[column] is >= 0 and var i && i < row.Count ? Text.Clean(row[i]) : null;
             var externalId = Field("external_id") ?? throw new ListFormatException($"Line {line + 1}: external_id is required.");
             var name = Field("name") ?? throw new ListFormatException($"Line {line + 1}: name is required.");

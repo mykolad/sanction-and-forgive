@@ -190,6 +190,30 @@ public sealed class ImportStoreTests : IAsyncLifetime
     }
 
     [SqlServerFact]
+    public async Task ActiveImportChangedMidEdit_FlipIsRefused_NothingLost()
+    {
+        await using var context = CreateContext();
+        await using var other = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("ee-mfa", "Estonia", null, null, CancellationToken.None);
+        await store.ChangeAsync(source, current => [.. Subjects(2)], CancellationToken.None);
+        var first = source.ActiveImportId;
+        await store.ChangeAsync(source, current => [.. Subjects(3)], CancellationToken.None);
+
+        // While this edit holds the lock, the active import moves anyway: what a retried command on a new session,
+        // which no longer holds the lock, could let another importer do.
+        var edit = store.ChangeAsync(source, current =>
+        {
+            other.Sources.Where(s => s.Code == "ee-mfa").ExecuteUpdate(set => set.SetProperty(s => s.ActiveImportId, first));
+            return [.. current, .. Subjects(5).Skip(3)];
+        }, CancellationToken.None);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => edit);
+        Assert.Equal(first, (await other.Sources.AsNoTracking().SingleAsync(s => s.Code == "ee-mfa")).ActiveImportId);
+        Assert.Equal(ImportStatus.Failed, (await other.Imports.AsNoTracking().OrderByDescending(i => i.Id).FirstAsync()).Status);
+    }
+
+    [SqlServerFact]
     public async Task TooLongExternalId_IsRefused_NotTruncated()
     {
         await using var context = CreateContext();
