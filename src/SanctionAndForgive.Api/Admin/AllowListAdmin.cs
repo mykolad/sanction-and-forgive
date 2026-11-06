@@ -84,6 +84,20 @@ public sealed class AllowListAdmin(IServiceScopeFactory scopes, ListLoader loade
 
     public async Task<AllowListAddResult> AddAsync(string name, string reason, string addedBy, IReadOnlySet<string> confirmed, CancellationToken cancellationToken)
     {
+        // Checked and stored under the refresh gate, so the lists it was checked against are the ones in use when it's
+        // stored: a refresh can't publish a new possible match in between. A later list update can, as for any entry.
+        var (result, reloaded) = await loader.AddToAllowListAsync(
+            async () =>
+            {
+                var checkedResult = await CheckAndStoreAsync(name, reason, addedBy, confirmed, cancellationToken);
+                return (checkedResult, checkedResult.Outcome == AllowListAddOutcome.Added);
+            },
+            cancellationToken);
+        return result with { Reloaded = reloaded };
+    }
+
+    private async Task<AllowListAddResult> CheckAndStoreAsync(string name, string reason, string addedBy, IReadOnlySet<string> confirmed, CancellationToken cancellationToken)
+    {
         // A name that is a Match on a list, as a person or as an entity, would allow-list the listed party itself. It
         // can only be checked against lists that can be searched: until every list can, nothing is added.
         var now = clock.GetUtcNow();
@@ -134,14 +148,10 @@ public sealed class AllowListAdmin(IServiceScopeFactory scopes, ListLoader loade
                 name, reason, addedBy, inForce => AllowList.Build(inForce.Select(entry => new AllowListEntry(entry.Id, entry.Name, entry.Reason)), "stored").Find(name)?.Id, cancellationToken);
         }
 
-        if (addition.Id is not { } id)
-        {
-            return AllowListAddResult.Refused(AllowListAddOutcome.Exists) with { ExistingId = addition.ExistingId };
-        }
-
-        // Committed: from here the request's cancellation no longer matters. A failed reload only delays the entry.
-        var reloaded = await loader.ReloadAllowListAsync(withoutId: null, CancellationToken.None);
-        return new AllowListAddResult(AllowListAddOutcome.Added, id, null, null, possible, possible.Count, reloaded);
+        // Stored: the caller reloads the allow-list, whatever the request's cancellation (a failed reload only delays it).
+        return addition.Id is { } id
+            ? new AllowListAddResult(AllowListAddOutcome.Added, id, null, null, possible, possible.Count, Reloaded: false)
+            : AllowListAddResult.Refused(AllowListAddOutcome.Exists) with { ExistingId = addition.ExistingId };
     }
 
     private string ListName(string code) => catalog.Lists.First(list => list.Code == code).Name;

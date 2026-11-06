@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SanctionAndForgive.Api.Admin;
+using SanctionAndForgive.Api.Lists;
 using SanctionAndForgive.Matching;
 using static SanctionAndForgive.Tests.Api.ApiFactory;
 
@@ -152,6 +153,32 @@ public sealed class AllowListApiTests : IDisposable
 
         Assert.Equal((AllowListAddOutcome.TooBroad, AllowListAdmin.MaxPossibleMatches + 1, AllowListAdmin.MaxPossibleMatches), (result.Outcome, result.PossibleMatchCount, result.PossibleMatches.Count));
         Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task AnAddition_HoldsTheRefreshGate_UntilItsStored()
+    {
+        var loader = factory.Services.GetRequiredService<ListLoader>();
+        var storing = new TaskCompletionSource();
+        var stored = new TaskCompletionSource();
+
+        var addition = loader.AddToAllowListAsync(
+            async () =>
+            {
+                storing.SetResult();
+                await stored.Task;
+                return (42, false);
+            },
+            CancellationToken.None);
+        await storing.Task;
+        var reload = loader.ReloadAllowListAsync(withoutId: null, CancellationToken.None);
+        await Task.Delay(100);
+        var reloadWaited = !reload.IsCompleted;
+        stored.SetResult();
+
+        Assert.True(reloadWaited);
+        Assert.Equal((42, false), await addition);
+        await reload;
     }
 
     private static ListedSubject Listed(string id, string name) =>

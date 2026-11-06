@@ -114,6 +114,8 @@ async function add(name, reason, confirmed) {
   status.textContent = "Adding…";
   try {
     const response = await fetch("/api/v1/admin/allow-list", { method: "POST", headers: HEADERS, body: JSON.stringify({ name, reason, confirmed }) });
+    // The whole answer first, so an edit made while it was still arriving counts too.
+    const body = response.ok || response.status === 409 || response.status === 503 ? await response.json() : null;
     if (mine !== attempt) {
       // Edited meanwhile: what's in the form now hasn't been checked. Say only what became of the earlier values.
       status.textContent = response.ok ? `Added “${name}”, as entered before your edit.` : "";
@@ -121,18 +123,14 @@ async function add(name, reason, confirmed) {
       return;
     }
     if (response.ok) {
-      const body = await response.json();
       status.textContent = body.reloaded ? "Added: it applies to the next screening." : "Added: it applies within 15 minutes, at the next refresh.";
       $("name").value = "";
       $("reason").value = "";
       load();
-    } else if (response.status === 409 || response.status === 503) {
-      const body = await response.json();
+    } else if (body) {
       if (body.code === "confirm") {
         status.textContent = "";
         showPossibleMatches(name, reason, body);
-      } else if (body.code === "tooBroad") {
-        status.textContent = body.message;
       } else {
         status.textContent = body.message;
       }
