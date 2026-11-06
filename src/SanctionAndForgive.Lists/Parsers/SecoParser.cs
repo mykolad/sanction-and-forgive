@@ -100,16 +100,27 @@ public sealed class SecoParser : IListParser
                 var parts = name.Els("name-part").OrderBy(part => int.TryParse(part.Attr("order"), out var order) ? order : 0).ToList();
                 builder.AddName(Text.Join(" ", parts.Select(part => part.Val("value"))), isWeak, isPrimary);
 
-                // Each spelling variant (language and script) of the parts makes another full name.
-                var variants = parts.SelectMany(part => part.Els("spelling-variant"))
+                // Each language and script of the spelling variants makes more full names: every combination of the
+                // parts' spellings in it (a part without one keeps its value), up to MaxVariantNames.
+                var languages = parts.SelectMany(part => part.Els("spelling-variant"))
                     .Select(variant => (Lang: variant.Attr("lang"), Script: variant.Attr("script")))
                     .Distinct();
-                foreach (var (lang, script) in variants)
+                foreach (var (lang, script) in languages)
                 {
-                    var variantName = Text.Join(" ", parts.Select(part =>
-                        part.Els("spelling-variant").FirstOrDefault(variant => variant.Attr("lang") == lang && variant.Attr("script") == script)?.Value
-                        ?? part.Val("value")));
-                    builder.AddName(variantName, isWeak, isPrimary: false);
+                    var spellings = parts.Select(part =>
+                    {
+                        var inLanguage = part.Els("spelling-variant")
+                            .Where(variant => variant.Attr("lang") == lang && variant.Attr("script") == script)
+                            .Select(variant => Text.Clean(variant.Value))
+                            .OfType<string>()
+                            .Distinct()
+                            .ToList();
+                        return inLanguage.Count > 0 ? inLanguage : [part.Val("value") ?? string.Empty];
+                    });
+                    foreach (var combination in Combinations(spellings).Take(MaxVariantNames))
+                    {
+                        builder.AddName(Text.Join(" ", combination), isWeak, isPrimary: false);
+                    }
                 }
             }
 
@@ -120,6 +131,20 @@ public sealed class SecoParser : IListParser
         }
 
         return builder.HasNames ? new PendingTarget(builder, addresses) : null;
+    }
+
+    /// <summary>Bounds the full names one language's spellings can make, should a name list many per part.</summary>
+    private const int MaxVariantNames = 8;
+
+    private static IEnumerable<List<string>> Combinations(IEnumerable<List<string>> choices)
+    {
+        IEnumerable<List<string>> combinations = [[]];
+        foreach (var choice in choices)
+        {
+            combinations = combinations.SelectMany(prefix => choice.Select(option => new List<string>(prefix) { option }));
+        }
+
+        return combinations;
     }
 
     private sealed record PendingTarget(SubjectBuilder Builder, List<(string? Details, string? PlaceId)> Addresses);

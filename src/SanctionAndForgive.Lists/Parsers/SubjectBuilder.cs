@@ -5,7 +5,7 @@ namespace SanctionAndForgive.Lists.Parsers;
 internal sealed class SubjectBuilder(string externalId, SubjectType type)
 {
     private readonly List<ParsedName> names = [];
-    private readonly HashSet<string> seenNames = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> nameIndexes = new(StringComparer.Ordinal);
     private readonly List<ParsedAddress> addresses = [];
     private readonly HashSet<string> seenAddresses = new(StringComparer.Ordinal);
     private string? primaryName;
@@ -39,10 +39,19 @@ internal sealed class SubjectBuilder(string externalId, SubjectType type)
             primaryName ??= cleaned;
         }
 
-        if (seenNames.Add(cleaned))
+        // A spelling listed more than once is weak only if every listing of it is weak.
+        if (nameIndexes.TryGetValue(cleaned, out var index))
         {
-            names.Add(new ParsedName(cleaned, isWeak, Text.DetectScript(cleaned)));
+            if (names[index].IsWeak && !isWeak)
+            {
+                names[index] = names[index] with { IsWeak = false };
+            }
+
+            return;
         }
+
+        nameIndexes[cleaned] = names.Count;
+        names.Add(new ParsedName(cleaned, isWeak, Text.DetectScript(cleaned)));
     }
 
     public void AddAddress(string? raw, string? countryCode)

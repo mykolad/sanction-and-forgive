@@ -234,6 +234,44 @@ public class ParserTests
         Assert.Equal(("Шевченко Тарас", SubjectType.Individual, NameScript.Cyrillic), (subjects[1].PrimaryName, subjects[1].Type, subjects[1].Names[0].Script));
     }
 
+    [Theory]
+    [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}, null]}""")]
+    [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}]""")]
+    [InlineData("""{"total": 0}""")]
+    public void UsExport_RejectsMalformedDocuments(string json)
+    {
+        Assert.ThrowsAny<Exception>(() => Parse(new UsExportParser(), json));
+    }
+
+    [Fact]
+    public void Seco_KeepsEverySpellingWithinALanguage()
+    {
+        var subjects = Parse(new SecoParser(), """
+            <swiss-sanctions-list>
+              <target ssid="1"><individual><identity main="true"><name name-type="primary-name">
+                <name-part order="1"><value>Ivan</value><spelling-variant lang="RUS" script="CYRL">Иван</spelling-variant></name-part>
+                <name-part order="2"><value>Gonchar</value><spelling-variant lang="RUS" script="CYRL">Гончар</spelling-variant><spelling-variant lang="RUS" script="CYRL">Ганчар</spelling-variant></name-part>
+              </name></identity></individual></target>
+            </swiss-sanctions-list>
+            """);
+
+        Assert.Equal(["Ivan Gonchar", "Иван Гончар", "Иван Ганчар"], Assert.Single(subjects).Names.Select(name => name.FullName));
+    }
+
+    [Fact]
+    public void RepeatedName_IsStrongIfAnyListingIsStrong()
+    {
+        var subjects = Parse(new UnParser(), """
+            <CONSOLIDATED_LIST><INDIVIDUALS><INDIVIDUAL>
+              <REFERENCE_NUMBER>X.1</REFERENCE_NUMBER><FIRST_NAME>ANNA</FIRST_NAME>
+              <INDIVIDUAL_ALIAS><QUALITY>Low</QUALITY><ALIAS_NAME>Annushka</ALIAS_NAME></INDIVIDUAL_ALIAS>
+              <INDIVIDUAL_ALIAS><QUALITY>Good</QUALITY><ALIAS_NAME>Annushka</ALIAS_NAME></INDIVIDUAL_ALIAS>
+            </INDIVIDUAL></INDIVIDUALS></CONSOLIDATED_LIST>
+            """);
+
+        Assert.Contains(Assert.Single(subjects).Names, name => name is { FullName: "Annushka", IsWeak: false });
+    }
+
     [Fact]
     public void WrongRootElement_IsAFormatError()
     {

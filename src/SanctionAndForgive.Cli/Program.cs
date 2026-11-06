@@ -1,4 +1,4 @@
-﻿using SanctionAndForgive.Cli;
+using SanctionAndForgive.Cli;
 using SanctionAndForgive.Lists;
 
 // Commands so far: probe. Imports, manual records and evaluate arrive with their phases.
@@ -19,7 +19,13 @@ if (args.Length == 0 || args[0] != "probe")
 string? sourceCode = null, file = null, keep = null;
 for (var i = 1; i < args.Length; i++)
 {
-    var value = i + 1 < args.Length ? args[i + 1] : null;
+    var value = i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal) ? args[i + 1] : null;
+    if (value is null)
+    {
+        Console.Error.WriteLine($"{args[i]} needs a value.{Environment.NewLine}{Usage}");
+        return 2;
+    }
+
     switch (args[i])
     {
         case "--source": sourceCode = value; i++; break;
@@ -61,5 +67,5 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 using var httpClient = FeedDownloader.CreateHttpClient(AppVersion.Current);
-var probe = new ProbeCommand(new FeedDownloader(httpClient), euToken, Console.Out);
+var probe = new ProbeCommand(new FeedDownloader(httpClient, TimeSpan.FromMinutes(10)), euToken, Console.Out);
 return await probe.RunAsync(sources, file, keep, cancellation.Token);

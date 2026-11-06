@@ -59,7 +59,7 @@ internal sealed class ProbeCommand(FeedDownloader downloader, string euToken, Te
                 $"{prefix} {bytes,12:N0}  {root,-20} {statistics.Subjects,9:N0} {statistics.Individuals,6:N0} {statistics.Entities,7:N0} {statistics.Unknown,8:N0} {statistics.Names,7:N0} {statistics.WeakNames,6:N0} {statistics.CyrillicNames,9:N0} {statistics.OtherScriptNames,6:N0} {statistics.Addresses,10:N0} {clock.Elapsed.TotalSeconds,8:N1}  {(ok ? "parsed" : "parsed, but no subjects")}"
                 + $" | chars: names {statistics.NameCharacters:N0}, addresses {statistics.AddressCharacters:N0}, other {statistics.OtherCharacters:N0}"), ok);
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or IOException or ListFormatException or System.Xml.XmlException or System.Text.Json.JsonException)
+        catch (Exception exception) when (exception is HttpRequestException or TimeoutException or IOException or ListFormatException or System.Xml.XmlException or System.Text.Json.JsonException)
         {
             return ($"{prefix} {"-",7}  FAILED after {clock.Elapsed.TotalSeconds:N1} s: {exception.GetType().Name}: {exception.Message}", false);
         }

@@ -27,8 +27,10 @@ public sealed class UsExportParser : IListParser
 
     private static List<UsRecord> ReadRecords(ReadOnlySpan<byte> json, CancellationToken cancellationToken)
     {
+        // A truncated or reshaped file must fail, not pass as a shorter list: every array entry must be an object,
+        // and the root object must close at the end of the input.
         var reader = new Utf8JsonReader(json);
-        var records = new List<UsRecord>();
+        List<UsRecord>? records = null;
         if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
         {
             throw new ListFormatException("Expected a JSON object.");
@@ -36,30 +38,38 @@ public sealed class UsExportParser : IListParser
 
         while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
         {
-            if (!reader.ValueTextEquals("results"u8))
+            var isResults = reader.ValueTextEquals("results"u8);
+            reader.Read();
+            if (!isResults)
             {
-                reader.Read();
                 reader.Skip();
                 continue;
             }
 
-            reader.Read();
             if (reader.TokenType != JsonTokenType.StartArray)
             {
                 throw new ListFormatException("Expected \"results\" to be an array.");
             }
 
-            while (reader.Read() && reader.TokenType == JsonTokenType.StartObject)
+            records = [];
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                records.Add(JsonSerializer.Deserialize(ref reader, UsJsonContext.Default.UsRecord)
-                    ?? throw new ListFormatException("A null record in \"results\"."));
-            }
+                if (reader.TokenType != JsonTokenType.StartObject)
+                {
+                    throw new ListFormatException($"Expected an object in \"results\", found {reader.TokenType}.");
+                }
 
-            return records;
+                records.Add(JsonSerializer.Deserialize(ref reader, UsJsonContext.Default.UsRecord)!);
+            }
         }
 
-        throw new ListFormatException("No \"results\" array.");
+        if (reader.TokenType != JsonTokenType.EndObject || reader.Read())
+        {
+            throw new ListFormatException("The JSON document doesn't end after its root object.");
+        }
+
+        return records ?? throw new ListFormatException("No \"results\" array.");
     }
 
     private static ParsedSubject? ToSubject(UsRecord record)
