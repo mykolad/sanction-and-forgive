@@ -42,6 +42,7 @@ what stopped the run.
 | Date | Image | Lists | Sustained screenings/s | p95 at that rate | CPU | Memory | Stopped by |
 |---|---|---|---|---|---|---|---|
 | 2026-11-06 | 358c9b0 | 6 (eu, ofac-cons, ofac-sdn, ua-sfms, uk, us-export: 37,362 subjects) | **2** | 0.86 s (p50 39 ms) | 0.07-0.14 vCPU (highest 1-minute value) | 380-450 MB working set of 512 MiB, no restarts | p95 5.6 s at 4/s |
+| 2026-11-06 | 274d26e (after #23) | the same 6 | **8** | 0.25 s (p50 26 ms) | up to 0.14 vCPU (highest 1-minute value) | 430-540 MiB working set, no restarts | p95 2.9 s at 12/s |
 
 Per step (2,000 inputs from the live lists; no request failed, none rate limited, no iteration dropped):
 
@@ -107,6 +108,12 @@ report unchanged):
   spelling and cognate groups, and its weight, are looked up once.
 - Jaro-Winkler is computed only for the edit distances that use it, and both edit-distance functions keep their rows
   on the stack.
+
+The second run (after #23, the procedure's revision wait included), per step: 1/s p95 284 ms, 2/s 121 ms, 4/s 126 ms,
+6/s 200 ms, 8/s 253 ms (p50 26 ms; 1,100 screenings), then 12/s p95 2.9 s, where it stopped; no request failed,
+none dropped. Four times the first run's 2 a second. The working set rose with the load to 540 MiB at 8-12 a
+second (the platform's figure; the replica didn't restart), so memory, not CPU, is now the closer limit on this
+size: #25 allocates a third less per screening.
 
 On Azure after the deploy (9e8173f, the same replica, the same stream of 1,000 inputs as above): 1,000 in 71 s,
 **14.0 records a second** (6.5 before), no errors, so a 200 s stream covers about 2,800 records and a 50,000-record
