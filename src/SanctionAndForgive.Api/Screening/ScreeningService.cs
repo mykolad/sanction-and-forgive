@@ -111,6 +111,7 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
     private static string AsOf(DateTimeOffset? value) =>
         value?.ToUniversalTime().ToString("d MMM yyyy HH:mm 'UTC'", CultureInfo.InvariantCulture) ?? "unknown";
 
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$", RegexOptions.CultureInvariant)]
+    // \z, not $: $ also matches before a final newline, so "TX-1\n" would pass.
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}\z", RegexOptions.CultureInvariant)]
     private static partial Regex ReferencePattern();
 }

@@ -183,6 +183,7 @@ public sealed class ApiTests : IDisposable
     [InlineData("""{"companyName":"Romashka"}""")]
     [InlineData("""{"reference":"Ivan Ivanov","companyName":"Romashka"}""")]
     [InlineData("""{"reference":"-x","companyName":"Romashka"}""")]
+    [InlineData("""{"reference":"TX-1\n","companyName":"Romashka"}""")]
     public async Task NothingEntered_OrNoValidReference_Is400(string json)
     {
         LoadStandardLists(ukStale: false);
