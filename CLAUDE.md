@@ -47,8 +47,37 @@ infra/                    Bicep (infra/README.md)
 tools/lists.ps1           The script the owner runs to manage lists
 ```
 
-The image will contain both `SanctionAndForgive.Api.dll` and `SanctionAndForgive.Cli.dll`; the import job overrides
-the command.
+## Lists (feeds and parsers)
+
+`docs/sources.md` holds each feed's format, real counts, terms of reuse and the sizing. Keep it current.
+
+- `ListSources.All` is the catalogue: code, name, URL, `MaxAgeHours` (72 for the daily feeds), `FeedStatus`, parser.
+  Only `Active` feeds are imported automatically. `TermsUnclear` (un, ch-seco, ca-sema) wait for the owner's
+  decision, and `NeedsAccess` (au-dfat, ua-nsdc) wait for a file or an API key. The EU URL's `{token}` comes from
+  `LISTS_EU_TOKEN` (the public token by default).
+- One `IListParser` per format reduces a file to `ParsedSubject`s: external id, `SubjectType` (`Unknown` when the
+  source doesn't say: US export records), primary name, every name with its script and weak flag, addresses as one
+  free-text string plus an ISO alpha-2 code when the source gives one. Parsers stream (`Parsers/Xml.Records`: one
+  record element at a time) and leave out vessels and aircraft. A wrong root element is a `ListFormatException`.
+- `FeedDownloader` identifies itself honestly (`sanction-and-forgive/<version>`). Never disguise the client as a
+  browser to get past a site that refuses it: report the source as `NeedsAccess` instead.
+- `probe` (`dotnet SanctionAndForgive.Cli.dll probe [--source <code>|all] [--file <path>] [--keep <dir>]`) downloads,
+  parses and prints counts per feed. It writes nothing else. It exits 1 if an `Active` feed failed.
+- Parser tests: `tests/SanctionAndForgive.Tests/Lists/ParserTests.cs`, one small fictional fixture per format.
+
+## Docker
+
+The image (`Dockerfile`) holds both `SanctionAndForgive.Api.dll` (the entry point) and `SanctionAndForgive.Cli.dll`
+(the import job overrides the command), published to one folder. Base: `aspnet:10.0-noble-chiseled-extra` (no shell:
+prepare files in the build stage), non-root, port 8080. Version metadata is baked in from build args (`VERSION`,
+`REVISION`, `COMMIT_DATE`, `SOURCE_URL` → `App__Version` etc.). **A new project needs its `.csproj` copied before
+`dotnet restore` in the Dockerfile.**
+
+```
+docker build -t sanction-and-forgive --build-arg VERSION=local .
+docker run --rm --entrypoint dotnet sanction-and-forgive SanctionAndForgive.Cli.dll probe --source ua-sfms
+docker run --rm -p 8080:8080 sanction-and-forgive
+```
 
 ## Code style rules
 
