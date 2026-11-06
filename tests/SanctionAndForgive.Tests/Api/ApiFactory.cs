@@ -38,7 +38,7 @@ public sealed class ApiFactory(int rateLimitPerMinute) : WebApplicationFactory<P
     public void Load(params LoadedList[] lists) => Catalog.Replace(lists);
 
     public static LoadedList Feed(string code, string name, DateTimeOffset? lastChecked, params ListedSubject[] subjects) =>
-        new(code, name, $"https://example.invalid/{code}", 72, 1, lastChecked, subjects.Length, ListIndex.Build(subjects));
+        new(code, name, $"https://example.invalid/{code}", 72, 1, lastChecked, lastChecked?.AddDays(-3), subjects.Length, ListIndex.Build(subjects));
 
     public static ListedSubject Subject(string name, SubjectKind kind) =>
         new($"X-{name.Length}-{name[0]}", kind, name, [new ListedName(name, IsWeak: false)], [], "TEST", "https://example.invalid/record");

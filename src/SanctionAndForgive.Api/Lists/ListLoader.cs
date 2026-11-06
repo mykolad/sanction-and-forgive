@@ -18,7 +18,7 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
         await using var scope = scopes.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<ListsDbContext>();
         var sources = await context.Sources.AsNoTracking().OrderBy(source => source.Code)
-            .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport != null ? source.ActiveImport!.RecordCount : 0 })
+            .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport != null ? source.ActiveImport!.RecordCount : 0, UpdatedAt = source.ActiveImport != null ? source.ActiveImport!.CompletedAt : null })
             .ToListAsync(cancellationToken);
 
         var current = catalog.Lists.ToDictionary(list => list.Code, StringComparer.Ordinal);
@@ -27,7 +27,7 @@ public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog,
         for (var i = 0; i < sources.Count; i++)
         {
             var source = sources[i];
-            var target = new LoadedList(source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, source.RecordCount, Index: null);
+            var target = new LoadedList(source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, source.UpdatedAt, source.RecordCount, Index: null);
             var existing = current.GetValueOrDefault(source.Code);
             if (existing is not null && existing.ActiveImportId == source.ActiveImportId && (existing.Index is not null || source.ActiveImportId is null))
             {
