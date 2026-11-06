@@ -133,7 +133,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             try
             {
                 await WriteSubjectsAsync(source, import, records, cancellationToken);
-                await ActivateAsync(source, import, cancellationToken);
+                await ActivateAsync(source, import, previousActive, cancellationToken);
             }
             catch (Exception exception) when (exception is SqlException or DbUpdateException or RetryLimitExceededException or InvalidOperationException or OperationCanceledException)
             {
@@ -226,18 +226,28 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         return Convert.ToHexStringLower(sha.GetHashAndReset());
     }
 
-    /// <summary>One record per external id: a repeated id's names and addresses join the first record.</summary>
+    /// <summary>One record per external id, independent of the file's order: of a repeated id's records, the base is
+    /// the one that sorts first by its fields (primary name, programmes, listed on, remarks, source URL); the others'
+    /// names and addresses join it. A spelling stays strong if any listing is strong; an address differing only by its
+    /// country code is kept. Ids keep their first appearance's order.</summary>
     public static List<Subject> Deduplicate(IEnumerable<Subject> subjects)
     {
-        var byId = new Dictionary<string, Subject>(StringComparer.Ordinal);
-        var ordered = new List<Subject>();
-        foreach (var subject in subjects)
+        var result = new List<Subject>();
+        foreach (var group in subjects.GroupBy(subject => subject.ExternalId, StringComparer.Ordinal))
         {
-            if (byId.TryGetValue(subject.ExternalId, out var first))
+            var ordered = group
+                .OrderBy(subject => subject.PrimaryName, StringComparer.Ordinal)
+                .ThenBy(subject => subject.Programmes, StringComparer.Ordinal)
+                .ThenBy(subject => subject.ListedOn)
+                .ThenBy(subject => subject.Remarks, StringComparer.Ordinal)
+                .ThenBy(subject => subject.SourceUrl, StringComparer.Ordinal)
+                .ThenBy(subject => subject.Type)
+                .ToList();
+            var first = ordered[0];
+            foreach (var subject in ordered.Skip(1))
             {
                 foreach (var name in subject.Names)
                 {
-                    // A spelling listed more than once is weak only if every listing is weak.
                     var existing = first.Names.FirstOrDefault(n => n.FullName == name.FullName);
                     if (existing is null)
                     {
@@ -250,16 +260,13 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 }
 
                 first.Addresses.AddRange(subject.Addresses.Where(address => !first.Addresses.Any(existing => existing.Raw == address.Raw && existing.CountryCode == address.CountryCode)));
-                continue;
             }
 
-            byId[subject.ExternalId] = subject;
-            ordered.Add(subject);
+            result.Add(first);
         }
 
-        return ordered;
+        return result;
     }
-
     private static Subject Detach(Subject subject)
     {
         var copy = new Subject
@@ -348,16 +355,32 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         await bulkCopy.WriteToServerAsync(table, cancellationToken);
     }
 
-    /// <summary>The flip: the new import completes and becomes active in one transaction (one SaveChanges is one
-    /// transaction, and works with EF's retrying execution strategy, unlike a user-started transaction).</summary>
-    private async Task ActivateAsync(Source source, Import import, CancellationToken cancellationToken)
+    /// <summary>The flip, in one transaction: the source moves to the new import only if its active import is still
+    /// the one this import started from, and the import completes. The condition, not the application lock, is
+    /// what guarantees no lost update: a retried command may run on a new session that no longer holds the lock.</summary>
+    private async Task ActivateAsync(Source source, Import import, int? expectedActive, CancellationToken cancellationToken)
     {
         var now = clock.GetUtcNow();
-        import.Status = ImportStatus.Completed;
-        import.CompletedAt = now;
-        source.ActiveImportId = import.Id;
-        source.LastCheckedAt = now;
-        await context.SaveChangesAsync(cancellationToken);
+        var strategy = context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            var flipped = await context.Sources
+                .Where(s => s.Id == source.Id && s.ActiveImportId == expectedActive)
+                .ExecuteUpdateAsync(set => set.SetProperty(s => s.ActiveImportId, import.Id).SetProperty(s => s.LastCheckedAt, now), cancellationToken);
+            if (flipped == 0)
+            {
+                throw new InvalidOperationException($"Another import of {source.Code} became active meanwhile; nothing was changed. Run it again.");
+            }
+
+            await context.Imports.Where(i => i.Id == import.Id)
+                .ExecuteUpdateAsync(set => set.SetProperty(i => i.Status, ImportStatus.Completed).SetProperty(i => i.CompletedAt, now), cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        });
+
+        // The tracked entities take what was committed (the update bypassed the change tracker).
+        await context.Entry(source).ReloadAsync(cancellationToken);
+        await context.Entry(import).ReloadAsync(cancellationToken);
     }
 
     /// <summary>Keeps the active import and the one before it; deletes every older import and its rows.</summary>

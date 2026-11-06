@@ -31,6 +31,7 @@ public class ManualCsvReaderTests
     [InlineData("external_id,type,name,country\nX,Entity,A,Estonia", "two-letter")]
     [InlineData("external_id,type,name,listed_on\nX,Entity,A,15.01.2026", "yyyy-MM-dd")]
     [InlineData("external_id,type,name\nX,Entity,", "name is required")]
+    [InlineData("external_id,type,name\nX,Entity,Northwind, Inc", "quote any value")]
     [InlineData("external_id,type,name\nX,Entity,\"Alpha\nY,Entity,Beta", "closing quote")]
     public void InvalidInput_SaysWhatsWrong(string csv, string expected)
     {
