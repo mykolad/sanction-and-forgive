@@ -32,7 +32,7 @@ public sealed record ScreeningResponse(
 public sealed record ListResponse(string Code, string Name, DateTimeOffset? AsOf, string State, int? Version, int RecordCount, string? Url)
 {
     public static ListResponse From(LoadedList list, DateTimeOffset now) =>
-        new(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? "Current" : "NotChecked", list.Index is null ? null : list.ActiveImportId, list.RecordCount, list.Url);
+        new(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? "Current" : "NotChecked", list.Index is null ? null : list.ActiveImportId, list.RecordCount, SanctionAndForgive.Lists.ListSources.Find(list.Code)?.PublicUrl ?? list.Url);
 }
 
 public sealed record EntryResponse(string Kind, string Input, string Compared, IReadOnlyList<CellResponse> Cells)
