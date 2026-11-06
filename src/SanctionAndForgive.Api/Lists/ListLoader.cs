@@ -11,12 +11,31 @@ namespace SanctionAndForgive.Api.Lists;
 /// against its import's record count, so a concurrent cleanup can never make half a list searchable; a list that
 /// fails either stays Not checked. If the database is unreachable the catalog keeps serving what it has, and lists
 /// age out.</summary>
-public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, TimeProvider clock, ILogger<ListLoader> logger)
+public sealed class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, TimeProvider clock, ILogger<ListLoader> logger) : IDisposable
 {
     /// <summary>How many of each source's latest imports the status page shows.</summary>
     public const int HistoryLength = 10;
 
+    /// <summary>One refresh at a time (the timer's, or one an administrator's review starts): two would build the same
+    /// list twice, and memory holds at most one list twice.</summary>
+    private readonly SemaphoreSlim gate = new(1, 1);
+
+    public void Dispose() => gate.Dispose();
+
     public async Task RefreshAsync(CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            await RefreshOnceAsync(cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task RefreshOnceAsync(CancellationToken cancellationToken)
     {
         await using var scope = scopes.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<ListsDbContext>();

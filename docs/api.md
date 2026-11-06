@@ -160,3 +160,21 @@ The answer has the `list` (as in the other responses: version, freshness, state)
 entry (`isWeak` where the list marks an alias as low quality), `addresses`, `programme` and `sourceUrl` (the
 official record). A list that is Not checked can still be browsed; its `state` says so. 404 for an unknown list code,
 503 before the lists have loaded, 400 for a bad filter or page, and the per-minute limit applies as for screenings.
+
+## Admin: `/api/v1/admin` and `/admin`
+
+For the demo's administrators. Sign-in is Container Apps' built-in Microsoft Entra ID sign-in (`/.auth/login/aad`,
+`/.auth/logout`), set up by `infra/admin-sign-in.ps1`; screening never needs it. The app reads the signed-in user from
+the platform's `X-MS-CLIENT-PRINCIPAL` header, which clients can't set, and only where the deployment turned sign-in
+on (`Admin:SignInEnabled`): otherwise nobody is signed in, whatever a request says.
+
+- `GET /api/v1/admin/me`: `enabled` (sign-in set up), `signedIn`, `name`, `isAdmin` (holds the `Lists.Admin` role),
+  `signInUrl`, `signOutUrl`.
+- `POST /api/v1/admin/imports/{id}/confirm` and `…/reject`: review an update held for review (its `importId` from
+  `held` in `/api/v1/sources`). Needs the `Lists.Admin` role and the header `X-Requested-By: sanction-and-forgive-admin`
+  (which another site can't send, so a signed-in admin's cookie can't be used against them). 200
+  `{importId, result, reloaded}` (`reloaded` false: the review stands, and the next refresh, within 15 minutes,
+  shows it); 401 not signed in; 403 without the role; 400 without the header; 404 sign-in off or no such
+  import; 409 `NotPending` (already reviewed, superseded, or held against a list that has changed since). Confirming
+  makes it the active list (searched while it's current: the status page shows whether it is) and reloads the lists
+  at once; the review is logged with the reviewer's sign-in name.

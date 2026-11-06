@@ -9,6 +9,7 @@ reproducible from an empty group. Nothing here belongs to or touches lazydad.
 | `platform.bicep` | Resource group | The deploy workflow (first time: by hand) | Log Analytics (30 days, daily cap), Container Apps environment `sanction-and-forgive-cae`, app identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` (Entra-only), database `sanction-and-forgive-db` (Basic, 5 DTU, 2 GB), the Azure services firewall rule; alerts to the subscription's Owner role: database storage above 80%, a failed or rejected import, and a $20 monthly budget (80% spent, 100% forecast) |
 | `app.bicep` | Resource group | The deploy workflow | Container App `sanction-and-forgive` (0.25 vCPU / 0.5 GiB, min = max = 1, port 8080, liveness `/healthz`, readiness `/readyz`, public ingress unless `allowedCidrs`) and the job `sanction-and-forgive-import` (daily 03:30 UTC, `import --source all`, 0.5 vCPU / 1 GiB, 30 minutes), both from `ghcr.io/mykolad/sanction-and-forgive:<sha>` as identity `sanction-and-forgive-app` |
 | `sql/grant-identities.sql` | Database | The owner, once (or after re-creating the database) | Database users for the app and deploy identities: what Bicep can't do |
+| `admin-sign-in.ps1` | Tenant | The owner, once | The admin sign-in's Entra app registration (role `Lists.Admin`, assignment required, assigned to the owner); `app.bicep` then turns the Container App's built-in sign-in on |
 
 Nothing personal lives in this public repository: the SQL admin's object ID and login come from environment variables
 (`platform.bicepparam`), set as repository variables for the workflows. Alerts go to whoever holds Owner directly on the
@@ -40,10 +41,33 @@ re-created repository can't inherit the trust. It isn't a secret.
 ### GitHub settings
 
 - **Repository variables** (no secrets anywhere): `AZURE_CLIENT_ID` (the deploy identity's client ID, a bootstrap
-  output), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `SQL_ADMIN_OBJECT_ID`, `SQL_ADMIN_LOGIN`.
+  output), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `SQL_ADMIN_OBJECT_ID`, `SQL_ADMIN_LOGIN`, and (optional)
+  `ADMIN_CLIENT_ID`, the admin sign-in's app registration.
 - **Environment `production`**: deployments from `master` only. The deploy identity trusts only this environment.
 - **Rulesets** on `master`: PR with `build-and-test` passing and up to date, review threads resolved; no force-push or
   deletion; Copilot code review on every PR and push.
+
+## Admin sign-in (the owner, once)
+
+The admin page (`/admin`: confirm or reject updates held for review) uses Container Apps' built-in Microsoft Entra ID
+sign-in. Screening never needs it. The app registration lives in the tenant, outside the resource group, so the owner
+creates it:
+
+```powershell
+./infra/admin-sign-in.ps1                        # creates (or updates) it and gives you the Lists.Admin role
+gh variable set ADMIN_CLIENT_ID --body <app id>  # as printed; the next deploy turns sign-in on
+gh workflow run deploy.yml                       # or wait for the next push to master
+```
+
+The deploy turns the app's trust in the principal header on only after it has checked that the Container App's
+auth config is in place for that client id (`ADMIN_SIGN_IN_READY`, checked on every deploy): the first deploy creates
+the auth config with the app still ignoring the header, then deploys again with it on. A failed provisioning never
+leaves the app trusting a header anyone could send. If the auth config is ever removed by hand, deploy again (or set
+`ADMIN_CLIENT_ID` empty) so the app stops trusting it too.
+
+Until `ADMIN_CLIENT_ID` is set, sign-in is off and the app ignores any principal header: the admin page says so and
+held updates are reviewed with `tools/lists.ps1 review|confirm|reject`. Others get the role in the Entra admin center
+(Enterprise applications, the registration, Users and groups). No client secret: the ID token carries the role.
 
 ## Deploying
 

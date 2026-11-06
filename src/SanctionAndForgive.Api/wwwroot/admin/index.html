@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin · Sanction &amp; Forgive</title>
+  <meta name="description" content="For the demo's administrators: review list updates held for review.">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23243b6b'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <nav class="menu" aria-label="Site">
+        <a href="/">Screen</a>
+        <a href="/lists">Browse lists</a>
+        <a href="/status">List status</a>
+        <a href="/admin" aria-current="page">Admin</a>
+        <a href="https://github.com/mykolad/sanction-and-forgive/blob/master/docs/api.md">API</a>
+      </nav>
+      <h1>Admin</h1>
+      <p class="tagline">For the demo's administrators: list updates held for review. Screening never needs sign-in.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" aria-labelledby="account-title">
+      <h2 id="account-title">Sign-in</h2>
+      <div id="account" aria-live="polite">Checking…</div>
+    </section>
+
+    <section class="panel" aria-labelledby="held-title">
+      <h2 id="held-title">Updates held for review</h2>
+      <p class="section-note">An update with more than 20% fewer records than the list it would replace is kept but not searched.
+        Compare it with the publisher's site: a real change (many entries delisted) is confirmed; a broken or partial file is
+        rejected. Until then the current list keeps serving, and still turns Not checked after its allowed age.</p>
+      <div id="held" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p class="fineprint">A demo list check, not a legal determination. · <a href="https://github.com/mykolad/sanction-and-forgive">Source code</a> (MIT)</p>
+    </div>
+  </footer>
+
+  <script src="/admin/admin.js"></script>
+</body>
+</html>
