@@ -87,12 +87,12 @@ Every one of the 10 fetched lists loaded (more than production's active ones), t
 After the Azure run: production's six lists from a local copy of the database, the same 2,000 inputs, one thread,
 the API's GC settings, and `dotnet-trace`. A screening never touches the database; it's all CPU.
 
-| | Before | After (#23) |
-|---|---|---|
-| Mean per screening, one desktop core | 21.8 ms | 9.3 ms |
-| p50 / p95 / p99 | 11.2 / 80 / 179 ms | 5.8 / 28 / 62 ms |
-| Screenings a second on one core | 46 | 108 |
-| Allocated per screening | 22 MB | 8 MB |
+| | Before | After #23 | After #25 |
+|---|---|---|---|
+| Mean per screening, one desktop core | 21.8 ms | 9.3 ms | 7.3 ms |
+| p50 / p95 / p99 | 11.2 / 80 / 179 ms | 5.8 / 28 / 62 ms | 4.3 / 23 / 56 ms |
+| Screenings a second on one core | 46 | 108 | 138 |
+| Allocated per screening | 22 MB | 8 MB | 5.4 MB |
 
 Where the time went: scoring about 1,560 candidate aliases per screening (up to 2,000 a list, six lists), each
 aligned word by word; finding the candidates was about 1 ms. The changes, each leaving every result identical (a full
@@ -113,8 +113,9 @@ On Azure after the deploy (9e8173f, the same replica, the same stream of 1,000 i
 batch about an hour. Concurrent single screenings weren't rerun (that needs the rate limit off again); expect
 roughly twice the 2 a second above.
 
-Left as it is: building every candidate's explanation (about a third of what remains) could wait until a candidate is
-kept, a larger change for perhaps 25% more.
+- (#25) Explanations are built only when read: every candidate alias is scored (percentage and caps), but only the
+  subjects a search reports are explained, the best one and those at Review or above, which is all a cell or the
+  allow-list's possible matches use. `SearchName` no longer returns the subjects below Review behind the best.
 
 **Combining lists into one index** (the owner's question): many listed parties appear on several lists, so one index
 with each entry referring to its lists would hold fewer names.

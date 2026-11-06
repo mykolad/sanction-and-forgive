@@ -104,10 +104,11 @@ row of spec 5.10, outcomes and bands, not exact percentages), `PerListTests.cs`,
 not break a golden test without the owner's approval.
 
 Measured on 2026-11-06 with production's six lists (37,362 subjects, 114,723 names): 128 MB of managed heap (each
-index about as much again as its subjects), built in about 3.4 s; a screening takes 9.3 ms mean, 5.8 ms p50, 28 ms
+index about as much again as its subjects), built in about 3.4 s; a screening takes 7.3 ms mean, 4.3 ms p50, 23 ms
 p95 on one desktop core, after the profiling in `docs/load-test.md` (it was 21.8 ms). Almost all of it is scoring
-(about 1,560 aliases per screening, each aligned word by word); finding candidates is about 1 ms. A speed change must
-leave every result identical: compare a full dump of results before and after, and the evaluation.
+(about 1,560 aliases per screening, each aligned word by word); finding candidates is about 1 ms. Explanations are
+built only for the subjects reported (`NameScore` builds them when read). A speed change must leave every result
+identical: compare a full dump of results before and after, and the evaluation.
 
 ## API and website (`SanctionAndForgive.Api`)
 
