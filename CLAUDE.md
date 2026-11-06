@@ -126,7 +126,10 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   resume from; one stream at a time, `Screening:ConcurrentStreams`; never echoes input, hits explained by
   `SubjectMatch.Words`; `docs/api.md`), `GET /api/v1/status`, `GET /api/v1/sources` (for the status page: every loaded
   list with state, count, last check, last change and the publisher's page, file and terms; then every catalogued
-  feed not loaded, with `ListSource.Note` as the reason; 503 before the first load), `GET /api/v1/examples` (entities from the live lists: a
+  feed not loaded, with `ListSource.Note` as the reason; 503 before the first load), `POST /api/v1/lists/{code}/browse`
+  (a page of a loaded list's entries in name order, filter text in the body, never the URL or logs; from the index in
+  memory, with each index's sorted, folded entries cached in a `ConditionalWeakTable` that goes with the index),
+  `GET /api/v1/examples` (entities from the live lists: a
   Latin one, a Cyrillic alias, one with an address, one with a typo; cached per snapshot), `GET /healthz` (liveness, no
   database), `GET /readyz` (200 after the first load), `GET /openapi/v1.json`.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
@@ -141,8 +144,11 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Website** (`wwwroot`, plain JS, no build step): one form (receiver, company, a multi-line address "any format"),
   "Try an example" buttons, a summary line, the table (lists × entries; Match / Possible match / No match / Not checked
   with a symbol each, never colour alone), a detail panel per cell (listed name, alias matched, how it aligned,
-  programme, address, the official record), the disclaimer, and the attribution footer (OGL, trade.gov's notice, EU)
-  with a link to **`/status`** (`wwwroot/status/`: lists searched, then lists not imported and why). A new catalogued
+  programme, address, the official record), the disclaimer, and the attribution footer (OGL, trade.gov's notice, EU).
+  Every page starts with the same menu (`<nav class="menu">`, the current page `aria-current="page"`): Screen,
+  **Browse lists** (`wwwroot/lists/`: pick a list, filter, page through entries, expand one for every name, address,
+  programme and the official record), **List status** (`wwwroot/status/`: lists searched, then lists not imported and
+  why), API. A new page copies the menu; `SourcesTests` and `BrowseTests` check it. A new catalogued
   feed needs its `Homepage` (and `TermsUrl`), and a `Note` unless it's `Active`; `SourcesTests` checks.
   `app.js` puts every value in as text, never HTML. Run it from `src/SanctionAndForgive.Api` (the content root holds
   `wwwroot`).

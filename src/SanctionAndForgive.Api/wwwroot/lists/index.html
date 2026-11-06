@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browse lists · Sanction &amp; Forgive</title>
+  <meta name="description" content="Browse the entries of each sanctions list the demo searches: every name and alias, address, programme and the official record.">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23243b6b'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <nav class="menu" aria-label="Site">
+        <a href="/">Screen</a>
+        <a href="/lists" aria-current="page">Browse lists</a>
+        <a href="/status">List status</a>
+        <a href="https://github.com/mykolad/sanction-and-forgive/blob/master/docs/api.md">API</a>
+      </nav>
+      <h1>Browse lists</h1>
+      <p class="tagline">Every entry of a list as the demo holds it and screens against: names and aliases, addresses, programme, and the official record.</p>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="panel" aria-labelledby="browse-title">
+      <h2 id="browse-title" class="visually-hidden">Find entries</h2>
+      <!-- method="post": without JavaScript the filter must never go into the URL. -->
+      <form id="browse-form" method="post" action="#" novalidate>
+        <div class="fields browse-fields">
+          <label class="field">
+            <span class="field-label">List</span>
+            <select id="list" name="list"></select>
+          </label>
+          <label class="field">
+            <span class="field-label">Type</span>
+            <select id="type" name="type">
+              <option value="">All</option>
+              <option value="Individual">People</option>
+              <option value="Entity">Entities</option>
+              <option value="Unknown">Not stated by the list</option>
+            </select>
+          </label>
+          <label class="field field-wide">
+            <span class="field-label">Name or id <span class="hint">any part of any name; case and accents ignored</span></span>
+            <input id="query" name="query" maxlength="100" autocomplete="off" spellcheck="false" placeholder="Romashka, Шевченко, or an id like EU.1234.56">
+          </label>
+        </div>
+        <p class="form-note">Nothing you type here is stored or logged. This is a plain text filter: to check a name for a match, <a href="/">screen it</a>.</p>
+        <div class="actions">
+          <button type="submit" class="primary">Show entries</button>
+          <button type="button" class="secondary" id="clear-button">Clear</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="state" class="state" aria-live="polite"></section>
+
+    <section class="panel" id="results" hidden aria-labelledby="results-title">
+      <h2 id="results-title"></h2>
+      <p id="list-note" class="section-note"></p>
+      <div class="table-scroll">
+        <table id="entries" class="sources entries">
+          <thead>
+            <tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Programme</th><th scope="col">Id</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button type="button" class="secondary" id="previous">← Previous</button>
+        <span id="range" class="muted"></span>
+        <button type="button" class="secondary" id="next">Next →</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <p>Each list belongs to its publisher: check any entry against the official record. Vessels and aircraft are left out, as the demo doesn't screen them.</p>
+      <p>Contains public sector information licensed under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">Open Government Licence v3.0</a> (UK Sanctions List).
+        This product uses the International Trade Administration's Data API but is not endorsed or certified by the International Trade Administration.
+        EU data © European Union, reused under the Commission's <a href="https://commission.europa.eu/legal-notice_en">reuse policy</a>.</p>
+      <p class="fineprint">A demo list check, not a legal determination. · <a href="https://github.com/mykolad/sanction-and-forgive">Source code</a> (MIT)</p>
+    </div>
+  </footer>
+
+  <script src="/lists/lists.js"></script>
+</body>
+</html>

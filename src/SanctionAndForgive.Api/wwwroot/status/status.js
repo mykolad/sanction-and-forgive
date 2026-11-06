@@ -56,7 +56,9 @@ function links(list) {
 
 function listCell(list) {
   return el("td", {},
-    el("span", { class: "list-title" }, list.name),
+    list.state === "NotImported"
+      ? el("span", { class: "list-title" }, list.name)
+      : el("a", { class: "list-title", href: `/lists?list=${encodeURIComponent(list.code)}`, title: "Browse its entries" }, list.name),
     el("span", { class: "sub" }, list.code,
       list.status === "Manual" ? " · maintained by hand" : "",
       list.state !== "NotImported" && list.status === "TermsUnclear" ? " · imported by decision; its terms aren't cleared" : ""));
