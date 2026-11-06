@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using SanctionAndForgive.Api.Admin;
 using SanctionAndForgive.Data;
+using SanctionAndForgive.Matching;
 
 namespace SanctionAndForgive.Tests.Api;
 
@@ -184,6 +185,42 @@ public sealed class AdminTests : IDisposable
     }
 
     [Fact]
+    public async Task ANameWithPossibleMatches_IsShownThem_AndAddedOnlyOnceTheyAreConfirmed()
+    {
+        using var client = Client(signInEnabled: true);
+        var owner = Principal("owner@example.invalid", AdminAccess.Role);
+
+        using var first = await SendAsync(client, HttpMethod.Post, "/api/v1/admin/allow-list", owner, fromThisSite: true, new { name = "Huamei Technologies", reason = "A customer" });
+        var refusal = await first.Content.ReadFromJsonAsync<JsonElement>();
+        using var otherKey = await SendAsync(client, HttpMethod.Post, "/api/v1/admin/allow-list", owner, fromThisSite: true, new { name = "Huamei Technologies", reason = "A customer", confirmed = new[] { "eu/1" } });
+        var addedBefore = allowList.Added.Count;
+        using var confirmed = await SendAsync(client, HttpMethod.Post, "/api/v1/admin/allow-list", owner, fromThisSite: true, new { name = "Huamei Technologies", reason = "A customer", confirmed = new[] { "ofac-sdn/123" } });
+
+        Assert.Equal(HttpStatusCode.Conflict, first.StatusCode);
+        Assert.Equal("confirm", refusal.GetProperty("code").GetString());
+        var hit = Assert.Single(refusal.GetProperty("possibleMatches").EnumerateArray().ToList());
+        Assert.Equal(("ofac-sdn/123", "OFAC SDN", "SHENZHEN HUAMEI LIANYUN", 72, "CHINA-EO13846"),
+            (hit.GetProperty("key").GetString(), hit.GetProperty("listName").GetString(), hit.GetProperty("listedName").GetString(), hit.GetProperty("percent").GetInt32(), hit.GetProperty("programme").GetString()));
+        Assert.Equal(HttpStatusCode.Conflict, otherKey.StatusCode);
+        Assert.Equal(0, addedBefore);
+        Assert.Equal(HttpStatusCode.OK, confirmed.StatusCode);
+        Assert.Equal(("Huamei Technologies", "A customer", "owner@example.invalid"), Assert.Single(allowList.Added));
+    }
+
+    [Fact]
+    public async Task ConfirmedKeys_AreBounded()
+    {
+        using var client = Client(signInEnabled: true);
+        var owner = Principal("owner@example.invalid", AdminAccess.Role);
+
+        using var empty = await SendAsync(client, HttpMethod.Post, "/api/v1/admin/allow-list", owner, fromThisSite: true, new { name = "Huamei Trading", reason = "x", confirmed = new[] { "" } });
+        using var tooMany = await SendAsync(client, HttpMethod.Post, "/api/v1/admin/allow-list", owner, fromThisSite: true, new { name = "Huamei Trading", reason = "x", confirmed = Enumerable.Range(0, 201).Select(i => $"eu/{i}").ToArray() });
+
+        Assert.Equal((HttpStatusCode.BadRequest, HttpStatusCode.BadRequest), (empty.StatusCode, tooMany.StatusCode));
+        Assert.Empty(allowList.Added);
+    }
+
+    [Fact]
     public async Task ChangingTheAllowList_NeedsTheSitesHeader_AndRemovingAnUnknownEntryIs404()
     {
         using var client = Client(signInEnabled: true);
@@ -207,20 +244,28 @@ public sealed class AdminTests : IDisposable
         public Task<IReadOnlyList<AllowListRecord>> HistoryAsync(CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<AllowListRecord>>([new AllowListRecord(1, "Huamei Trading", "A customer", "owner@example.invalid", ApiFactory.Now, null, null)]);
 
-        public Task<AllowListAddResult> AddAsync(string name, string reason, string addedBy, CancellationToken cancellationToken)
+        public Task<AllowListAddResult> AddAsync(string name, string reason, string addedBy, IReadOnlySet<string> confirmed, CancellationToken cancellationToken)
         {
             if (name == "Listed Party LLC")
             {
-                return Task.FromResult(new AllowListAddResult(null, "EU: Listed Party LLC", Unavailable: false, Reloaded: false));
+                return Task.FromResult(AllowListAddResult.Refused(AllowListAddOutcome.Listed) with { ListedAs = "EU: Listed Party LLC" });
             }
 
             if (name == "While Loading")
             {
-                return Task.FromResult(new AllowListAddResult(null, null, Unavailable: true, Reloaded: false));
+                return Task.FromResult(AllowListAddResult.Refused(AllowListAddOutcome.Unavailable));
+            }
+
+            List<AllowListPossibleMatch> possible = name == "Huamei Technologies"
+                ? [new AllowListPossibleMatch("ofac-sdn/123", "ofac-sdn", "OFAC SDN", "SHENZHEN HUAMEI LIANYUN", "SHENZHEN HUAMEI LIANYUN", 72, "CHINA-EO13846")]
+                : [];
+            if (possible.Any(hit => !confirmed.Contains(hit.Key)))
+            {
+                return Task.FromResult(AllowListAddResult.Refused(AllowListAddOutcome.Confirm) with { PossibleMatches = possible, PossibleMatchCount = possible.Count });
             }
 
             Added.Add((name, reason, addedBy));
-            return Task.FromResult(new AllowListAddResult(Added.Count, null, Unavailable: false, Reloaded: true));
+            return Task.FromResult(new AllowListAddResult(AllowListAddOutcome.Added, Added.Count, null, null, possible, possible.Count, Reloaded: true));
         }
 
         public Task<AllowListRemoveResult> RemoveAsync(int id, string removedBy, CancellationToken cancellationToken)

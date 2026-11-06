@@ -32,7 +32,8 @@
         spellings are separate entries), its <strong>possible matches</strong> are shown as
         “Possible match, allowed” with the entry's reason, and don't raise the outcome. A <strong>Match</strong> is never allowed,
         and a name that is itself a match on a list can't be added (nor anything while a list can't be checked). An entry
-        allows that name's possible matches on every list, whichever listed party they point to: read them before adding.
+        allows that name's possible matches on every list, whichever listed party they point to: when a name you add is a
+        possible match for listed parties, they're shown first, and it's added only if you confirm them.
         Every addition and removal is kept, with who and when.
         Only administrators can see or change the list: entries can be people's names.</p>
     </section>
@@ -55,6 +56,7 @@
           <span id="add-status" class="review-status" aria-live="polite"></span>
         </div>
       </form>
+      <div id="confirm" class="held-card" hidden></div>
     </section>
 
     <section class="panel" id="entries-panel" hidden aria-labelledby="entries-title">

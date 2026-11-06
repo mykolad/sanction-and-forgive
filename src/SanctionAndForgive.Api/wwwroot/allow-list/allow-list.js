@@ -88,32 +88,79 @@ async function remove(cell, entry) {
   load();
 }
 
-$("add-form").addEventListener("submit", async (event) => {
+$("add-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  const status = $("add-status");
   const name = $("name").value.trim();
   const reason = $("reason").value.trim();
   if (!name || !reason) {
-    status.textContent = "A name and a reason are both needed.";
+    $("add-status").textContent = "A name and a reason are both needed.";
     return;
   }
+  add(name, reason, []);
+});
+
+// A confirmation is for the name and reason it was shown for: editing either asks again, and an answer still on its
+// way for the old values is dropped (each request has a number; editing moves it on).
+let attempt = 0;
+for (const id of ["name", "reason"]) $(id).addEventListener("input", () => { attempt++; $("confirm").hidden = true; });
+
+// The first try sends no confirmations. If the name is a possible match for listed parties, the service lists them
+// and adds nothing: they're shown, and "Add anyway" sends their keys. If a list changed meanwhile and brought a new
+// possible match, the service lists them again.
+async function add(name, reason, confirmed) {
+  const status = $("add-status");
+  const mine = ++attempt;
+  $("confirm").hidden = true;
   status.textContent = "Adding…";
   try {
-    const response = await fetch("/api/v1/admin/allow-list", { method: "POST", headers: HEADERS, body: JSON.stringify({ name, reason }) });
+    const response = await fetch("/api/v1/admin/allow-list", { method: "POST", headers: HEADERS, body: JSON.stringify({ name, reason, confirmed }) });
+    // The whole answer first, so an edit made while it was still arriving counts too.
+    const body = response.ok || response.status === 409 || response.status === 503 ? await response.json() : null;
+    if (mine !== attempt) {
+      // Edited meanwhile: what's in the form now hasn't been checked. Say only what became of the earlier values.
+      status.textContent = response.ok ? `Added “${name}”, as entered before your edit.` : "";
+      if (response.ok) load();
+      return;
+    }
     if (response.ok) {
-      const body = await response.json();
       status.textContent = body.reloaded ? "Added: it applies to the next screening." : "Added: it applies within 15 minutes, at the next refresh.";
       $("name").value = "";
       $("reason").value = "";
       load();
-    } else if (response.status === 409 || response.status === 503) {
-      status.textContent = (await response.json()).message;
+    } else if (body) {
+      if (body.code === "confirm") {
+        status.textContent = "";
+        showPossibleMatches(name, reason, body);
+      } else {
+        status.textContent = body.message;
+      }
     } else {
       status.textContent = response.status === 400 ? "Check the name and the reason (at most 300 and 500 characters)." : "That didn't work. Try again in a moment.";
     }
   } catch {
     status.textContent = "The service isn't answering. Try again in a moment.";
   }
-});
+}
+
+function showPossibleMatches(name, reason, body) {
+  const panel = $("confirm");
+  const items = body.possibleMatches.map((hit) => el("li", {},
+    el("strong", {}, hit.listedName),
+    ` — ${hit.listName}, ${hit.percent}%`,
+    el("span", { class: "sub" }, [
+      hit.alias !== hit.listedName ? `alias “${hit.alias}”` : null,
+      hit.programme ? `programme ${hit.programme}` : null,
+    ].filter(Boolean).join("; "))));
+  panel.replaceChildren(
+    el("h3", { tabindex: "-1" }, `“${name}” is a possible match on the lists`),
+    el("p", {}, body.message),
+    el("ul", { class: "possible-matches" }, items),
+    el("div", { class: "actions" },
+      el("button", { type: "button", class: "primary", onclick: () => add(name, reason, body.possibleMatches.map((hit) => hit.key)) }, "Add anyway"),
+      " ",
+      el("button", { type: "button", class: "secondary", onclick: () => { panel.hidden = true; } }, "Cancel")));
+  panel.hidden = false;
+  panel.querySelector("h3").focus();
+}
 
 start();

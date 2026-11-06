@@ -1,3 +1,5 @@
+using System.Data;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
 namespace SanctionAndForgive.Data;
@@ -8,6 +10,9 @@ public sealed record AllowListRecord(int Id, string Name, string Reason, string 
 /// <summary>The allow-list's entries in force, and its version: the number of additions plus removals, so it changes
 /// with every edit and never repeats.</summary>
 public sealed record AllowListSnapshot(IReadOnlyList<AllowListRecord> Entries, string Version);
+
+/// <summary>An addition: the new entry's id, or the id of the entry in force that already has this name.</summary>
+public sealed record AllowListAddition(int? Id, int? ExistingId);
 
 /// <summary>Reads and edits the allow-list. Entries are never deleted: a removal is recorded, so the history stays.</summary>
 public sealed class AllowListStore(ListsDbContext context, TimeProvider clock)
@@ -30,12 +35,50 @@ public sealed class AllowListStore(ListsDbContext context, TimeProvider clock)
             .Select(item => new AllowListRecord(item.Id, item.Name, item.Reason, item.AddedBy, item.AddedAt, item.RemovedBy, item.RemovedAt))
             .ToListAsync(cancellationToken);
 
-    public async Task<int> AddAsync(string name, string reason, string addedBy, CancellationToken cancellationToken)
+    /// <summary>Adds an entry, unless <paramref name="existing"/> finds the name among the entries in force.</summary>
+    /// <param name="existing">The caller's rule for "the same name" (the way screening reads names, which isn't the
+    /// store's to know): given the entries in force, the id of the one with this name, or null.</param>
+    public async Task<AllowListAddition> AddAsync(string name, string reason, string addedBy, Func<IReadOnlyList<AllowListRecord>, int?> existing, CancellationToken cancellationToken)
     {
-        var item = new AllowListItem { Name = name.Trim(), Reason = reason.Trim(), AddedBy = addedBy, AddedAt = clock.GetUtcNow() };
-        context.AllowList.Add(item);
-        await context.SaveChangesAsync(cancellationToken);
-        return item.Id;
+        // Checked and inserted under one lock held to the end of the transaction, so two additions of one name, from
+        // any replica, can't both find it absent.
+        var (trimmedName, trimmedReason, addedAt) = (name.Trim(), reason.Trim(), clock.GetUtcNow());
+        var attempt = 0;
+        var strategy = context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            context.ChangeTracker.Clear();
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken);
+            var result = new SqlParameter("@result", SqlDbType.Int) { Direction = ParameterDirection.Output };
+            await context.Database.ExecuteSqlRawAsync(
+                "EXEC @result = sp_getapplock @Resource = N'allow-list', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000",
+                [result],
+                cancellationToken);
+            if ((int)result.Value < 0)
+            {
+                throw new InvalidOperationException("Another change to the allow-list held its lock for 30 seconds.");
+            }
+
+            var inForce = (await CurrentAsync(cancellationToken)).Entries;
+
+            // A retry after a commit whose acknowledgement was lost finds its own entry: the same name, reason,
+            // administrator and time, set once before the first attempt. That's this addition, not an earlier one.
+            if (++attempt > 1 && inForce.FirstOrDefault(entry => entry.Name == trimmedName && entry.Reason == trimmedReason && entry.AddedBy == addedBy && entry.AddedAt == addedAt) is { } ours)
+            {
+                return new AllowListAddition(ours.Id, null);
+            }
+
+            if (existing(inForce) is { } id)
+            {
+                return new AllowListAddition(null, id);
+            }
+
+            var item = new AllowListItem { Name = trimmedName, Reason = trimmedReason, AddedBy = addedBy, AddedAt = addedAt };
+            context.AllowList.Add(item);
+            await context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return new AllowListAddition(item.Id, null);
+        });
     }
 
     /// <summary>Marks an entry removed. False if there's no such entry, or it was removed already.</summary>

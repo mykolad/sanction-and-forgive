@@ -61,5 +61,9 @@ public sealed class AllowList
 
     private static string Key(Tokenizer tokenizer, string name) => Key(tokenizer.Tokenize(name, joinInitials: true));
 
-    private static string Key(IReadOnlyList<RawToken> tokens) => string.Join(' ', tokens.Select(token => token.Token.Text));
+    // Everything the matcher reads from the tokens: their text, and whether a token is a run of single letters, whose
+    // letters can align as initials ("A. B. Corp" can match "Anna Brown", "AB Corp" can't). Two names with one key
+    // screen alike, so the possible matches confirmed for one are the other's too.
+    private static string Key(IReadOnlyList<RawToken> tokens) =>
+        string.Join(' ', tokens.Select(token => token.Initials is { } letters ? string.Join('.', letters.Select(letter => letter.Text)) + "." : token.Token.Text));
 }

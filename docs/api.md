@@ -184,11 +184,14 @@ on (`Admin:SignInEnabled`): otherwise nobody is signed in, whatever a request sa
 Names known to be legitimate parties that resemble a listed one (owner's decision, 2026-11-06). When the receiver or
 company entered **is** an allow-listed name, word for word as screening reads it (case, punctuation, apostrophes and
 spacing don't matter, but every word does, the legal form included: "Huamei Co., Ltd." is "HUAMEI CO LTD", not
-"Huamei Limited"; Latin and Cyrillic spellings are separate entries), each of its
+"Huamei Limited"; initials are not a word: "A. B. Corp" is not "AB Corp"; Latin and Cyrillic spellings are
+separate entries), each of its
 **possible matches** (Review) is still shown, with its percentage, but marked `allowed`, and doesn't raise the
 outcome. A **Match** is never allowed, the address entry never is, and a name that is itself a Match on a list
 can't be added, nor anything while a list can't be checked (503: loading, or not current). An entry allows that
-name's possible matches on every list, whichever listed party they point to.
+name's possible matches on every list, whichever listed party they point to, so those are the administrator's
+decision (owner's decision, 2026-11-06): a name that is a possible match for listed parties is added only once each
+of them has been shown and confirmed.
 
 - Screening responses: `allowListVersion`; per entry `allowedBy` (`id`, `name`, `reason`); per cell `allowed`. The
   summary says which possible matches were allowed and why. The audit line has `allow-list <version>`, the entry by
@@ -197,8 +200,22 @@ name's possible matches on every list, whichever listed party they point to.
   cell `allowed`.
 - Administrators only (`/allow-list`, or the API with the `Lists.Admin` role and, for changes, the
   `X-Requested-By: sanction-and-forgive-admin` header): `GET /api/v1/admin/allow-list` (every entry, newest first,
-  removed ones with who and when), `POST /api/v1/admin/allow-list` `{name, reason}` (1-300 and 1-500 characters; 409
-  if the name is a Match on a list; 503 if a list can't be checked now), `POST /api/v1/admin/allow-list/{id}/remove`.
+  removed ones with who and when), `POST /api/v1/admin/allow-list` `{name, reason, confirmed}` (1-300 and 1-500
+  characters), `POST /api/v1/admin/allow-list/{id}/remove`. A refusal is `{code, message, possibleMatches}`:
+  - 409 `confirm`: the name is a possible match for listed parties, and not all of them were confirmed. Nothing was
+    added. `possibleMatches`: each listed party once, the closest first: `key` (`<list>/<external id>`), `list`,
+    `listName`, `listedName`, `alias` (the name or alias that matched), `percent`, `programme`. Every listed party at
+    Review the name finds, not only the five closest a screening cell shows: an entry allows the whole cell. Send the
+    same request again with `confirmed`: the keys accepted. If a list has changed since and brings a possible match
+    not among them, it's 409 `confirm` again.
+  - 409 `tooBroad`: the name is a possible match for more than 100 listed parties (the closest 100 are listed): too
+    generic to allow-list.
+  - 409 `listed`: the name is a Match on a list; never added.
+  - 409 `exists`: the name is already an entry in force (the same words as screening reads them; checked again when
+    it's stored, under a lock, so two additions of one name can't both succeed).
+  - 503 `unavailable`: a list can't be checked now (loading, or not current).
+
+  The log line for an addition names the possible matches confirmed by key (never the name).
   Both answer `{id, reloaded}`: a committed change is reported as such; `reloaded` false means the next refresh, within
   15 minutes, applies an addition (a removal stops applying at once regardless). An entry is never deleted, so the
   history stays; the version is the number of additions plus removals.

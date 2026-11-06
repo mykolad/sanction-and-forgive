@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SanctionAndForgive.Api.Admin;
+using SanctionAndForgive.Api.Lists;
 using SanctionAndForgive.Matching;
 using static SanctionAndForgive.Tests.Api.ApiFactory;
 
@@ -83,9 +84,9 @@ public sealed class AllowListApiTests : IDisposable
             Feed("uk", "UK", Now.AddHours(-80), Subject("Volga Trade", SubjectKind.Entity)));
         var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
 
-        var result = await admin.AddAsync("Volga Trade", "test", "owner@example.invalid", CancellationToken.None);
+        var result = await admin.AddAsync("Volga Trade", "test", "owner@example.invalid", new HashSet<string>(), CancellationToken.None);
 
-        Assert.True(result.Unavailable);
+        Assert.Equal(AllowListAddOutcome.Unavailable, result.Outcome);
         Assert.Null(result.Id);
         Assert.Equal(0, factory.Database.Opened);
     }
@@ -95,10 +96,91 @@ public sealed class AllowListApiTests : IDisposable
     {
         var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
 
-        var result = await admin.AddAsync("Romashka LLC", "test", "owner@example.invalid", CancellationToken.None);
+        var result = await admin.AddAsync("Romashka LLC", "test", "owner@example.invalid", new HashSet<string>(["eu/X-12-R"]), CancellationToken.None);
 
-        Assert.Null(result.Id);
+        Assert.Equal((AllowListAddOutcome.Listed, null), (result.Outcome, result.Id));
         Assert.Equal("EU: Romashka LLC", result.ListedAs);
         Assert.Equal(0, factory.Database.Opened);
     }
+
+    [Fact]
+    public async Task ANameAlreadyInForce_IsNotAddedTwice_HoweverItsWritten()
+    {
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var result = await admin.AddAsync("ab corp.", "test", "owner@example.invalid", new HashSet<string>(["ofac-sdn/X-15-A"]), CancellationToken.None);
+
+        Assert.Equal((AllowListAddOutcome.Exists, null, 5), (result.Outcome, result.Id, result.ExistingId));
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task ANameWithPossibleMatches_ListsThem_AndIsNotAddedUntilEachIsConfirmed()
+    {
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var unconfirmed = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(), CancellationToken.None);
+        var otherKey = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(["eu/X-12-R"]), CancellationToken.None);
+
+        Assert.Equal((AllowListAddOutcome.Confirm, null), (unconfirmed.Outcome, unconfirmed.Id));
+        var hit = Assert.Single(unconfirmed.PossibleMatches);
+        Assert.Equal(("ofac-sdn/X-15-A", "OFAC SDN", "AB Incorporated"), (hit.Key, hit.ListName, hit.ListedName));
+        Assert.Equal((AllowListAddOutcome.Confirm, 1), (otherKey.Outcome, otherKey.PossibleMatches.Count));
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task EveryPossibleMatchIsShown_NotOnlyTheFiveACellKeeps()
+    {
+        factory.Load(Feed("ofac-sdn", "OFAC SDN", Now, [.. Enumerable.Range(1, 7).Select(i => Listed($"SDN-{i}", "AB Incorporated"))]));
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var result = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(Enumerable.Range(1, 5).Select(i => $"ofac-sdn/SDN-{i}")), CancellationToken.None);
+
+        Assert.Equal(AllowListAddOutcome.Confirm, result.Outcome);
+        Assert.Equal(7, result.PossibleMatches.Count);
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task ANameWithTooManyPossibleMatches_IsTooBroad_HoweverManyAreConfirmed()
+    {
+        var subjects = Enumerable.Range(1, AllowListAdmin.MaxPossibleMatches + 1).Select(i => Listed($"SDN-{i}", "AB Incorporated")).ToArray();
+        factory.Load(Feed("ofac-sdn", "OFAC SDN", Now, subjects));
+        var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
+
+        var result = await admin.AddAsync("AB Corporation", "test", "owner@example.invalid", new HashSet<string>(subjects.Select(subject => $"ofac-sdn/{subject.ExternalId}")), CancellationToken.None);
+
+        Assert.Equal((AllowListAddOutcome.TooBroad, AllowListAdmin.MaxPossibleMatches + 1, AllowListAdmin.MaxPossibleMatches), (result.Outcome, result.PossibleMatchCount, result.PossibleMatches.Count));
+        Assert.Equal(0, factory.Database.Opened);
+    }
+
+    [Fact]
+    public async Task AnAddition_HoldsTheRefreshGate_UntilItsStored()
+    {
+        var loader = factory.Services.GetRequiredService<ListLoader>();
+        var storing = new TaskCompletionSource();
+        var stored = new TaskCompletionSource();
+
+        var addition = loader.AddToAllowListAsync(
+            async () =>
+            {
+                storing.SetResult();
+                await stored.Task;
+                return (42, false);
+            },
+            CancellationToken.None);
+        await storing.Task;
+        var reload = loader.ReloadAllowListAsync(withoutId: null, CancellationToken.None);
+        await Task.Delay(100);
+        var reloadWaited = !reload.IsCompleted;
+        stored.SetResult();
+
+        Assert.True(reloadWaited);
+        Assert.Equal((42, false), await addition);
+        await reload;
+    }
+
+    private static ListedSubject Listed(string id, string name) =>
+        new(id, SubjectKind.Entity, name, [new ListedName(name, IsWeak: false)], [], "TEST", "https://example.invalid/record");
 }

@@ -36,6 +36,36 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
                 catalog.ReplaceAllowList(catalog.AllowList.Without(id));
             }
 
+            return await TryLoadAllowListAsync(cancellationToken);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <summary>Runs an allow-list addition under the refresh gate, then reloads the allow-list if it was stored: the
+    /// lists the name was checked against can't change between the check and the insert, and the entry is in use before
+    /// any later refresh. <paramref name="add"/> returns its result and whether it stored an entry. The reload ignores
+    /// cancellation (the entry is committed); its second value is false if the reload failed.</summary>
+    public async Task<(T Result, bool Reloaded)> AddToAllowListAsync<T>(Func<Task<(T Result, bool Stored)>> add, CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var (result, stored) = await add();
+            return (result, stored && await TryLoadAllowListAsync(CancellationToken.None));
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<bool> TryLoadAllowListAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
             await using var scope = scopes.CreateAsyncScope();
             await LoadAllowListAsync(scope.ServiceProvider.GetRequiredService<ListsDbContext>(), cancellationToken);
             return true;
@@ -44,10 +74,6 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
         {
             AllowListReloadFailed(logger, exception);
             return false;
-        }
-        finally
-        {
-            gate.Release();
         }
     }
 

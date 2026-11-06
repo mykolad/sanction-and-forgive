@@ -16,6 +16,19 @@ public class AllowListTests
         AllowList.Build(names.Select((name, i) => new AllowListEntry(i + 1, name, "Known legitimate company")), "v7");
 
     [Fact]
+    public void InitialsAndAWord_AreDifferentNames_ThoughTheyreSpelledWithTheSameLetters()
+    {
+        var initials = Allow("A. B. Corp");
+        var word = Allow("AB Corp");
+
+        Assert.NotNull(initials.Find("A B Corp"));
+        Assert.NotNull(initials.Find("a.b. corp"));
+        Assert.Null(initials.Find("AB Corp"));
+        Assert.Null(word.Find("A. B. Corp"));
+        Assert.NotNull(word.Find("ab corp"));
+    }
+
+    [Fact]
     public void APossibleMatch_OnAnAllowListedName_IsAllowed_AndTheOutcomeDoesntRise()
     {
         var without = Screener.Screen(new ScreeningRequest(null, "AB Corp", null), [Eu, Ofac]);
@@ -43,8 +56,9 @@ public class AllowListTests
     }
 
     [Theory]
-    [InlineData("A.B. Corp.", true)]
+    [InlineData("AB Corp.", true)]
     [InlineData("ab  CORP", true)]
+    [InlineData("A.B. Corp.", false)] // initials, which can align with a person's names: another name
     [InlineData("AB Corporation", false)]
     [InlineData("AB Corp Holding", false)]
     [InlineData("AB", false)]

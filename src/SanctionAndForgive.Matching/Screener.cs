@@ -45,6 +45,9 @@ public sealed record Entry(EntryKind Kind, string Input, string Compared, IReadO
 /// <param name="AllowListVersion">The allow-list's version this result used.</param>
 public sealed record ScreeningResult(OverallOutcome Outcome, string MatcherVersion, IReadOnlyList<Entry> Entries, string AllowListVersion);
 
+/// <summary>One listed subject found for a name on one list (<see cref="Screener.NameHits"/>).</summary>
+public sealed record ListedHit(string List, SubjectMatch Match);
+
 /// <summary>Screens each entry against each list separately (section 5.7). Deterministic: the same input, lists and
 /// matcher version always give the same result. Nothing here stores or logs the input.</summary>
 public sealed class Screener
@@ -102,6 +105,23 @@ public sealed class Screener
         }
 
         return new ScreeningResult(Overall(entries), MatcherVersion, entries, allowList.Version);
+    }
+
+    /// <summary>Every listed subject at Review or above for <paramref name="name"/> (as receiver or company: both read
+    /// it the same way), on each list that can be searched: what an allow-list entry for the name would allow. Unlike a
+    /// cell, which keeps the closest <see cref="MatchingOptions.HitsPerCell"/>, nothing is left out beyond the search's
+    /// own candidate limit. Throws <see cref="ArgumentException"/> if the name is empty.</summary>
+    public IReadOnlyList<ListedHit> NameHits(string name, IReadOnlyList<ScreenedList> lists)
+    {
+        var cleaned = Clean(name) ?? throw new ArgumentException("Enter a name.", nameof(name));
+        var tokens = new Tokenizer(data, cache: null).Tokenize(cleaned, joinInitials: true);
+        var parser = new NameParser(data);
+        var prepared = new PreparedName(parser.Entity(tokens), parser.Person(tokens), Address: null);
+        return [.. lists
+            .Where(list => list.Index is not null)
+            .SelectMany(list => list.Index!.SearchName(prepared, options)
+                .Where(match => match.Outcome != Outcome.NoMatch)
+                .Select(match => new ListedHit(list.Code, match)))];
     }
 
     private Cell ToCell(ScreenedList list, Func<ListIndex, List<SubjectMatch>> search)
