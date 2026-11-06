@@ -234,16 +234,17 @@ resource importFailed 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
     criteria: {
       allOf: [
         {
-          query: '''
+          // A multi-line string isn't interpolated: the job's name goes in with replace().
+          query: replace('''
 union isfuzzy=true
   (datatable(Log_s: string) []),
   (ContainerAppConsoleLogs_CL
-    | where tostring(column_ifexists("ContainerGroupName_s", "")) startswith "${name}-import"
+    | where tostring(column_ifexists("ContainerGroupName_s", "")) startswith "__JOB__"
     | where tostring(column_ifexists("Log_s", "")) has_any ("FAILED", "Rejected")),
   (ContainerAppSystemLogs_CL
-    | where tostring(column_ifexists("JobName_s", "")) == "${name}-import"
+    | where tostring(column_ifexists("JobName_s", "")) == "__JOB__"
     | where tostring(column_ifexists("Reason_s", "")) has_any ("Failed", "BackoffLimitExceeded", "DeadlineExceeded"))
-'''
+''', '__JOB__', '${name}-import')
           timeAggregation: 'Count'
           operator: 'GreaterThan'
           threshold: 0
