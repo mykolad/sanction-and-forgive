@@ -23,6 +23,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="SanctionAndForgive.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Migrations tooling only (dotnet ef, with this project as the startup project); not shipped. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
   </ItemGroup>
