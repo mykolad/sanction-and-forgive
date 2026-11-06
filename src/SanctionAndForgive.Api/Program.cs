@@ -34,7 +34,7 @@ if (builder.Configuration.GetValue("Lists:RefreshEnabled", true))
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
 builder.Services.AddOpenApi();
-builder.Services.AddScreeningRateLimit(builder.Configuration.GetValue("RateLimiting:PerMinute", 120));
+builder.Services.AddScreeningRateLimit(builder.Configuration.GetValue("RateLimiting:PerMinute", 120), builder.Configuration.GetValue("Screening:ConcurrentStreams", 1));
 
 var app = builder.Build();
 

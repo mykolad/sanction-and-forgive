@@ -47,11 +47,27 @@ public sealed record ListedSubject(
 
 /// <summary>One listed subject's match for one entry: the best of its names.</summary>
 /// <param name="Alias">The listed name or alias that matched best.</param>
-/// <param name="Alignment">How the tokens aligned, and what wasn't compared, in plain words.</param>
+/// <param name="Alignment">How the tokens aligned, and what wasn't compared, in plain words (quoting the entry).</param>
+/// <param name="Words">The same alignment without the entered text, for responses that never echo input: each
+/// entered word by position, the listed word it aligned with, and how.</param>
+/// <param name="Notes">Why the percentage is what it is beyond the words (a cap, or how many address parts aligned),
+/// in sentences that never quote the entry.</param>
 public sealed record SubjectMatch(
     ListedSubject Subject,
     int Percent,
     Outcome Outcome,
     string Alias,
     IReadOnlyList<string> Alignment,
-    AddressState AddressState);
+    AddressState AddressState,
+    IReadOnlyList<WordAlignment> Words,
+    IReadOnlyList<string> Notes);
+
+/// <summary>One word of a name alignment, without the entered text. <paramref name="Entered"/>: the entered word's
+/// 1-based position among the words compared (legal forms, generic words and honorifics aside), or null for an
+/// initial. <paramref name="Listed"/>: the listed word (normalised), or null. <paramref name="How"/>: <c>Same</c>,
+/// <c>Transliterated</c>, <c>SpellingVariant</c>, <c>Romanisation</c>, <c>Cognate</c>, <c>OneLetterDiffers</c>,
+/// <c>TwoLettersDiffer</c>, <c>Initial</c>, <c>InitialContradicts</c>, <c>InitialUnchecked</c>, <c>NotListed</c>
+/// (entered, no listed partner) or <c>NotEntered</c> (listed, no entered partner); for an address-only hit, the
+/// address words by the same methods, plus <c>SamePlace</c> and <c>SameNumber</c> (positions among the entered
+/// address's words; null for places and numbers).</summary>
+public sealed record WordAlignment(int? Entered, string? Listed, string How);
