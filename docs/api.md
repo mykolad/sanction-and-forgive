@@ -61,7 +61,10 @@ with nothing left to send. A client should always check `end`: no `end` line mea
 records after the last `result` or `error` have an **unknown** status: one may have been screened (and audited)
 just before the break without its answer arriving. Send them again from the line after the last answer;
 a record screened twice has two audit lines under its reference, with the same result for the same list versions. **One stream at a time** across all clients (`Screening:ConcurrentStreams`):
-a second one gets 429 until the first ends, so a batch can't starve the website on the demo's single small replica.
+a second one gets 429 with `Retry-After: 1` until the first ends, so a batch can't starve the website on the demo's
+single small replica. The permit comes back as the first stream's request completes, a moment after its end line,
+so a client that starts the next stream straight away may need that one retry. (The per-minute limit's 429 carries
+its own `Retry-After`.)
 
 **Throughput.** Measured on 2026-11-06 on a desktop, against all 10 fetched lists, one stream at a time: about
 **32 records a second** (5,000 in 158 s, 417 MB working set, flat). A record is screened on one core. The

@@ -4,7 +4,8 @@ namespace SanctionAndForgive.Api.Screening;
 
 /// <summary>Reads lines from a request body holding at most <c>maxBytes</c> of one line (counted as UTF-8, as the
 /// client sent it), so a huge line can't exhaust memory: the rest of it is consumed and the line is reported as too
-/// long. Reads in chunks.</summary>
+/// long. A line ends at LF or CRLF; the terminator doesn't count toward the limit, but a carriage return anywhere
+/// else does. Reads in chunks.</summary>
 public sealed class BoundedLineReader(TextReader reader, int maxBytes) : IDisposable
 {
     private readonly char[] buffer = new char[16 * 1024];
@@ -19,6 +20,30 @@ public sealed class BoundedLineReader(TextReader reader, int maxBytes) : IDispos
         var bytes = 0;
         var tooLong = false;
         var any = false;
+
+        // A carriage return is held until the next character shows whether it ends the line (CRLF) or is part of it.
+        var pendingReturn = false;
+
+        void Add(char c)
+        {
+            if (tooLong)
+            {
+                return;
+            }
+
+            // UTF-8 length: a surrogate pair is 4 bytes, so 2 for each half.
+            bytes += c < 0x80 ? 1 : c < 0x800 || char.IsSurrogate(c) ? 2 : 3;
+            if (bytes > maxBytes)
+            {
+                tooLong = true;
+                line.Clear();
+            }
+            else
+            {
+                line.Append(c);
+            }
+        }
+
         while (true)
         {
             if (position == length)
@@ -27,6 +52,7 @@ public sealed class BoundedLineReader(TextReader reader, int maxBytes) : IDispos
                 position = 0;
                 if (length == 0)
                 {
+                    // A carriage return just before the end of the body ends the line like CRLF.
                     return any ? Finish(line, tooLong) : null;
                 }
             }
@@ -40,21 +66,19 @@ public sealed class BoundedLineReader(TextReader reader, int maxBytes) : IDispos
                     return Finish(line, tooLong);
                 }
 
-                if (tooLong)
+                if (pendingReturn)
                 {
-                    continue;
+                    Add('\r');
+                    pendingReturn = false;
                 }
 
-                // UTF-8 length: a surrogate pair is 4 bytes, so 2 for each half.
-                bytes += c < 0x80 ? 1 : c < 0x800 || char.IsSurrogate(c) ? 2 : 3;
-                if (bytes > maxBytes)
+                if (c == '\r')
                 {
-                    tooLong = true;
-                    line.Clear();
+                    pendingReturn = true;
                 }
                 else
                 {
-                    line.Append(c);
+                    Add(c);
                 }
             }
         }
@@ -63,5 +87,5 @@ public sealed class BoundedLineReader(TextReader reader, int maxBytes) : IDispos
     public void Dispose() => reader.Dispose();
 
     private static (string, bool) Finish(StringBuilder line, bool tooLong) =>
-        tooLong ? (string.Empty, true) : (line.ToString().TrimEnd('\r'), false);
+        tooLong ? (string.Empty, true) : (line.ToString(), false);
 }

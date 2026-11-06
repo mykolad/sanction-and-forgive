@@ -26,6 +26,15 @@ public static class RateLimits
         return services.AddRateLimiter(limiter =>
         {
             limiter.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+            // Retry-After: the window's own wait for the per-minute limit; a second for a busy stream (its permit
+            // comes back as the running stream's request completes, just after its end line).
+            limiter.OnRejected = (context, _) =>
+            {
+                var after = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var wait) ? Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds)) : 1;
+                context.HttpContext.Response.Headers.RetryAfter = after.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return ValueTask.CompletedTask;
+            };
             limiter.AddPolicy(Screenings, context => perMinute <= 0
                 ? RateLimitPartition.GetNoLimiter("off")
                 : RateLimitPartition.GetFixedWindowLimiter(

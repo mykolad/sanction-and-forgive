@@ -191,13 +191,29 @@ public sealed class StreamTests : IDisposable
     }
 
     [Fact]
+    public async Task BoundedLineReader_DoesNotCountTheLineBreak_LfOrCrLf_ButCountsOtherCarriageReturns()
+    {
+        // Exactly at the 5-byte limit with either line ending; a carriage return inside a line counts.
+        using var reader = new BoundedLineReader(new StringReader("abcde\nabcde\r\nab\rcd\r\nabc\r\rd\nlast\r"), maxBytes: 5);
+
+        Assert.Equal(("abcde", false), await reader.ReadLineAsync(CancellationToken.None));
+        Assert.Equal(("abcde", false), await reader.ReadLineAsync(CancellationToken.None));
+        Assert.Equal(("ab\rcd", false), await reader.ReadLineAsync(CancellationToken.None));
+        Assert.Equal((string.Empty, true), await reader.ReadLineAsync(CancellationToken.None));
+        Assert.Equal(("last", false), await reader.ReadLineAsync(CancellationToken.None));
+        Assert.Null(await reader.ReadLineAsync(CancellationToken.None));
+    }
+
+    [Fact]
     public async Task AStalledUpload_StopsAtTheTimeLimit_WithAnEndLine()
     {
         using var kestrel = new ApiFactory();
 
         // Line 1, then half of line 2, then nothing more; once record 1 is answered, the time runs out.
-        var lines = await OpenUploadAsync(kestrel, "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",",
-            onResult: () => kestrel.Clock.Advance(TimeSpan.FromSeconds(201)));
+        await using var upload = await RawUpload.StartAsync(kestrel, "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",");
+        await upload.ReadUntilAsync("result");
+        kestrel.Clock.Advance(TimeSpan.FromSeconds(201));
+        var lines = await upload.ReadUntilAsync("end");
 
         Assert.Equal(["header", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
         Assert.True(lines[^1].GetProperty("truncated").GetBoolean());
@@ -211,50 +227,111 @@ public sealed class StreamTests : IDisposable
         using var kestrel = parent.WithWebHostBuilder(builder => builder.UseSetting("Screening:StreamMaxRecords", "2"));
 
         // Two records and the upload left open: the end line comes without waiting for a third or for the deadline.
-        var lines = await OpenUploadAsync(kestrel, "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",\"companyName\":\"Romashka\"}\n", onResult: () => { });
+        await using var upload = await RawUpload.StartAsync(kestrel, "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n{\"reference\":\"TX-2\",\"companyName\":\"Romashka\"}\n");
+        var lines = await upload.ReadUntilAsync("end");
 
         Assert.Equal(["header", "result", "result", "end"], lines.Select(line => line.GetProperty("type").GetString()));
         Assert.Equal(3, lines[^1].GetProperty("nextLine").GetInt32());
     }
 
-    /// <summary>Posts <paramref name="body"/> to the stream on real Kestrel as a raw HTTP/1.1 chunked request and
-    /// leaves the upload open (HttpClient won't hand over a response while its own upload is still open, and the
-    /// in-memory test server only hands the app a request once its body is complete). Reads the answer as it comes,
-    /// decoding the chunks, until a complete end line has arrived; <paramref name="onResult"/> runs once, at the
-    /// first result.</summary>
-    private static async Task<List<JsonElement>> OpenUploadAsync(WebApplicationFactory<Program> server, string body, Action onResult)
+    [Fact]
+    public async Task OneStreamAtATime_ASecondIs429_AndTheNextIsAcceptedOnceTheFirstEnds()
     {
-        server.UseKestrel(0);
-        server.StartServer();
-        server.Services.GetRequiredService<SanctionAndForgive.Api.Lists.ListCatalog>().Replace([Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity))]);
-        var address = server.ClientOptions.BaseAddress;
+        using var kestrel = new ApiFactory();
+        await using var first = await RawUpload.StartAsync(kestrel, "{\"reference\":\"TX-1\",\"companyName\":\"Romashka\"}\n");
+        await first.ReadUntilAsync("result");
+        using var other = kestrel.CreateClient();
 
-        using var tcp = new System.Net.Sockets.TcpClient();
-        await tcp.ConnectAsync(address.Host, address.Port);
-        await using var connection = tcp.GetStream();
-        await connection.WriteAsync(Encoding.UTF8.GetBytes(
-            $"POST /api/v1/screenings/stream HTTP/1.1\r\nHost: {address.Authority}\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n{Encoding.UTF8.GetByteCount(body):x}\r\n{body}\r\n"));
-        await connection.FlushAsync();
-
-        var received = new List<byte>();
-        var buffer = new byte[4096];
-        var resulted = false;
-        List<JsonElement> lines = [];
-        using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        while (lines.Count == 0 || lines[^1].GetProperty("type").GetString() != "end")
+        // While the first is open, a second (from any client) is refused.
+        using (var refused = await PostStreamAsync(other, "{\"reference\":\"TX-2\",\"companyName\":\"Romashka\"}\n"))
         {
-            var read = await connection.ReadAsync(buffer, patience.Token);
-            Assert.NotEqual(0, read);
-            received.AddRange(buffer.AsSpan(0, read));
-            lines = CompleteLines(DechunkedBody([.. received]));
-            if (!resulted && lines.Any(line => line.GetProperty("type").GetString() == "result"))
+            Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+        }
+
+        // The first finishes its upload and ends; its permit is released as its request completes, just after the end
+        // line, so the next stream is accepted (a client retries a 429 after a moment, as Retry-After says).
+        await first.FinishUploadAsync();
+        Assert.Equal("end", (await first.ReadUntilAsync("end"))[^1].GetProperty("type").GetString());
+        var attempts = new List<HttpStatusCode>();
+        for (var attempt = 0; attempt < 50 && !attempts.Contains(HttpStatusCode.OK); attempt++)
+        {
+            using var next = await PostStreamAsync(other, "{\"reference\":\"TX-3\",\"companyName\":\"Romashka\"}\n");
+            attempts.Add(next.StatusCode);
+            if (next.StatusCode == HttpStatusCode.TooManyRequests)
             {
-                resulted = true;
-                onResult();
+                Assert.Equal(TimeSpan.FromSeconds(1), next.Headers.RetryAfter?.Delta);
+                await Task.Delay(TimeSpan.FromMilliseconds(100));
             }
         }
 
-        return lines;
+        Assert.Equal(HttpStatusCode.OK, attempts[^1]);
+    }
+
+    private static async Task<HttpResponseMessage> PostStreamAsync(HttpClient client, string ndjson)
+    {
+        using var content = new StringContent(ndjson, Encoding.UTF8, "application/x-ndjson");
+        return await client.PostAsync(new Uri("/api/v1/screenings/stream", UriKind.Relative), content).WaitAsync(TimeSpan.FromSeconds(30));
+    }
+
+    /// <summary>A stream request to real Kestrel as raw HTTP/1.1 with a chunked body, left open until
+    /// <see cref="FinishUploadAsync"/>: HttpClient won't hand over a response while its own upload is still open, and
+    /// the in-memory test server only hands the app a request once its body is complete. The answer is read as it
+    /// comes, decoding the chunks.</summary>
+    private sealed class RawUpload : IAsyncDisposable
+    {
+        private readonly System.Net.Sockets.TcpClient tcp = new();
+        private readonly List<byte> received = [];
+        private System.Net.Sockets.NetworkStream connection = null!;
+
+        public static async Task<RawUpload> StartAsync(WebApplicationFactory<Program> server, string body)
+        {
+            server.UseKestrel(0);
+            server.StartServer();
+            server.Services.GetRequiredService<SanctionAndForgive.Api.Lists.ListCatalog>().Replace([Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity))]);
+            var address = server.ClientOptions.BaseAddress;
+
+            var upload = new RawUpload();
+            await upload.tcp.ConnectAsync(address.Host, address.Port);
+            upload.connection = upload.tcp.GetStream();
+            await upload.connection.WriteAsync(Encoding.UTF8.GetBytes(
+                $"POST /api/v1/screenings/stream HTTP/1.1\r\nHost: {address.Authority}\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n{Encoding.UTF8.GetByteCount(body):x}\r\n{body}\r\n"));
+            await upload.connection.FlushAsync();
+            return upload;
+        }
+
+        /// <summary>Sends the last chunk: the upload is complete.</summary>
+        public async Task FinishUploadAsync()
+        {
+            await connection.WriteAsync("0\r\n\r\n"u8.ToArray());
+            await connection.FlushAsync();
+        }
+
+        /// <summary>Every complete line so far, once one of type <paramref name="type"/> has arrived whole.</summary>
+        public async Task<List<JsonElement>> ReadUntilAsync(string type)
+        {
+            var buffer = new byte[4096];
+            using var patience = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var lines = CompleteLines(DechunkedBody([.. received]));
+            while (!lines.Any(line => line.GetProperty("type").GetString() == type))
+            {
+                var read = await connection.ReadAsync(buffer, patience.Token);
+                Assert.NotEqual(0, read);
+                received.AddRange(buffer.AsSpan(0, read));
+                lines = CompleteLines(DechunkedBody([.. received]));
+            }
+
+            return lines;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (connection is not null)
+            {
+                await connection.DisposeAsync();
+            }
+
+            tcp.Dispose();
+        }
     }
 
     /// <summary>The body of a chunked HTTP/1.1 response received so far: the complete chunks after the headers.</summary>
