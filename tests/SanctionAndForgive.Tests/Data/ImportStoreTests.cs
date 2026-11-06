@@ -161,6 +161,25 @@ public sealed class ImportStoreTests : IAsyncLifetime
     }
 
     [SqlServerFact]
+    public async Task ANewerShortUpdate_ReplacesTheHold_AndTheOldHoldsRecordsAreDeleted()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        var first = await store.ImportAsync(source, Subjects(7), force: false, CancellationToken.None);
+
+        var second = await store.ImportAsync(source, Subjects(6), force: false, CancellationToken.None);
+
+        Assert.Equal(ImportResult.HeldForReview, second.Result);
+        Assert.NotEqual(first.ImportId, second.ImportId);
+        var old = await context.Imports.AsNoTracking().SingleAsync(i => i.Id == first.ImportId);
+        Assert.Equal((ImportStatus.Rejected, false), (old.Status, old.HasData));
+        Assert.Equal(0, await context.Subjects.CountAsync(s => s.ImportId == first.ImportId));
+        Assert.Equal(second.ImportId, Assert.Single(await store.HeldAsync(CancellationToken.None)).Id);
+    }
+
+    [SqlServerFact]
     public async Task AHeldUpdate_StaysFindable_AfterManyLaterChecks()
     {
         await using var context = CreateContext();
