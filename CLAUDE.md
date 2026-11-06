@@ -65,6 +65,41 @@ tools/lists.ps1           The script the owner runs to manage lists
   parses and prints counts per feed. It writes nothing else. It exits 1 if an `Active` feed failed.
 - Parser tests: `tests/SanctionAndForgive.Tests/Lists/ParserTests.cs`, one small fictional fixture per format.
 
+## Matching (`SanctionAndForgive.Matching`)
+
+Pure and deterministic: no I/O except its embedded dictionaries, no EF, HTTP or LLM. Spec section 5 is the
+reference. The pipeline:
+
+- **Dictionaries** (`Data/*.json`, embedded, loaded once by `MatcherData`): `translit/ru.json` and `translit/uk.json`
+  (a new language is a new table plus golden rows; register it in `MatcherData.TableFiles`), `legal-forms.json`
+  (classes, ambiguous spellings, multi-word phrases), `generic.json`, `words.json` (stop words, honorifics, address
+  words), `spelling-pairs.json`, `cognates.json`, `countries.json` (244 countries: English variants as the feeds write
+  them, Russian, Ukrainian, native names from ICU), `places.json` (exonyms with their country). Keys are normalised like
+  the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`.
+- **Text** (`Text/`): `Normalizer.Words` (NFKC, lower case, apostrophes inside words deleted, punctuation as
+  separators, `&` → and); `Tokenizer` (legal phrases → short form, single-letter runs joined, letters kept as
+  initials); `TokenFactory` (Latin forms: one per transliteration table for Cyrillic, plus a look-alike reading;
+  diacritics stripped from Latin only, never before transliterating); `FoldKey` (the spec's fold rules).
+- **Names** (`Names/`): `NameParser` gives two readings, `Entity` (legal forms stripped from the ends with the
+  ambiguity guard, generic words aside, legal-only flagged) and `Person` (honorifics dropped, initials kept, an
+  initials run is never a legal form). `TokenComparer` is section 5.4's table. `NameScorer` aligns (best pairs first),
+  weights by IDF, maps to the percentage bands (`Bands`), applies caps, contained names and initials.
+- **Addresses** (`Addresses/`): country (names, or a final capitalised ISO code), places, words and numbers;
+  `NotCompared` / `Corroborated` / `Conflicting`, plus address-only screening.
+- **`ListIndex`**: one per list, built from `ListedSubject`s (`Individual`, `Entity`, or `Unknown`: both readings).
+  Interned tokens, document frequencies, aliases by fold key, a trigram index over the fold-key vocabulary (typos
+  are found by trigrams, then checked by edit distance), address postings. Immutable.
+- **`Screener.Screen(request, lists)`**: one entry per field entered (receiver, company, address), one cell per list.
+  A list passed with `Index = null` is `Not checked` (no percentage); overall `Match` > `Review` > `Incomplete` >
+  `NoMatch`. Throws `ArgumentException` when every field is empty.
+
+Every number is in `MatchingOptions` (bands, caps, initials, candidate limit). Tests: `Matching/GoldenTests.cs` (every
+row of spec 5.10, outcomes and bands, not exact percentages), `PerListTests.cs`, `TextTests.cs`. Calibration must
+not break a golden test without the owner's approval.
+
+Measured on 2026-11-06 with real feeds: OFAC SDN, EU, UK and US export together are 110 MB of managed heap and
+build in about 3 s; a request against all four takes about 20 ms (p50) and 60 ms (p95) on a desktop.
+
 ## Docker
 
 The image (`Dockerfile`) holds both `SanctionAndForgive.Api.dll` (the entry point) and `SanctionAndForgive.Cli.dll`
