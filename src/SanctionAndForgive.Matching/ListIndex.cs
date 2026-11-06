@@ -109,8 +109,10 @@ public sealed class ListIndex
             subjectsByAddressKey.ToDictionary(pair => pair.Key, pair => pair.Value.ToArray(), StringComparer.Ordinal));
     }
 
-    /// <summary>Every subject that matches a name entry, best first: its best alias, with the entered address
-    /// compared against its listed addresses.</summary>
+    /// <summary>The subjects a name entry finds, best first (then by name): the best one, whatever its percentage, and
+    /// every other at Review or above, each with its best alias and the entered address compared against its listed
+    /// addresses. That's all a cell reports (its best and its other hits) and all the allow-list's possible matches
+    /// need, so only those are explained.</summary>
     internal List<SubjectMatch> SearchName(PreparedName query, MatchingOptions options)
     {
         var comparer = new TokenComparer(data);
@@ -145,7 +147,9 @@ public sealed class ListIndex
             }
         }
 
-        var matches = new List<SubjectMatch>(best.Count);
+        // Every subject's percentage first (its address can move it), then the order (a stable sort, as before), then
+        // the explanations of the ones reported.
+        var ranked = new List<(int Subject, int Percent, NameScore Score, AliasEntry Alias, AddressComparison Address)>(best.Count);
         foreach (var (subjectIndex, (score, alias)) in best)
         {
             var address = addressComparer.Compare(query.Address, addresses[subjectIndex]);
@@ -159,10 +163,20 @@ public sealed class ListIndex
                 percent = Math.Min(percent + options.CorroboratedBonus, Math.Min(Bands.BandMax(percent, options), score.Ceiling));
             }
 
-            matches.Add(new SubjectMatch(subjects[subjectIndex], percent, Bands.ToOutcome(percent, options), alias.Name, [.. score.Explanation, address.Explanation], address.State, score.Words, score.Notes));
+            ranked.Add((subjectIndex, percent, score, alias, address));
         }
 
-        return [.. matches.OrderByDescending(match => match.Percent).ThenBy(match => match.Subject.PrimaryName, StringComparer.Ordinal)];
+        var matches = new List<SubjectMatch>();
+        foreach (var (subjectIndex, percent, score, alias, address) in ranked.OrderByDescending(entry => entry.Percent).ThenBy(entry => subjects[entry.Subject].PrimaryName, StringComparer.Ordinal))
+        {
+            var outcome = Bands.ToOutcome(percent, options);
+            if (matches.Count == 0 || outcome != Outcome.NoMatch)
+            {
+                matches.Add(new SubjectMatch(subjects[subjectIndex], percent, outcome, alias.Name, [.. score.Explanation, address.Explanation], address.State, score.Words, score.Notes));
+            }
+        }
+
+        return matches;
     }
 
     /// <summary>Address-only screening: listed subjects whose address shares at least 3 parts (a number and a word)

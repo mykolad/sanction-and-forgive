@@ -3,13 +3,31 @@ using SanctionAndForgive.Matching.Text;
 
 namespace SanctionAndForgive.Matching.Names;
 
-/// <summary>A name's percentage against one listed alias, and why. <paramref name="Ceiling"/> is the lowest cap that
+/// <summary>A name's percentage against one listed alias, and why. <see cref="Ceiling"/> is the lowest cap that
 /// applied (or none): a later adjustment, such as a corroborating address, never lifts the result above it.
-/// <paramref name="Words"/> and <paramref name="Notes"/> say the same without quoting the entry.</summary>
-internal sealed record NameScore(int Percent, List<string> Explanation, int Ceiling, List<WordAlignment> Words, List<string> Notes)
+/// <see cref="Words"/> and <see cref="Notes"/> say the same as <see cref="Explanation"/> without quoting the entry.
+/// The explanation is built the first time it's read: a search scores every candidate alias (about 1,500 a screening)
+/// but reports only a few, and the explanation's strings were a third of the time.</summary>
+internal sealed class NameScore(int percent, int ceiling, Func<NameScoreDetails> explain)
 {
-    public static NameScore Zero(string reason) => new(0, [reason], 0, [], [reason]);
+    private NameScoreDetails? details;
+
+    public int Percent { get; } = percent;
+
+    public int Ceiling { get; } = ceiling;
+
+    public List<string> Explanation => Details.Explanation;
+
+    public List<WordAlignment> Words => Details.Words;
+
+    public List<string> Notes => Details.Notes;
+
+    private NameScoreDetails Details => details ??= explain();
+
+    public static NameScore Zero(string reason) => new(0, 0, () => new NameScoreDetails([reason], [], [reason]));
 }
+
+internal sealed record NameScoreDetails(List<string> Explanation, List<WordAlignment> Words, List<string> Notes);
 
 /// <summary>Sections 5.5 and 5.6: aligns the core tokens (order-independent, best pairs first), turns the weighted
 /// score into a percentage, applies the caps (lowest wins), contained names and initials.</summary>
@@ -44,14 +62,10 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         }
 
         var pairs = Align(query.Core, listed.Core, weight);
-        var explanation = new List<string>();
-        var words = new List<WordAlignment>();
         var aligned = 0.0;
         foreach (var pair in pairs)
         {
             aligned += pair.Alignment.Similarity * (weight(query.Core[pair.Query]) + weight(listed.Core[pair.Listed]));
-            explanation.Add(Describe(query.Core[pair.Query], listed.Core[pair.Listed], pair.Alignment));
-            words.Add(new WordAlignment(pair.Query + 1, listed.Core[pair.Listed].Text, How(pair.Alignment.Method)));
         }
 
         var total = query.Core.Sum(weight) + listed.Core.Sum(weight);
@@ -88,19 +102,14 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             }
         }
 
-        explanation.AddRange(unalignedQuery.Select(token => $"{token}: not in the listed name"));
-        explanation.AddRange(unalignedListed.Select(token => $"{token}: listed, not entered"));
-        words.AddRange(unalignedQueryIndexes.Select(i => new WordAlignment(i + 1, null, "NotListed")));
-        words.AddRange(unalignedListed.Select(token => new WordAlignment(null, token.Text, "NotEntered")));
-
         // Contained names: every core token of the shorter name (at least 2) aligned, all of them the same word (exactly, transliterated, a spelling pair or a romanisation; not by edits), and the
         // longer has more (a patronymic). Near words don't count: "авиационные … комплексы" isn't
         // contained in "aviatsionnyi kompleks im. Ilyushina" just because two words are near.
         var shorter = Math.Min(query.Core.Length, listed.Core.Length);
-        if (shorter >= 2 && pairs.Count == shorter && query.Core.Length != listed.Core.Length && pairs.All(pair => pair.Alignment.Method is AlignMethod.Identical or AlignMethod.Transliteration or AlignMethod.SpellingPair or AlignMethod.FoldKey))
+        var contained = shorter >= 2 && pairs.Count == shorter && query.Core.Length != listed.Core.Length && pairs.All(pair => pair.Alignment.Method is AlignMethod.Identical or AlignMethod.Transliteration or AlignMethod.SpellingPair or AlignMethod.FoldKey);
+        if (contained)
         {
             percent = options.ContainedNamePercent;
-            explanation.Add("One name contains the other");
         }
         else if (unalignedQuery.Count > 0 || unalignedListed.Count > 0)
         {
@@ -139,12 +148,34 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             }
         }
 
-        foreach (var legal in query.LegalClasses.Union(listed.LegalClasses))
+        // The explanation, in its order: the pairs, the words left over, a contained name, the legal forms (and, from
+        // Finish, the caps that applied). Built only when it's read.
+        return Finish(percent, caps, () =>
         {
-            explanation.Add($"Legal form {legal} not compared");
-        }
+            var explanation = new List<string>();
+            var words = new List<WordAlignment>();
+            foreach (var pair in pairs)
+            {
+                explanation.Add(Describe(query.Core[pair.Query], listed.Core[pair.Listed], pair.Alignment));
+                words.Add(new WordAlignment(pair.Query + 1, listed.Core[pair.Listed].Text, How(pair.Alignment.Method)));
+            }
 
-        return Finish(percent, caps, explanation, words);
+            explanation.AddRange(unalignedQuery.Select(token => $"{token}: not in the listed name"));
+            explanation.AddRange(unalignedListed.Select(token => $"{token}: listed, not entered"));
+            words.AddRange(unalignedQueryIndexes.Select(i => new WordAlignment(i + 1, null, "NotListed")));
+            words.AddRange(unalignedListed.Select(token => new WordAlignment(null, token.Text, "NotEntered")));
+            if (contained)
+            {
+                explanation.Add("One name contains the other");
+            }
+
+            foreach (var legal in query.LegalClasses.Union(listed.LegalClasses))
+            {
+                explanation.Add($"Legal form {legal} not compared");
+            }
+
+            return (explanation, words);
+        });
     }
 
     /// <summary>Whether, in the best assignment, some initial matches nothing while a candidate is left over.</summary>
@@ -262,7 +293,7 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
             caps.Add((options.CappedMethodCap, "A word aligned only approximately"));
         }
 
-        return Finish(percent, caps, explanation, words);
+        return Finish(percent, caps, () => (explanation, words));
     }
 
     /// <summary>An initial matches a given name whose fold key starts with the initial's (<c>Г</c>: <c>Grigoriy</c>
@@ -283,14 +314,18 @@ internal sealed class NameScorer(TokenComparer comparer, MatchingOptions options
         return Starts(candidate.Forms, initial.Forms) || Starts(candidate.Folds.Concat(cognateFolds), initial.Folds);
     }
 
-    private static NameScore Finish(int percent, List<(int Cap, string Reason)> caps, List<string> explanation, List<WordAlignment> words)
+    private static NameScore Finish(int percent, List<(int Cap, string Reason)> caps, Func<(List<string> Explanation, List<WordAlignment> Words)> explain)
     {
-        // Cap reasons are fixed sentences that never quote the entry, so they serve both explanations.
-        var applied = caps.Where(cap => cap.Cap < percent).OrderBy(cap => cap.Cap)
-            .Select(cap => string.Create(CultureInfo.InvariantCulture, $"Capped at {cap.Cap}%: {cap.Reason}")).ToList();
-        explanation.AddRange(applied);
         var ceiling = caps.Count == 0 ? int.MaxValue : caps.Min(cap => cap.Cap);
-        return new NameScore(Math.Min(percent, ceiling), explanation, ceiling, words, applied);
+        return new NameScore(Math.Min(percent, ceiling), ceiling, () =>
+        {
+            var (explanation, words) = explain();
+            // Cap reasons are fixed sentences that never quote the entry, so they serve both explanations.
+            var applied = caps.Where(cap => cap.Cap < percent).OrderBy(cap => cap.Cap)
+                .Select(cap => string.Create(CultureInfo.InvariantCulture, $"Capped at {cap.Cap}%: {cap.Reason}")).ToList();
+            explanation.AddRange(applied);
+            return new NameScoreDetails(explanation, words, applied);
+        });
     }
 
     /// <summary>The best one-to-one pairs: the assignment with the highest total weighted similarity, and among equal

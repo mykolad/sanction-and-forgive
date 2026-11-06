@@ -42,6 +42,7 @@ what stopped the run.
 | Date | Image | Lists | Sustained screenings/s | p95 at that rate | CPU | Memory | Stopped by |
 |---|---|---|---|---|---|---|---|
 | 2026-11-06 | 358c9b0 | 6 (eu, ofac-cons, ofac-sdn, ua-sfms, uk, us-export: 37,362 subjects) | **2** | 0.86 s (p50 39 ms) | 0.07-0.14 vCPU (highest 1-minute value) | 380-450 MB working set of 512 MiB, no restarts | p95 5.6 s at 4/s |
+| 2026-11-06 | 274d26e (after #23) | the same 6 | **8** | 0.25 s (p50 26 ms) | up to 0.14 vCPU (highest 1-minute value) | 430-540 MiB working set, no restarts | p95 2.9 s at 12/s |
 
 Per step (2,000 inputs from the live lists; no request failed, none rate limited, no iteration dropped):
 
@@ -87,12 +88,12 @@ Every one of the 10 fetched lists loaded (more than production's active ones), t
 After the Azure run: production's six lists from a local copy of the database, the same 2,000 inputs, one thread,
 the API's GC settings, and `dotnet-trace`. A screening never touches the database; it's all CPU.
 
-| | Before | After (#23) |
-|---|---|---|
-| Mean per screening, one desktop core | 21.8 ms | 9.3 ms |
-| p50 / p95 / p99 | 11.2 / 80 / 179 ms | 5.8 / 28 / 62 ms |
-| Screenings a second on one core | 46 | 108 |
-| Allocated per screening | 22 MB | 8 MB |
+| | Before | After #23 | After #25 |
+|---|---|---|---|
+| Mean per screening, one desktop core | 21.8 ms | 9.3 ms | 7.3 ms |
+| p50 / p95 / p99 | 11.2 / 80 / 179 ms | 5.8 / 28 / 62 ms | 4.3 / 23 / 56 ms |
+| Screenings a second on one core | 46 | 108 | 138 |
+| Allocated per screening | 22 MB | 8 MB | 5.4 MB |
 
 Where the time went: scoring about 1,560 candidate aliases per screening (up to 2,000 a list, six lists), each
 aligned word by word; finding the candidates was about 1 ms. The changes, each leaving every result identical (a full
@@ -108,13 +109,20 @@ report unchanged):
 - Jaro-Winkler is computed only for the edit distances that use it, and both edit-distance functions keep their rows
   on the stack.
 
+The second run (after #23, the procedure's revision wait included), per step: 1/s p95 284 ms, 2/s 121 ms, 4/s 126 ms,
+6/s 200 ms, 8/s 253 ms (p50 26 ms; 1,100 screenings), then 12/s p95 2.9 s, where it stopped; no request failed,
+none dropped. Four times the first run's 2 a second. The working set rose with the load to 540 MiB at 8-12 a
+second (the platform's figure; the replica didn't restart), so memory, not CPU, is now the closer limit on this
+size: #25 allocates a third less per screening.
+
 On Azure after the deploy (9e8173f, the same replica, the same stream of 1,000 inputs as above): 1,000 in 71 s,
 **14.0 records a second** (6.5 before), no errors, so a 200 s stream covers about 2,800 records and a 50,000-record
 batch about an hour. Concurrent single screenings weren't rerun (that needs the rate limit off again); expect
 roughly twice the 2 a second above.
 
-Left as it is: building every candidate's explanation (about a third of what remains) could wait until a candidate is
-kept, a larger change for perhaps 25% more.
+- (#25) Explanations are built only when read: every candidate alias is scored (percentage and caps), but only the
+  subjects a search reports are explained, the best one and those at Review or above, which is all a cell or the
+  allow-list's possible matches use. `SearchName` no longer returns the subjects below Review behind the best.
 
 **Combining lists into one index** (the owner's question): many listed parties appear on several lists, so one index
 with each entry referring to its lists would hold fewer names.
