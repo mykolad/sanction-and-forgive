@@ -136,6 +136,72 @@ public sealed class ImportStoreTests : IAsyncLifetime
         Assert.False(Assert.Single(await store.StatusAsync(CancellationToken.None)).Current);
     }
 
+    [SqlServerFact]
+    public async Task StaleSourceObject_GuardUsesTheCurrentActiveImport()
+    {
+        await using var first = CreateContext();
+        await using var second = CreateContext();
+        var staleStore = new ImportStore(first, clock);
+        var stale = await staleStore.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await staleStore.ImportAsync(stale, Subjects(10), force: false, CancellationToken.None);
+
+        // Another process grows the list to 20 after this one loaded the source.
+        var otherStore = new ImportStore(second, clock);
+        var fresh = await otherStore.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await otherStore.ImportAsync(fresh, Subjects(20), force: false, CancellationToken.None);
+
+        // 15 is fine against the stale 10, but more than a 20% drop from the real 20.
+        var outcome = await staleStore.ImportAsync(stale, Subjects(15), force: false, CancellationToken.None);
+
+        Assert.Equal(ImportResult.Rejected, outcome.Result);
+        Assert.Equal(20, (await staleStore.ActiveSubjectsAsync(stale, CancellationToken.None)).Count);
+    }
+
+    [SqlServerFact]
+    public async Task ManualChange_SeesTheListUnderTheLock_AndCantEmptyIt()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("ee-mfa", "Estonia", null, null, CancellationToken.None);
+        await store.ChangeAsync(source, current => [.. current, .. Subjects(2)], CancellationToken.None);
+
+        var removed = await store.ChangeAsync(source, current => [.. current.Where(subject => subject.ExternalId != "X-1")], CancellationToken.None);
+        var emptied = await store.ChangeAsync(source, current => [], CancellationToken.None);
+
+        Assert.Equal((ImportResult.Imported, 1), (removed.Result, removed.RecordCount));
+        Assert.Equal(ImportResult.Rejected, emptied.Result);
+        Assert.Equal("X-2", Assert.Single(await store.ActiveSubjectsAsync(source, CancellationToken.None)).ExternalId);
+    }
+
+    [SqlServerFact]
+    public async Task TooLongExternalId_IsRefused_NotTruncated()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        var subjects = Subjects(1);
+        subjects[0].ExternalId = new string('x', 201);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => store.ImportAsync(source, subjects, force: false, CancellationToken.None));
+        Assert.Null(source.ActiveImportId);
+    }
+
+    [SqlServerFact]
+    public async Task RecordedFailure_ShowsInStatus_ActiveListUntouched()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(3), force: false, CancellationToken.None);
+        var checkedAt = source.LastCheckedAt;
+        clock.Advance(TimeSpan.FromHours(1));
+
+        await store.RecordFailureAsync(source, "HttpRequestException: 503", CancellationToken.None);
+
+        var status = Assert.Single(await store.StatusAsync(CancellationToken.None));
+        Assert.Equal((ImportStatus.Failed, 3, checkedAt), (status.LastImportStatus, status.RecordCount, status.LastCheckedAt));
+    }
+
     private ListsDbContext CreateContext() =>
         new(new DbContextOptionsBuilder<ListsDbContext>().UseSqlServer(connectionString).Options);
 

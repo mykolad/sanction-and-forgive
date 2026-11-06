@@ -17,6 +17,12 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
         IReadOnlyList<ListSource> sources;
         if (sourceCode == "all")
         {
+            if (file is not null)
+            {
+                output.WriteLine("--file needs a single --source: one file is one feed.");
+                return 2;
+            }
+
             sources = [.. ListSources.All.Where(source => source.Status == FeedStatus.Active)];
         }
         else if (ListSources.Find(sourceCode) is { } source)
@@ -74,7 +80,7 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
         return 0;
     }
 
-    /// <summary>Upserts the CSV's records by external id into a manual source's active list.</summary>
+    /// <summary>Upserts the CSV's records by external id into a manual source's active list, under the source's lock.</summary>
     public async Task<int> AddAsync(string code, string file, CancellationToken cancellationToken)
     {
         if (await ManualSourceAsync(code, cancellationToken) is not { } source)
@@ -88,15 +94,17 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
             records = ManualCsvReader.Read(reader);
         }
 
-        var subjects = (await store.ActiveSubjectsAsync(source, cancellationToken)).ToDictionary(s => s.ExternalId, StringComparer.Ordinal);
-        foreach (var record in records)
+        var outcome = await store.ChangeAsync(source, current =>
         {
-            subjects[record.ExternalId] = SubjectMapper.ToEntity(record);
-        }
+            var subjects = current.ToDictionary(subject => subject.ExternalId, StringComparer.Ordinal);
+            foreach (var record in records)
+            {
+                subjects[record.ExternalId] = SubjectMapper.ToEntity(record);
+            }
 
-        var outcome = await store.ImportAsync(source, [.. subjects.Values], force: true, cancellationToken);
-        output.WriteLine($"{code}: {records.Count} records upserted, {outcome.RecordCount} in the list ({outcome.Result}).");
-        return 0;
+            return [.. subjects.Values];
+        }, cancellationToken);
+        return Report(code, $"{records.Count} records upserted", outcome);
     }
 
     public async Task<int> RemoveAsync(string code, string externalId, CancellationToken cancellationToken)
@@ -106,18 +114,33 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
             return 2;
         }
 
-        var subjects = await store.ActiveSubjectsAsync(source, cancellationToken);
-        if (subjects.RemoveAll(subject => subject.ExternalId == externalId) == 0)
+        var found = false;
+        var outcome = await store.ChangeAsync(source, current =>
         {
-            output.WriteLine($"{code} has no record {externalId}.");
+            found = current.RemoveAll(subject => subject.ExternalId == externalId) > 0;
+            return current;
+        }, cancellationToken);
+        if (!found)
+        {
+            output.WriteLine($"{code} has no record {externalId}; nothing changed.");
             return 1;
         }
 
-        var outcome = await store.ImportAsync(source, subjects, force: true, cancellationToken);
-        output.WriteLine($"{code}: removed {externalId}, {outcome.RecordCount} left ({outcome.Result}).");
-        return 0;
+        return Report(code, $"removed {externalId}", outcome);
     }
 
+    /// <summary>A manual change's result. A rejected change (the list would be empty) kept the old list: exit 1.</summary>
+    private int Report(string code, string what, ImportOutcome outcome)
+    {
+        if (outcome.Result == ImportResult.Rejected)
+        {
+            output.WriteLine($"{code}: NOT changed: {outcome.Message}. A list can't be emptied: it keeps at least one record.");
+            return 1;
+        }
+
+        output.WriteLine($"{code}: {what}, {outcome.RecordCount} in the list ({outcome.Result}).");
+        return 0;
+    }
     private async Task<bool> ImportOneAsync(ListSource source, string? file, bool force, CancellationToken cancellationToken)
     {
         if (source.CreateParser is null)
@@ -127,9 +150,10 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
         }
 
         string? path = file;
+        Source? record = null;
         try
         {
-            var record = await store.EnsureSourceAsync(source.Code, source.Name, source.Url?.Replace("{token}", "…", StringComparison.Ordinal), source.MaxAgeHours, cancellationToken);
+            record = await store.EnsureSourceAsync(source.Code, source.Name, source.Url?.Replace("{token}", "…", StringComparison.Ordinal), source.MaxAgeHours, cancellationToken);
             path ??= await downloader.DownloadAsync(new Uri(source.Url!.Replace("{token}", euToken, StringComparison.Ordinal)), cancellationToken);
             List<SanctionAndForgive.Data.Subject> subjects;
             await using (var stream = File.OpenRead(path))
@@ -142,9 +166,30 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
             return outcome.Result != ImportResult.Rejected;
         }
         catch (Exception exception) when (exception is HttpRequestException or TimeoutException or IOException or ListFormatException or System.Xml.XmlException
-            or System.Text.Json.JsonException or Microsoft.Data.SqlClient.SqlException or InvalidOperationException)
+            or System.Text.Json.JsonException or Microsoft.Data.SqlClient.SqlException or Microsoft.EntityFrameworkCore.DbUpdateException
+            or InvalidOperationException or ArgumentException)
         {
             output.WriteLine($"{source.Code}: FAILED: {exception.GetType().Name}: {exception.Message}");
+
+            // Nothing of this source's attempt may reach the next source's save; then the failure is recorded, so
+            // status shows it. The active list and its last check stay as they were.
+            store.Reset();
+            if (record is not null)
+            {
+                try
+                {
+                    if (await store.FindSourceAsync(source.Code, CancellationToken.None) is { } stored)
+                    {
+                        await store.RecordFailureAsync(stored, $"{exception.GetType().Name}: {exception.Message}", CancellationToken.None);
+                    }
+                }
+                catch (Exception recordFailure) when (recordFailure is Microsoft.Data.SqlClient.SqlException or Microsoft.EntityFrameworkCore.DbUpdateException or InvalidOperationException)
+                {
+                    output.WriteLine($"{source.Code}: the failure couldn't be recorded either ({recordFailure.GetType().Name}).");
+                    store.Reset();
+                }
+            }
+
             return false;
         }
         finally

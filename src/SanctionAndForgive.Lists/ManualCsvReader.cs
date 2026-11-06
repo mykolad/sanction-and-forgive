@@ -128,6 +128,11 @@ public static class ManualCsvReader
             }
         }
 
+        if (quoted)
+        {
+            throw new ListFormatException("The CSV ends inside a quoted field: a closing quote is missing.");
+        }
+
         if (any || field.Length > 0 || row.Count > 0)
         {
             row.Add(field.ToString());

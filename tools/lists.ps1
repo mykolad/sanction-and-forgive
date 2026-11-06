@@ -56,7 +56,7 @@ if ($Command -eq 'probe' -or $env:ConnectionStrings__Lists) {
 }
 
 $ip = (Invoke-RestMethod -Uri 'https://api.ipify.org').Trim()
-$rule = 'lists-ps1-' + [Environment]::MachineName.ToLowerInvariant()
+$rule = 'lists-ps1-' + [Environment]::MachineName.ToLowerInvariant() + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 az sql server firewall-rule create -g $ResourceGroup -s $Server -n $rule --start-ip-address $ip --end-ip-address $ip -o none
 if ($LASTEXITCODE -ne 0) { throw 'Could not open the SQL firewall (are you signed in with az login?).' }
 try {

@@ -19,7 +19,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $sql = Get-Content -Raw -Path $File
 $ip = (Invoke-RestMethod -Uri 'https://api.ipify.org').Trim()
-$rule = 'invoke-sql-' + [Environment]::MachineName.ToLowerInvariant()
+$rule = 'invoke-sql-' + [Environment]::MachineName.ToLowerInvariant() + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
 
 az sql server firewall-rule create -g $ResourceGroup -s $Server -n $rule --start-ip-address $ip --end-ip-address $ip -o none
 if ($LASTEXITCODE -ne 0) { throw 'Could not open the SQL firewall.' }

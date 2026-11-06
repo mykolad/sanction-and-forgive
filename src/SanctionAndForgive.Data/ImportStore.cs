@@ -29,6 +29,9 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
 {
     private const int BatchSize = 5000;
 
+    /// <summary>External ids are keys (dedup, upsert, remove): longer ones are refused, never truncated.</summary>
+    private const int MaxExternalId = 200;
+
     /// <summary>A drop of more than this fraction of the active import's records is refused without --force.</summary>
     private const double MaxDrop = 0.20;
 
@@ -55,15 +58,46 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         context.Sources.SingleOrDefaultAsync(s => s.Code == code, cancellationToken);
 
     /// <summary>Imports <paramref name="subjects"/> as <paramref name="source"/>'s new list, unless it's unchanged or
-    /// the sanity guard refuses it (<paramref name="force"/> overrides both).</summary>
-    public async Task<ImportOutcome> ImportAsync(Source source, IReadOnlyList<Subject> subjects, bool force, CancellationToken cancellationToken)
+    /// the sanity guard refuses it (<paramref name="force"/> overrides the drop guard and "unchanged"; zero records
+    /// are always refused). Throws <see cref="ArgumentException"/> for an external id over 200 characters: ids are
+    /// keys, never truncated.</summary>
+    public Task<ImportOutcome> ImportAsync(Source source, IReadOnlyList<Subject> subjects, bool force, CancellationToken cancellationToken) =>
+        LockedImportAsync(source, subjects, change: null, force, cancellationToken);
+
+    /// <summary>A manual change: <paramref name="change"/> gets the active list as it is under the source's lock, and
+    /// its result becomes the new list. Reading, changing and activating all happen under one lock, so two edits
+    /// can't overwrite each other.</summary>
+    public Task<ImportOutcome> ChangeAsync(Source source, Func<List<Subject>, IReadOnlyList<Subject>> change, CancellationToken cancellationToken) =>
+        LockedImportAsync(source, subjects: null, change, force: true, cancellationToken);
+
+    /// <summary>Records a refresh that failed before it could import (download, parse): a <c>Failed</c> import with
+    /// the reason, for <c>status</c>. The active list and <see cref="Source.LastCheckedAt"/> don't change.</summary>
+    public async Task RecordFailureAsync(Source source, string message, CancellationToken cancellationToken)
     {
-        var records = Deduplicate(subjects);
-        var hash = CanonicalHash(records);
+        var now = clock.GetUtcNow();
+        context.Imports.Add(new Import { SourceId = source.Id, StartedAt = now, CompletedAt = now, Status = ImportStatus.Failed, Message = Truncate(message, 1000) });
+        await context.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>Forgets every tracked change after a failed source, so the next source's save can't retry it.</summary>
+    public void Reset() => context.ChangeTracker.Clear();
+
+    private async Task<ImportOutcome> LockedImportAsync(Source source, IReadOnlyList<Subject>? subjects, Func<List<Subject>, IReadOnlyList<Subject>>? change, bool force, CancellationToken cancellationToken)
+    {
         await context.Database.OpenConnectionAsync(cancellationToken);
         try
         {
             await AcquireLockAsync(source.Code, cancellationToken);
+
+            // Another process may have imported since the source was loaded: decide on what's there now.
+            await context.Entry(source).ReloadAsync(cancellationToken);
+            var records = Deduplicate(subjects ?? change!(await ActiveSubjectsAsync(source, cancellationToken)));
+            if (records.FirstOrDefault(subject => subject.ExternalId.Length > MaxExternalId) is { } tooLong)
+            {
+                throw new ArgumentException($"An external id is longer than {MaxExternalId} characters: {tooLong.ExternalId[..40]}…", nameof(subjects));
+            }
+
+            var hash = CanonicalHash(records);
             var active = source.ActiveImportId is { } activeId ? await context.Imports.SingleAsync(i => i.Id == activeId, cancellationToken) : null;
             var now = clock.GetUtcNow();
 
@@ -74,7 +108,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 return new ImportOutcome(ImportResult.Unchanged, active.RecordCount, active.RecordCount, "Unchanged since the active import");
             }
 
-            var refusal = records.Count == 0 ? "The file parsed to zero records"
+            var refusal = records.Count == 0 ? "Zero records"
                 : !force && active is not null && records.Count < active.RecordCount * (1 - MaxDrop)
                     ? $"Records dropped from {active.RecordCount} to {records.Count}, more than {MaxDrop:P0}"
                     : null;
@@ -88,6 +122,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             var import = new Import { SourceId = source.Id, StartedAt = now, ContentHash = hash, RecordCount = records.Count, Status = ImportStatus.Running };
             context.Imports.Add(import);
             await context.SaveChangesAsync(cancellationToken);
+            var (previousActive, previousChecked) = (source.ActiveImportId, source.LastCheckedAt);
             try
             {
                 await WriteSubjectsAsync(source, import, records, cancellationToken);
@@ -95,11 +130,23 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             }
             catch (Exception exception) when (exception is SqlException or DbUpdateException or InvalidOperationException or OperationCanceledException)
             {
-                await DeleteImportDataAsync(import.Id, CancellationToken.None);
-                import.Status = ImportStatus.Failed;
-                import.Message = exception.GetType().Name;
-                await context.SaveChangesAsync(CancellationToken.None);
-                throw;
+                // The activation may have committed before the failure surfaced: if so, the import is active and whole.
+                var persisted = await context.Sources.AsNoTracking().Where(s => s.Id == source.Id).Select(s => s.ActiveImportId).SingleAsync(CancellationToken.None);
+                if (persisted != import.Id)
+                {
+                    source.ActiveImportId = previousActive;
+                    source.LastCheckedAt = previousChecked;
+                    context.Entry(source).State = EntityState.Unchanged;
+                    await DeleteImportDataAsync(import.Id, CancellationToken.None);
+                    import.Status = ImportStatus.Failed;
+                    import.CompletedAt = clock.GetUtcNow();
+                    import.Message = exception.GetType().Name;
+                    await context.SaveChangesAsync(CancellationToken.None);
+                    throw;
+                }
+
+                await context.Entry(source).ReloadAsync(CancellationToken.None);
+                await context.Entry(import).ReloadAsync(CancellationToken.None);
             }
 
             await DeleteOldImportsAsync(source, cancellationToken);
@@ -181,8 +228,21 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         {
             if (byId.TryGetValue(subject.ExternalId, out var first))
             {
-                first.Names.AddRange(subject.Names.Where(name => !first.Names.Any(existing => existing.FullName == name.FullName)));
-                first.Addresses.AddRange(subject.Addresses.Where(address => !first.Addresses.Any(existing => existing.Raw == address.Raw)));
+                foreach (var name in subject.Names)
+                {
+                    // A spelling listed more than once is weak only if every listing is weak.
+                    var existing = first.Names.FirstOrDefault(n => n.FullName == name.FullName);
+                    if (existing is null)
+                    {
+                        first.Names.Add(name);
+                    }
+                    else
+                    {
+                        existing.IsWeak &= name.IsWeak;
+                    }
+                }
+
+                first.Addresses.AddRange(subject.Addresses.Where(address => !first.Addresses.Any(existing => existing.Raw == address.Raw && existing.CountryCode == address.CountryCode)));
                 continue;
             }
 
@@ -228,7 +288,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             table.Columns.Add(nameof(Subject.SourceUrl), typeof(string));
             foreach (var subject in batch)
             {
-                table.Rows.Add(import.Id, source.Id, Truncate(subject.ExternalId, 200), (byte)subject.Type, Truncate(subject.PrimaryName, 500), Truncate(subject.Programmes, 1000),
+                table.Rows.Add(import.Id, source.Id, subject.ExternalId, (byte)subject.Type, Truncate(subject.PrimaryName, 500), Truncate(subject.Programmes, 1000),
                     subject.ListedOn?.ToDateTime(TimeOnly.MinValue) is { } date ? date : DBNull.Value, subject.Remarks, Truncate(subject.SourceUrl, 1000));
             }
 
@@ -238,7 +298,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         var ids = await context.Subjects.AsNoTracking().Where(s => s.ImportId == import.Id)
             .Select(s => new { s.Id, s.ExternalId }).ToDictionaryAsync(s => s.ExternalId, s => s.Id, StringComparer.Ordinal, cancellationToken);
 
-        var names = records.SelectMany(subject => subject.Names.Select(name => (Id: ids[Truncate(subject.ExternalId, 200)!], Name: name)));
+        var names = records.SelectMany(subject => subject.Names.Select(name => (Id: ids[subject.ExternalId], Name: name)));
         foreach (var batch in names.Chunk(BatchSize))
         {
             var table = new DataTable();
@@ -254,7 +314,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             await BulkCopyAsync("SubjectNames", table, cancellationToken);
         }
 
-        var addresses = records.SelectMany(subject => subject.Addresses.Select(address => (Id: ids[Truncate(subject.ExternalId, 200)!], Address: address)));
+        var addresses = records.SelectMany(subject => subject.Addresses.Select(address => (Id: ids[subject.ExternalId], Address: address)));
         foreach (var batch in addresses.Chunk(BatchSize))
         {
             var table = new DataTable();
