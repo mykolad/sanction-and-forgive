@@ -120,7 +120,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Endpoints** (controllers; every response a record in `Controllers/ApiResponses.cs`): `POST /api/v1/screenings`
   (`{receiverName, companyName, address}`, each optional up to 300 characters, at least one; 503 `{state:"warmingUp"}`
   before the first load; rows with hits first; a summary worded "No match found in: EU, as of …; …" and never
-  "not sanctioned"; the disclaimer), `GET /api/v1/status`, `GET /api/v1/examples` (entities from the live lists: a
+  "not sanctioned"; the disclaimer), `GET /api/v1/status`, `GET /api/v1/sources` (for the status page: every loaded
+  list with state, count, last check, last change and the publisher's page, file and terms; then every catalogued
+  feed not loaded, with `ListSource.Note` as the reason; 503 before the first load), `GET /api/v1/examples` (entities from the live lists: a
   Latin one, a Cyrillic alias, one with an address, one with a typo; cached per snapshot), `GET /healthz` (liveness, no
   database), `GET /readyz` (200 after the first load), `GET /openapi/v1.json`.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
@@ -135,7 +137,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Website** (`wwwroot`, plain JS, no build step): one form (receiver, company, a multi-line address "any format"),
   "Try an example" buttons, a summary line, the table (lists × entries; Match / Possible match / No match / Not checked
   with a symbol each, never colour alone), a detail panel per cell (listed name, alias matched, how it aligned,
-  programme, address, the official record), the disclaimer, and the attribution footer (OGL, trade.gov's notice, EU).
+  programme, address, the official record), the disclaimer, and the attribution footer (OGL, trade.gov's notice, EU)
+  with a link to **`/status`** (`wwwroot/status/`: lists searched, then lists not imported and why). A new catalogued
+  feed needs its `Homepage` (and `TermsUrl`), and a `Note` unless it's `Active`; `SourcesTests` checks.
   `app.js` puts every value in as text, never HTML. Run it from `src/SanctionAndForgive.Api` (the content root holds
   `wwwroot`).
 - **Memory** (`ServerGarbageCollection` and `ConcurrentGarbageCollection` off, `System.GC.ConserveMemory` 5): with
