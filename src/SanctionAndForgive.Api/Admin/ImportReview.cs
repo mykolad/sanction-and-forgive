@@ -37,7 +37,9 @@ public sealed partial class ImportReview(IServiceScopeFactory scopes, ListLoader
             await loader.RefreshAsync(cancellationToken);
             return new ReviewOutcome(result, Reloaded: true);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        // Any failure after the commit, a cancelled request included (the page closed while the reload waited), is a
+        // reload that didn't happen: the review stands, and the controller still logs it.
+        catch (Exception exception)
         {
             ReloadFailed(logger, exception, importId);
             return new ReviewOutcome(result, Reloaded: false);
