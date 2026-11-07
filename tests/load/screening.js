@@ -30,6 +30,10 @@ function seconds(value) {
 const STEP_SECONDS = seconds(RAMP) + seconds(STEP);
 const VUS = Math.max(20, Math.ceil(Math.max(...STAGES) * 3));
 
+// The regular half of the inputs (load-inputs: ordinary Latin names, and listed companies shortened); the rest is the
+// hard half. Each half has its own (never failing) thresholds below, so the summary reports both.
+const REGULAR = new Set(['company', 'person', 'short']);
+
 // receiverName,companyName,address,kind: every field quoted or empty (load-inputs writes it that way).
 const inputs = new SharedArray('inputs', () => {
   const lines = open(__ENV.INPUTS || './inputs.csv').split(/\r?\n/).slice(1).filter(line => line.trim());
@@ -72,7 +76,11 @@ export const options = {
   // delayAbortEval counts from the start of the run, so each step's delay is offset by its own start), or once k6
   // itself can't keep the arrival rate (dropped iterations: then what was measured isn't the rate asked for).
   thresholds: Object.assign(
-    { dropped_iterations: [{ threshold: 'count<10', abortOnFail: true }] },
+    {
+      dropped_iterations: [{ threshold: 'count<10', abortOnFail: true }],
+      'http_req_duration{mix:hard}': ['max>=0'],
+      'http_req_duration{mix:regular}': ['max>=0'],
+    },
     ...STAGES.map((rate, i) => ({
       [`http_req_duration{step:${rate}}`]: [{ threshold: 'p(95)<2000', abortOnFail: true, delayAbortEval: `${i * STEP_SECONDS + 30}s` }],
       [`http_req_failed{step:${rate}}`]: [{ threshold: 'rate<0.02', abortOnFail: true, delayAbortEval: `${i * STEP_SECONDS + 30}s` }],
@@ -103,7 +111,7 @@ export default function () {
     address: input.address,
   }), {
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    tags: { name: 'screening', kind: input.kind, step: String(currentStep()) },
+    tags: { name: 'screening', kind: input.kind, mix: REGULAR.has(input.kind) ? 'regular' : 'hard', step: String(currentStep()) },
   });
   check(response, {
     'screening 200': r => r.status === 200,
