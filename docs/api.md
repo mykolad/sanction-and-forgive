@@ -127,15 +127,23 @@ Every list a screening searches, then every known feed that isn't imported, with
   the owner), `NeedsAccess` (an API key, or a site that refuses automated clients), or `Manual` (kept by hand).
 - `lastCheckedAt`: the last successful check, changed or not; freshness counts from it. `updatedAt`: when the
   list's content last changed here. `version`: the active import's id, as in the screening responses.
-- `held`: an update held for review, if one is waiting (`importId`, `recordCount`, `downloadedAt`, `reason`), however
+- `held`: an update held for review, if one is waiting (`importId`, `recordCount`, `downloadedAt`, `reason`, and
+  `added`, `removed`, `changed` against the list it was compared with: the list in use when it was downloaded), however
   many checks came after it. An update with more than 20% fewer records than the list it would replace is written but
   not searched. Screenings keep using the active list while it's current; it still turns Not checked after its
   allowed age. An administrator confirms or rejects the held one (`tools/lists.ps1 confirm|reject -Import <id>`).
-- `history`: the latest 10 updates, newest first, as of the API's last refresh (every 15 minutes): `importId`,
+- `history`: the latest 10 updates, newest first, as of the API's last refresh (every 15 minutes), and
+  `historyCount`, how many there are in all: `importId`,
   `result` (`Active`: the list in use; `Replaced`, `HeldForReview`, `Rejected`, `Failed`, `Running`), `startedAt`,
   `completedAt`, `recordCount`, `note` (why it was held or rejected; a failure says only that the download or parse
-  failed, as the details stay in `tools/lists.ps1 history`) and `reviewed` (whether a person confirmed or rejected
-  it; who, isn't public).
+  failed, as the details stay in `tools/lists.ps1 history`), `reviewed` (whether a person confirmed or rejected
+  it; who, isn't public), and what it changed against the list in use when it was downloaded: `added`, `removed` (by
+  external id) and `changed` (kept, with any field, name or address different, compared exactly); a list's first
+  update added everything. Null where not recorded: an update from before 2026-11-07 whose records were already
+  gone, a failure, or a count that failed. A row is an update, a failure, a hold or a rejection; a daily check that
+  finds the list unchanged only moves `lastCheckedAt`.
+- `GET /api/v1/sources/{code}/history`: every update of one loaded list, newest first (`code`, `name`, `history`),
+  from memory; 404 for a list the API doesn't load, 503 before the first load. The status page's "Show all".
 
 ## Browsing a list: `POST /api/v1/lists/{code}/browse` and `/lists`
 
