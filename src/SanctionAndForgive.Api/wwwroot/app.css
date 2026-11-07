@@ -252,6 +252,10 @@ details.history summary .state-badge { margin-left: 8px; font-size: 0.85rem; }
 details.history table { margin-top: 8px; }
 details.history .note { color: var(--muted); font-size: 0.9rem; }
 .update-result { font-weight: 650; }
+.changes { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.change.added { color: var(--clear-ink); }
+.change.removed { color: var(--match-ink); }
+.change.changed { color: var(--review-ink); }
 .update-result.HeldForReview { color: var(--review-ink); }
 .held .sub { max-width: 34ch; }
 .update-result.Failed, .update-result.Rejected { color: var(--match-ink); }

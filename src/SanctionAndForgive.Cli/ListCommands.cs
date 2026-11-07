@@ -67,17 +67,19 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
         return 0;
     }
 
-    /// <summary>Each source's latest imports, newest first: changes, failures, held and rejected updates.</summary>
+    /// <summary>Each source's latest imports, newest first: changes (entries added, removed and changed against the
+    /// list then in use; "-" where not recorded), failures, held and rejected updates.</summary>
     public async Task<int> HistoryAsync(string? code, CancellationToken cancellationToken)
     {
         var history = await store.HistoryAsync(code, perSource: 20, cancellationToken);
-        output.WriteLine("source     import  started (UTC)     status         records  note");
+        output.WriteLine("source     import  started (UTC)     status         records    added  removed  changed  note");
         foreach (var entry in history)
         {
             var status = entry.Active ? "Active" : entry.Status.ToString();
             var reviewed = entry.ReviewedBy is { } by ? string.Create(CultureInfo.InvariantCulture, $" (reviewed by {by}, {entry.ReviewedAt:yyyy-MM-dd HH:mm})") : string.Empty;
+            static string Count(int? value) => value is { } count ? count.ToString("N0", CultureInfo.InvariantCulture) : "-";
             output.WriteLine(string.Create(CultureInfo.InvariantCulture,
-                $"{entry.SourceCode,-10} {entry.Id,6}  {entry.StartedAt:yyyy-MM-dd HH:mm}  {status,-13} {entry.RecordCount,8:N0}  {entry.Message}{reviewed}"));
+                $"{entry.SourceCode,-10} {entry.Id,6}  {entry.StartedAt:yyyy-MM-dd HH:mm}  {status,-13} {entry.RecordCount,8:N0} {Count(entry.Added),8} {Count(entry.Removed),8} {Count(entry.Changed),8}  {entry.Message}{reviewed}"));
         }
 
         return 0;

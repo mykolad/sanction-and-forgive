@@ -130,7 +130,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   resume from; one stream at a time, `Screening:ConcurrentStreams`; never echoes input, hits explained by
   `SubjectMatch.Words`; `docs/api.md`), `GET /api/v1/status`, `GET /api/v1/sources` (for the status page: every loaded
   list with state, count, last check, last change and the publisher's page, file and terms; then every catalogued
-  feed not loaded, with `ListSource.Note` as the reason; 503 before the first load), `POST /api/v1/lists/{code}/browse`
+  feed not loaded, with `ListSource.Note` as the reason; the latest `ListLoader.HistoryShown` (10) updates and
+  `historyCount`; 503 before the first load), `GET /api/v1/sources/{code}/history` (every update, from the catalog,
+  which loads all of them: a row is an update, never an unchanged check), `POST /api/v1/lists/{code}/browse`
   (a page of a loaded list's entries in name order, filter text in the body, never the URL or logs; from the index in
   memory, with each index's sorted, folded entries cached in a `ConditionalWeakTable` that goes with the index),
   `GET /api/v1/examples` (entities from the live lists: a
@@ -245,7 +247,11 @@ Spec sections 4 ("Import rules") and 6. The database holds parsed lists only, ne
   later). A hold keeps `BasedOnImportId`, the list it was compared with: `ReviewAsync` confirms only while that's still
   active (never a rollback), in the activation's transaction with the reviewer and `LastCheckedAt` = when it was
   downloaded; rejecting marks it `Rejected` before deleting its records. `HeldAsync` finds holds however old (the
-  history is bounded); the public history never shows a failure's details or a reviewer's name. `--force` imports past the drop, never zero. Otherwise
+  history is bounded); the public history never shows a failure's details or a reviewer's name. Every written import
+  records `AddedCount`, `RemovedCount` and `ChangedCount` against the active list (`ChangeCountSql`, in SQL after the
+  records are written: external ids matched exactly, each record's fields, names and addresses hashed in a fixed
+  order with a binary collation); a first import added everything; a failed count leaves them null and never fails
+  the import. Migration `ImportChangeCounts` backfilled them where both imports' records still existed. `--force` imports past the drop, never zero. Otherwise
   `SqlBulkCopy` in batches of 5,000, then the conditional flip of `ActiveImportId`. Records are kept for the active
   import, the one before it and a held one; other imports' records are deleted in chunks (`HasData` false), their rows
   stay.
