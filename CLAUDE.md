@@ -174,8 +174,8 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `wwwroot`).
 - **Memory** (`ServerGarbageCollection` and `ConcurrentGarbageCollection` off, `System.GC.ConserveMemory` 5): with
   all 10 fetched lists loaded locally, about 320-340 MB private / 400-415 MB working set, also under load. Production
-  has fewer active lists. The 0.5 GiB container is measured in Phase 4; if it doesn't fit, the next step is 0.5 vCPU /
-  1 GiB, but **ask the owner first**.
+  has fewer active lists. Production is 0.5 vCPU / 1 GiB since 2026-11-07 (owner's decision: at 0.25 / 0.5 GiB the
+  working set reached the limit under load, `docs/load-test.md`); a larger size is the owner's decision too.
 - **Tests:** `Api/ApiTests.cs` with `ApiFactory` (the real `Program`, environment `Testing`, refresh off, a fake clock,
   a database that counts connection attempts).
 
@@ -261,8 +261,9 @@ Spec sections 4 ("Import rules") and 6. The database holds parsed lists only, ne
   (`Authentication=Active Directory Default`), and closes the firewall. With `$env:ConnectionStrings__Lists` set it
   uses that database instead and leaves the firewall alone.
 - **Manual CSV:** `external_id,type,name,aliases,address,country,programme,listed_on,remarks` (`ManualCsvReader`).
-- **`load-inputs`** writes `tests/load/inputs.csv` (gitignored) from the active lists for the k6 run: listed names,
-  near misses, Cyrillic, unlisted (common surnames), addresses and initials, deterministic (fixed seed). The run and
+- **`load-inputs`** writes `tests/load/inputs.csv` (gitignored) from the active lists for the k6 run, deterministic
+  (fixed seed): half hard (listed names, near misses, Cyrillic, common surnames, addresses, initials), half regular
+  (ordinary Latin company and person names, listed companies shortened: kinds `company`, `person`, `short`). The run and
   its results: `docs/load-test.md`; the owner runs k6 against Azure.
 
 ## EF Core migrations

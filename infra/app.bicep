@@ -14,9 +14,9 @@ param image string = 'ghcr.io/mykolad/sanction-and-forgive'
 param minReplicas int = 1
 param maxReplicas int = 1
 
-@description('vCPU per replica, as a string (Bicep has no decimals): 0.25 with 0.5Gi is the smallest size.')
-param cpu string = '0.25'
-param memory string = '0.5Gi'
+@description('vCPU per replica, as a string (Bicep has no decimals). 0.5 with 1Gi since 2026-11-07 (owner\'s decision, after the load test: memory was the limit at 0.25 with 0.5Gi).')
+param cpu string = '0.5'
+param memory string = '1Gi'
 
 @description('Screenings per minute per client IP; 0 turns the limit off (load tests only).')
 param rateLimitPerMinute int = 120

@@ -1,14 +1,16 @@
 # Load test
 
-How fast one replica (0.25 vCPU / 0.5 GiB, always on) can screen, and what limits it. Spec section 7, "Load test".
+How fast one replica (always on; 0.5 vCPU / 1 GiB since 2026-11-07, 0.25 vCPU / 0.5 GiB before) can screen, and
+what limits it. Spec section 7, "Load test".
 
 ## How to run it
 
 From the owner's machine, with k6 installed:
 
 ```powershell
-# 1. Inputs from the live lists (about 30% listed names, 20% near misses, 20% Cyrillic, 20% unlisted, 10% addresses
-#    or surname + initials; common surnames on purpose: they have the most candidates).
+# 1. Inputs from the live lists. Half hard (listed names, near misses, Cyrillic, common surnames, addresses, initials:
+#    the most candidates), half regular (ordinary Latin company and person names, and listed companies shortened as
+#    people write them, "AAA Inc." or "AAA"); k6 reports the two halves as mix:hard and mix:regular.
 ./tools/lists.ps1 load-inputs -File tests/load/inputs.csv
 
 # 2. The rate limit off (it would answer 429 long before the app is the limit):
