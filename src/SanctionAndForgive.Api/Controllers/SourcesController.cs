@@ -27,19 +27,48 @@ public sealed class SourcesController(ListCatalog catalog, TimeProvider clock) :
         var loaded = catalog.Lists;
         var history = catalog.History;
         var heldUpdates = catalog.Held;
-        var searched = loaded.Select(list => SourceResponse.From(list, ListSources.Find(list.Code), now) with
+        var searched = loaded.Select(list =>
         {
-            Held = heldUpdates.GetValueOrDefault(list.Code) is { } held
-                ? new HeldUpdateResponse(held.Id, held.RecordCount, held.StartedAt, held.Message)
-                : null,
-            History = [.. (history.GetValueOrDefault(list.Code) ?? []).Select(HistoryEntryResponse.From)],
+            var entries = history.GetValueOrDefault(list.Code) ?? [];
+            return SourceResponse.From(list, ListSources.Find(list.Code), now) with
+            {
+                Held = heldUpdates.GetValueOrDefault(list.Code) is { } held
+                    ? new HeldUpdateResponse(held.Id, held.RecordCount, held.StartedAt, held.Message, held.Added, held.Removed, held.Changed)
+                    : null,
+                History = [.. entries.Take(ListLoader.HistoryShown).Select(HistoryEntryResponse.From)],
+                HistoryCount = entries.Count,
+            };
         });
         var notImported = ListSources.All
             .Where(source => !loaded.Any(list => string.Equals(list.Code, source.Code, StringComparison.OrdinalIgnoreCase)))
             .Select(SourceResponse.NotImported);
         return Ok(new SourcesResponse(now, [.. searched, .. notImported]));
     }
+
+    /// <summary><c>GET /api/v1/sources/{code}/history</c>: every update of a list the API loads, newest first, from
+    /// memory (never SQL). 404 for a list it doesn't load.</summary>
+    [HttpGet("{code}/history")]
+    [ProducesResponseType<SourceHistoryResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType<WarmingUpResponse>(StatusCodes.Status503ServiceUnavailable)]
+    public IActionResult History(string code)
+    {
+        if (!catalog.IsReady)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new WarmingUpResponse("warmingUp"));
+        }
+
+        if (catalog.Lists.FirstOrDefault(list => string.Equals(list.Code, code, StringComparison.OrdinalIgnoreCase)) is not { } list)
+        {
+            return NotFound();
+        }
+
+        var entries = catalog.History.GetValueOrDefault(list.Code) ?? [];
+        return Ok(new SourceHistoryResponse(list.Code, list.Name, [.. entries.Select(HistoryEntryResponse.From)]));
+    }
 }
+
+public sealed record SourceHistoryResponse(string Code, string Name, IReadOnlyList<HistoryEntryResponse> History);
 
 public sealed record SourcesResponse(DateTimeOffset Now, IReadOnlyList<SourceResponse> Lists);
 
@@ -69,8 +98,12 @@ public sealed record SourceResponse(
     /// <summary>An update held for review (a drop of more than 20%), if one is waiting: the list above still serves.</summary>
     public HeldUpdateResponse? Held { get; init; }
 
-    /// <summary>The latest imports, newest first: changes, failures, held and rejected updates.</summary>
+    /// <summary>The latest updates, newest first (at most <see cref="ListLoader.HistoryShown"/>): changes, failures,
+    /// held and rejected updates. Every one of them: <c>GET /api/v1/sources/{code}/history</c>.</summary>
     public IReadOnlyList<HistoryEntryResponse> History { get; init; } = [];
+
+    /// <summary>How many updates the list has in all.</summary>
+    public int HistoryCount { get; init; }
 
     public static SourceResponse From(LoadedList list, ListSource? source, DateTimeOffset now)
     {
@@ -111,16 +144,21 @@ public sealed record SourceResponse(
         source.TermsUrl);
 }
 
-/// <summary>An update held for review: what was downloaded, and why it's held. Confirming or rejecting it takes an
-/// administrator (<c>tools/lists.ps1 confirm|reject -Import</c>).</summary>
-public sealed record HeldUpdateResponse(int ImportId, int RecordCount, DateTimeOffset DownloadedAt, string? Reason);
+/// <summary>An update held for review: what was downloaded, what it would change against the list searched now, and
+/// why it's held. Confirming or rejecting it takes an administrator (<c>/admin</c>, or
+/// <c>tools/lists.ps1 confirm|reject -Import</c>).</summary>
+public sealed record HeldUpdateResponse(int ImportId, int RecordCount, DateTimeOffset DownloadedAt, string? Reason, int? Added, int? Removed, int? Changed);
 
 /// <param name="Result"><c>Active</c> (the list in use: searched while it's current), <c>Replaced</c> (an earlier
 /// list), <c>HeldForReview</c>, <c>Rejected</c>, <c>Failed</c> or <c>Running</c>.</param>
 /// <param name="Note">Why it was held or rejected. For a failure, only that it failed: its details (an exception, a
 /// path on the operator's machine) stay in <c>tools/lists.ps1 history</c>.</param>
 /// <param name="Reviewed">Whether a person confirmed or rejected it (who, isn't public).</param>
-public sealed record HistoryEntryResponse(int ImportId, string Result, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, int RecordCount, string? Note, bool Reviewed)
+/// <param name="Added">Entries new against the list it was compared with (the list in use when it was downloaded; for
+/// a list's first update, all of them). With <paramref name="Removed"/> and <paramref name="Changed"/> (entries kept
+/// with any field, name or address different): null where not recorded (an update from before these counts whose
+/// records are gone, a failure, or a count that failed).</param>
+public sealed record HistoryEntryResponse(int ImportId, string Result, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, int RecordCount, string? Note, bool Reviewed, int? Added, int? Removed, int? Changed)
 {
     public static HistoryEntryResponse From(ImportHistoryEntry entry) => new(
         entry.Id,
@@ -135,5 +173,8 @@ public sealed record HistoryEntryResponse(int ImportId, string Result, DateTimeO
         entry.CompletedAt,
         entry.RecordCount,
         entry.Status == ImportStatus.Failed ? "The download or the parse failed." : entry.Message,
-        entry.ReviewedAt is not null);
+        entry.ReviewedAt is not null,
+        entry.Added,
+        entry.Removed,
+        entry.Changed);
 }

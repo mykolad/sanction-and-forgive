@@ -14,7 +14,9 @@ namespace SanctionAndForgive.Api.Lists;
 public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog catalog, TimeProvider clock, ILogger<ListLoader> logger) : IDisposable
 {
     /// <summary>How many of each source's latest imports the status page shows.</summary>
-    public const int HistoryLength = 10;
+    /// <summary>How many updates <c>GET /api/v1/sources</c> shows per list; the catalog holds every one of them
+    /// (<c>GET /api/v1/sources/{code}/history</c>): a row is an update, never an unchanged check, so they're few.</summary>
+    public const int HistoryShown = 10;
 
     /// <summary>One refresh at a time (the timer's, or one an administrator's review starts): two would build the same
     /// list twice, and memory holds at most one list twice.</summary>
@@ -111,7 +113,7 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
 
         // The history first: a small read, and the status page shows a held update even while lists rebuild.
         var store = new ImportStore(context, clock);
-        var history = await store.HistoryAsync(code: null, HistoryLength, cancellationToken);
+        var history = await store.HistoryAsync(code: null, perSource: int.MaxValue, cancellationToken);
         catalog.ReplaceHeld((await store.HeldAsync(cancellationToken)).GroupBy(entry => entry.SourceCode, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal));
         catalog.ReplaceHistory(history.GroupBy(entry => entry.SourceCode, StringComparer.Ordinal)

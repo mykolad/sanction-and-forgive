@@ -396,6 +396,27 @@ public sealed class ImportStoreTests : IAsyncLifetime
     private ListsDbContext CreateContext() =>
         new(new DbContextOptionsBuilder<ListsDbContext>().UseSqlServer(connectionString).Options);
 
+    [SqlServerFact]
+    public async Task EachUpdate_RecordsWhatWasAdded_Removed_AndChanged()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        clock.Advance(TimeSpan.FromHours(1));
+
+        // X-1 and X-2 gone, X-11 new; X-3 gets an alias, X-4 a name differing only in case, X-5 a new address country.
+        var next = Subjects(11).Where(subject => subject.ExternalId is not ("X-1" or "X-2")).ToList();
+        next.Single(subject => subject.ExternalId == "X-3").Names.Add(new SubjectName { FullName = "Fictional Alias" });
+        next.Single(subject => subject.ExternalId == "X-4").Names[0].FullName = "FICTIONAL Company 4";
+        next.Single(subject => subject.ExternalId == "X-5").Addresses[0].CountryCode = "LV";
+        var outcome = await store.ImportAsync(source, next, force: false, CancellationToken.None);
+
+        var history = await store.HistoryAsync("eu", perSource: int.MaxValue, CancellationToken.None);
+        Assert.Equal(ImportResult.Imported, outcome.Result);
+        Assert.Equal([(1, 2, 3), (10, 0, 0)], history.Select(entry => (entry.Added, entry.Removed, entry.Changed)).Select(c => (c.Added!.Value, c.Removed!.Value, c.Changed!.Value)));
+    }
+
     private static List<Subject> Subjects(int count) =>
     [
         .. Enumerable.Range(1, count).Select(i =>

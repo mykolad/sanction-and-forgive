@@ -68,7 +68,13 @@ namespace SanctionAndForgive.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AddedCount")
+                        .HasColumnType("int");
+
                     b.Property<int?>("BasedOnImportId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ChangedCount")
                         .HasColumnType("int");
 
                     b.Property<DateTimeOffset?>("CompletedAt")
@@ -90,6 +96,9 @@ namespace SanctionAndForgive.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.Property<int>("RecordCount")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RemovedCount")
                         .HasColumnType("int");
 
                     b.Property<DateTimeOffset?>("ReviewedAt")

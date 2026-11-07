@@ -19,6 +19,7 @@ function el(tag, attributes = {}, ...children) {
   for (const [name, value] of Object.entries(attributes)) {
     if (value === null || value === undefined || value === false) continue;
     if (name === "class") node.className = value;
+    else if (name.startsWith("on")) node.addEventListener(name.slice(2), value);
     else node.setAttribute(name, value === true ? "" : value);
   }
   for (const child of children.flat()) {
@@ -96,24 +97,63 @@ const RESULTS = {
   Running: "Running",
 };
 
-function historyBlock(list, now) {
-  const rows = list.history.map((entry) => el("tr", {},
+// What an update changed against the list in use when it was downloaded: entries added, removed, and kept with any
+// field, name or address different. Null counts weren't recorded (an update from before they were, or a failure).
+function changes(entry) {
+  if (entry.added === null || entry.added === undefined) {
+    return entry.result === "Failed" || entry.result === "Running" ? "" : el("span", { class: "muted" }, "not recorded");
+  }
+  if (entry.added === 0 && entry.removed === 0 && entry.changed === 0) return el("span", { class: "muted" }, "no entry changed");
+  const parts = [];
+  if (entry.added) parts.push(el("span", { class: "change added" }, `+${entry.added.toLocaleString()} added`));
+  if (entry.removed) parts.push(el("span", { class: "change removed" }, `−${entry.removed.toLocaleString()} removed`));
+  if (entry.changed) parts.push(el("span", { class: "change changed" }, `${entry.changed.toLocaleString()} changed`));
+  return el("span", { class: "changes" }, ...parts);
+}
+
+function historyRows(entries, now) {
+  return entries.map((entry) => el("tr", {},
     el("td", {}, when(entry.startedAt, now)),
     el("td", {}, el("span", { class: `update-result ${entry.result}` }, RESULTS[entry.result] ?? entry.result), entry.reviewed ? el("span", { class: "sub" }, "after review") : null),
     el("td", { class: "num" }, entry.result === "Failed" ? "" : entry.recordCount.toLocaleString()),
+    el("td", {}, changes(entry)),
     el("td", { class: "note" }, entry.note ?? "")));
+}
+
+function historyBlock(list, now) {
   const last = list.history.find((entry) => entry.result === "Active" || entry.result === "Replaced");
+  const total = list.historyCount ?? list.history.length;
+  const body = el("tbody", {}, historyRows(list.history, now));
+  const more = total > list.history.length
+    ? el("button", { type: "button", class: "secondary", onclick: (event) => showAll(list, body, event.currentTarget, now) }, `Show all ${total} updates`)
+    : null;
   return el("details", { class: "history" },
     el("summary", {}, el("span", { class: "list-title" }, list.name),
       el("span", { class: "muted" }, list.history.length
-        ? ` · the latest ${list.history.length} ${list.history.length === 1 ? "update" : "updates"}${last ? `; current list from ${utc(list.updatedAt ?? last.completedAt)}` : ""}`
+        ? ` · ${total > list.history.length ? `the latest ${list.history.length} of ${total} updates` : `${total} ${total === 1 ? "update" : "updates"}`}${last ? `; current list from ${utc(list.updatedAt ?? last.completedAt)}` : ""}`
         : " · no updates recorded"),
       list.held ? el("span", { class: "state-badge Held" }, " ! held for review") : null),
     list.history.length
       ? el("div", { class: "table-scroll" }, el("table", { class: "sources" },
-        el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "When"), el("th", { scope: "col" }, "Result"), el("th", { scope: "col", class: "num" }, "Records"), el("th", { scope: "col" }, "Note"))),
-        el("tbody", {}, rows)))
-      : el("p", { class: "muted" }, "Nothing recorded yet."));
+        el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "When"), el("th", { scope: "col" }, "Result"), el("th", { scope: "col", class: "num" }, "Entries"), el("th", { scope: "col" }, "Changes"), el("th", { scope: "col" }, "Note"))),
+        body))
+      : el("p", { class: "muted" }, "Nothing recorded yet."),
+    more ? el("p", {}, more) : null);
+}
+
+async function showAll(list, body, button, now) {
+  button.disabled = true;
+  button.textContent = "Loading…";
+  try {
+    const response = await fetch(`/api/v1/sources/${encodeURIComponent(list.code)}/history`, { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(String(response.status));
+    const full = await response.json();
+    body.replaceChildren(...historyRows(full.history, now));
+    button.parentElement.remove();
+  } catch {
+    button.disabled = false;
+    button.textContent = "That didn't work. Try again";
+  }
 }
 
 function notImportedRow(list) {

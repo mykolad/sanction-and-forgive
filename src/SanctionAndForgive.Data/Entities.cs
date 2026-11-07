@@ -83,6 +83,16 @@ public sealed class Import
     public DateTimeOffset? ReviewedAt { get; set; }
 
     public string? ReviewedBy { get; set; }
+
+    /// <summary>What changed against the list it was compared with (the active list when it was written; for the first
+    /// import, everything is added), by external id: records new, gone, and kept with different content (any field,
+    /// name or address). Null where it wasn't recorded (an import from before these counts whose records are gone, or
+    /// a count that failed: an import never fails for its counts).</summary>
+    public int? AddedCount { get; set; }
+
+    public int? RemovedCount { get; set; }
+
+    public int? ChangedCount { get; set; }
 }
 
 public enum SubjectType : byte

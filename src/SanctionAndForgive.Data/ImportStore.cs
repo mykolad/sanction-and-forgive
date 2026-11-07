@@ -38,7 +38,27 @@ public enum ReviewResult
 }
 
 /// <summary>One import of a source as the history shows it.</summary>
-public sealed record ImportHistoryEntry(int Id, string SourceCode, ImportStatus Status, DateTimeOffset StartedAt, DateTimeOffset? CompletedAt, int RecordCount, string? Message, bool Active, DateTimeOffset? ReviewedAt, string? ReviewedBy);
+/// <param name="Added">Records new against the list it was compared with; with <paramref name="Removed"/> and
+/// <paramref name="Changed"/>, null where not recorded (<see cref="Import.AddedCount"/>).</param>
+public sealed record ImportHistoryEntry(
+    int Id,
+    string SourceCode,
+    ImportStatus Status,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? CompletedAt,
+    int RecordCount,
+    string? Message,
+    bool Active,
+    DateTimeOffset? ReviewedAt,
+    string? ReviewedBy,
+    int? Added,
+    int? Removed,
+    int? Changed)
+{
+    public static ImportHistoryEntry From(Import import, string sourceCode, bool active) => new(
+        import.Id, sourceCode, import.Status, import.StartedAt, import.CompletedAt, import.RecordCount, import.Message, active, import.ReviewedAt, import.ReviewedBy,
+        import.AddedCount, import.RemovedCount, import.ChangedCount);
+}
 
 /// <summary>Writes imports (section 4, "Import rules"). Each import is a complete copy of a source's subjects, written
 /// with <see cref="SqlBulkCopy"/> in batches, then made active in one transaction: readers never see half a list.
@@ -155,11 +175,12 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
     {
         var held = await context.Imports.AsNoTracking().Where(i => i.Status == ImportStatus.PendingReview && i.HasData)
             .OrderByDescending(i => i.Id).Select(i => new { Import = i, i.Source!.Code }).ToListAsync(cancellationToken);
-        return [.. held.Select(h => new ImportHistoryEntry(h.Import.Id, h.Code, h.Import.Status, h.Import.StartedAt, h.Import.CompletedAt, h.Import.RecordCount, h.Import.Message, Active: false, h.Import.ReviewedAt, h.Import.ReviewedBy))];
+        return [.. held.Select(h => ImportHistoryEntry.From(h.Import, h.Code, active: false))];
     }
 
     /// <summary>The latest imports of every source (or of <paramref name="code"/>), newest first,
-    /// <paramref name="perSource"/> each.</summary>
+    /// <paramref name="perSource"/> each (<see cref="int.MaxValue"/>: all of them; a row is an update, a failure, a hold
+    /// or a rejection, never an unchanged check, so a source has a few hundred at most).</summary>
     public async Task<List<ImportHistoryEntry>> HistoryAsync(string? code, int perSource, CancellationToken cancellationToken)
     {
         var sources = await context.Sources.AsNoTracking().Where(s => code == null || s.Code == code).OrderBy(s => s.Code)
@@ -169,7 +190,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
         {
             // One small query per source (a dozen sources): the index on (SourceId, Status) serves it.
             var imports = await context.Imports.AsNoTracking().Where(i => i.SourceId == source.Id).OrderByDescending(i => i.Id).Take(perSource).ToListAsync(cancellationToken);
-            history.AddRange(imports.Select(i => new ImportHistoryEntry(i.Id, source.Code, i.Status, i.StartedAt, i.CompletedAt, i.RecordCount, i.Message, source.ActiveImportId == i.Id, i.ReviewedAt, i.ReviewedBy)));
+            history.AddRange(imports.Select(i => ImportHistoryEntry.From(i, source.Code, source.ActiveImportId == i.Id)));
         }
 
         return history;
@@ -239,6 +260,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             try
             {
                 await WriteSubjectsAsync(source, import, records, cancellationToken);
+                await CountChangesAsync(import.Id, active?.Id, cancellationToken);
                 if (drop is not null)
                 {
                     // Held, and any older hold superseded, in one transaction.
@@ -330,6 +352,61 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
             }),
         ];
     }
+
+    /// <summary>Records <see cref="Import.AddedCount"/>, <see cref="Import.RemovedCount"/> and
+    /// <see cref="Import.ChangedCount"/> for an import whose records are written, against <paramref name="previousImportId"/>
+    /// (whose records are still there: the active list), or everything added when there's none. In SQL, so a large
+    /// list isn't read back into memory. The counts are history: if counting fails, they stay null and the import goes
+    /// on.</summary>
+    private async Task CountChangesAsync(int importId, int? previousImportId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(
+                ChangeCountSql,
+                [new SqlParameter("@new", SqlDbType.Int) { Value = importId }, new SqlParameter("@old", SqlDbType.Int) { Value = (object?)previousImportId ?? DBNull.Value }],
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is SqlException or RetryLimitExceededException)
+        {
+            // Not recorded: the history says so.
+        }
+    }
+
+    /// <summary>Counts what changed between two imports' records (<c>@new</c> against <c>@old</c>, which may be null)
+    /// and stores it on <c>@new</c>. A record's content is its fields, names and addresses, hashed in a fixed order and
+    /// compared byte for byte (binary collation: a change of case is a change); null and empty differ. External ids
+    /// match exactly. The same statement backfilled the counts (migration <c>ImportChangeCounts</c>).</summary>
+    public const string ChangeCountSql = @"
+        WITH Signatures AS (
+            SELECT s.ImportId, s.ExternalId,
+                HASHBYTES('SHA2_256', CONCAT(
+                    CONVERT(nvarchar(3), s.Type), NCHAR(31),
+                    s.PrimaryName, NCHAR(31),
+                    ISNULL(N'+' + s.Programmes, N'-'), NCHAR(31),
+                    ISNULL(N'+' + CONVERT(nvarchar(10), s.ListedOn, 23), N'-'), NCHAR(31),
+                    ISNULL(N'+' + s.Remarks, N'-'), NCHAR(31),
+                    ISNULL(N'+' + s.SourceUrl, N'-'), NCHAR(30),
+                    (SELECT STRING_AGG(CONVERT(nvarchar(max), CONCAT(n.FullName, NCHAR(31), CONVERT(nvarchar(1), n.IsWeak), NCHAR(31), CONVERT(nvarchar(3), n.Script))), NCHAR(30))
+                        WITHIN GROUP (ORDER BY n.FullName COLLATE Latin1_General_BIN2, n.IsWeak, n.Script)
+                     FROM SubjectNames n WHERE n.SubjectId = s.Id), NCHAR(29),
+                    (SELECT STRING_AGG(CONVERT(nvarchar(max), CONCAT(a.Raw, NCHAR(31), ISNULL(N'+' + a.CountryCode, N'-'))), NCHAR(29))
+                        WITHIN GROUP (ORDER BY a.Raw COLLATE Latin1_General_BIN2, a.CountryCode COLLATE Latin1_General_BIN2)
+                     FROM SubjectAddresses a WHERE a.SubjectId = s.Id))) AS Signature
+            FROM Subjects s
+            WHERE s.ImportId = @new OR s.ImportId = @old),
+        Counted AS (
+            SELECT
+                ISNULL(SUM(CASE WHEN o.ExternalId IS NULL THEN 1 ELSE 0 END), 0) AS Added,
+                ISNULL(SUM(CASE WHEN n.ExternalId IS NULL THEN 1 ELSE 0 END), 0) AS Removed,
+                ISNULL(SUM(CASE WHEN n.ExternalId IS NOT NULL AND o.ExternalId IS NOT NULL AND n.Signature <> o.Signature THEN 1 ELSE 0 END), 0) AS Changed
+            FROM (SELECT ExternalId, Signature FROM Signatures WHERE ImportId = @new) n
+            FULL OUTER JOIN (SELECT ExternalId, Signature FROM Signatures WHERE ImportId = @old) o
+                ON o.ExternalId COLLATE Latin1_General_BIN2 = n.ExternalId COLLATE Latin1_General_BIN2)
+        UPDATE Imports SET AddedCount = Counted.Added, RemovedCount = Counted.Removed, ChangedCount = Counted.Changed
+        FROM Counted
+        WHERE Imports.Id = @new;
+        ";
 
     /// <summary>The canonical hash: records sorted by external id, each with its content in a fixed order, so a file
     /// regenerated with a new date but the same records hashes the same.</summary>

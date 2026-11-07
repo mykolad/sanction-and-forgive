@@ -54,15 +54,15 @@ public sealed class SourcesTests : IDisposable
     public async Task AHeldUpdate_AndTheHistory_AreShown_WithoutTheReviewersName_OrFailureDetails()
     {
         factory.Load(Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity)));
-        var held = new SanctionAndForgive.Data.ImportHistoryEntry(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddHours(-1), Now.AddHours(-1), 4900, "Records dropped from 6269 to 4900, more than 20 %: held for review", Active: false, ReviewedAt: null, ReviewedBy: null);
+        var held = new SanctionAndForgive.Data.ImportHistoryEntry(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddHours(-1), Now.AddHours(-1), 4900, "Records dropped from 6269 to 4900, more than 20 %: held for review", Active: false, ReviewedAt: null, ReviewedBy: null, Added: 3, Removed: 1372, Changed: 40);
         factory.Catalog.ReplaceHistory(new Dictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>>
         {
             ["eu"] =
             [
-                new(4, "eu", SanctionAndForgive.Data.ImportStatus.Failed, Now.AddMinutes(-30), Now.AddMinutes(-30), 0, "FileNotFoundException: Could not find file '/home/owner/eu.xml'.", Active: false, ReviewedAt: null, ReviewedBy: null),
+                new(4, "eu", SanctionAndForgive.Data.ImportStatus.Failed, Now.AddMinutes(-30), Now.AddMinutes(-30), 0, "FileNotFoundException: Could not find file '/home/owner/eu.xml'.", Active: false, ReviewedAt: null, ReviewedBy: null, Added: null, Removed: null, Changed: null),
                 held,
-                new(2, "eu", SanctionAndForgive.Data.ImportStatus.Rejected, Now.AddDays(-1), Now.AddDays(-1), 100, "…; rejected on review", Active: false, Now.AddDays(-1), "owner@example.invalid"),
-                new(1, "eu", SanctionAndForgive.Data.ImportStatus.Completed, Now.AddDays(-2), Now.AddDays(-2), 6269, null, Active: true, ReviewedAt: null, ReviewedBy: null),
+                new(2, "eu", SanctionAndForgive.Data.ImportStatus.Rejected, Now.AddDays(-1), Now.AddDays(-1), 100, "…; rejected on review", Active: false, Now.AddDays(-1), "owner@example.invalid", Added: null, Removed: null, Changed: null),
+                new(1, "eu", SanctionAndForgive.Data.ImportStatus.Completed, Now.AddDays(-2), Now.AddDays(-2), 6269, null, Active: true, ReviewedAt: null, ReviewedBy: null, Added: 6269, Removed: 0, Changed: 0),
             ],
         });
         factory.Catalog.ReplaceHeld(new Dictionary<string, SanctionAndForgive.Data.ImportHistoryEntry> { ["eu"] = held });
@@ -70,6 +70,10 @@ public sealed class SourcesTests : IDisposable
         var eu = (await SourcesAsync())["eu"];
 
         Assert.Equal((3, 4900), (eu.GetProperty("held").GetProperty("importId").GetInt32(), eu.GetProperty("held").GetProperty("recordCount").GetInt32()));
+        Assert.Equal((3, 1372, 40), (eu.GetProperty("held").GetProperty("added").GetInt32(), eu.GetProperty("held").GetProperty("removed").GetInt32(), eu.GetProperty("held").GetProperty("changed").GetInt32()));
+        Assert.Equal((6269, 0, 0), (eu.GetProperty("history")[3].GetProperty("added").GetInt32(), eu.GetProperty("history")[3].GetProperty("removed").GetInt32(), eu.GetProperty("history")[3].GetProperty("changed").GetInt32()));
+        Assert.Equal(JsonValueKind.Null, eu.GetProperty("history")[0].GetProperty("added").ValueKind);
+        Assert.Equal(4, eu.GetProperty("historyCount").GetInt32());
         Assert.Equal(["Failed", "HeldForReview", "Rejected", "Active"], eu.GetProperty("history").EnumerateArray().Select(entry => entry.GetProperty("result").GetString()));
         Assert.True(eu.GetProperty("history")[2].GetProperty("reviewed").GetBoolean());
         Assert.Equal("The download or the parse failed.", eu.GetProperty("history")[0].GetProperty("note").GetString());
@@ -84,13 +88,36 @@ public sealed class SourcesTests : IDisposable
         factory.Load(Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity)));
         factory.Catalog.ReplaceHeld(new Dictionary<string, SanctionAndForgive.Data.ImportHistoryEntry>
         {
-            ["eu"] = new(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddDays(-3), Now.AddDays(-3), 4900, "held for review", Active: false, ReviewedAt: null, ReviewedBy: null),
+            ["eu"] = new(3, "eu", SanctionAndForgive.Data.ImportStatus.PendingReview, Now.AddDays(-3), Now.AddDays(-3), 4900, "held for review", Active: false, ReviewedAt: null, ReviewedBy: null, Added: null, Removed: null, Changed: null),
         });
 
         var eu = (await SourcesAsync())["eu"];
 
         Assert.Equal(3, eu.GetProperty("held").GetProperty("importId").GetInt32());
         Assert.Equal(0, eu.GetProperty("history").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task TheFullHistory_IsServedFromMemory_WhileTheStatusShowsTheLatest()
+    {
+        factory.Load(Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity)));
+        factory.Catalog.ReplaceHistory(new Dictionary<string, IReadOnlyList<SanctionAndForgive.Data.ImportHistoryEntry>>
+        {
+            ["eu"] = [.. Enumerable.Range(1, 15).Reverse().Select(id => new SanctionAndForgive.Data.ImportHistoryEntry(
+                id, "eu", SanctionAndForgive.Data.ImportStatus.Completed, Now.AddDays(-id), Now.AddDays(-id), 6000 + id, null, Active: id == 15, ReviewedAt: null, ReviewedBy: null, Added: 1, Removed: 0, Changed: id))],
+        });
+
+        var eu = (await SourcesAsync())["eu"];
+        using var full = await client.GetAsync(new Uri("/api/v1/sources/eu/history", UriKind.Relative));
+        var body = await full.Content.ReadFromJsonAsync<JsonElement>();
+        using var unknown = await client.GetAsync(new Uri("/api/v1/sources/nope/history", UriKind.Relative));
+
+        Assert.Equal((10, 15), (eu.GetProperty("history").GetArrayLength(), eu.GetProperty("historyCount").GetInt32()));
+        Assert.Equal(15, body.GetProperty("history").GetArrayLength());
+        Assert.Equal((15, 1), (body.GetProperty("history")[0].GetProperty("importId").GetInt32(), body.GetProperty("history")[14].GetProperty("importId").GetInt32()));
+        Assert.Equal(("eu", "EU"), (body.GetProperty("code").GetString(), body.GetProperty("name").GetString()));
+        Assert.Equal(HttpStatusCode.NotFound, unknown.StatusCode);
+        Assert.Equal(0, factory.Database.Opened);
     }
 
     [Fact]
