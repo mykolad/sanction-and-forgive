@@ -58,8 +58,10 @@ By half, over the whole first run (14,390 screenings, none failed, none dropped)
 361 ms; regular p50 20 ms, p95 97 ms, p99 281 ms. So the regular half is only a little cheaper than the hard one:
 most of a screening's cost is scoring each name's candidates on six lists, which ordinary names have too.
 
-The limit is between 32 and 48 a second, four times the 8 of the smaller size with the same code: twice the CPU, and
-the memory no longer close to its limit (about 45% free). The per-IP rate limit (120 a minute) is a sixteenth of it.
+The limit is between 32 and 48 a second, four times the 8 measured on the smaller size, but not a like-for-like
+comparison: that run had 274d26e (before #25's 22% less CPU per screening) and only hard inputs, this one #25 and
+half regular inputs. Twice the CPU is most of the gain; the rest is #25 and the lighter half. Memory is no longer
+close to its limit (about 45% free). The per-IP rate limit (120 a minute) is a sixteenth of the capacity.
 
 ### Azure, one 0.25 vCPU replica
 
