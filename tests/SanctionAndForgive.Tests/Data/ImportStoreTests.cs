@@ -417,6 +417,23 @@ public sealed class ImportStoreTests : IAsyncLifetime
         Assert.Equal([(1, 2, 3), (10, 0, 0)], history.Select(entry => (entry.Added, entry.Removed, entry.Changed)).Select(c => (c.Added!.Value, c.Removed!.Value, c.Changed!.Value)));
     }
 
+    [SqlServerFact]
+    public async Task AnIdWithATrailingSpace_IsAnotherEntry_InTheCounts()
+    {
+        await using var context = CreateContext();
+        var store = new ImportStore(context, clock);
+        var source = await store.EnsureSourceAsync("eu", "EU", "https://example.invalid/eu", 72, CancellationToken.None);
+        await store.ImportAsync(source, Subjects(10), force: false, CancellationToken.None);
+        clock.Advance(TimeSpan.FromHours(1));
+
+        var next = Subjects(10);
+        next[0].ExternalId = "X-1 ";
+        await store.ImportAsync(source, next, force: false, CancellationToken.None);
+
+        var latest = (await store.HistoryAsync("eu", perSource: 1, CancellationToken.None)).Single();
+        Assert.Equal((1, 1, 0), (latest.Added!.Value, latest.Removed!.Value, latest.Changed!.Value));
+    }
+
     private static List<Subject> Subjects(int count) =>
     [
         .. Enumerable.Range(1, count).Select(i =>

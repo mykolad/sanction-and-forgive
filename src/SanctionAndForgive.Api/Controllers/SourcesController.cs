@@ -144,7 +144,8 @@ public sealed record SourceResponse(
         source.TermsUrl);
 }
 
-/// <summary>An update held for review: what was downloaded, what it would change against the list searched now, and
+/// <summary>An update held for review: what was downloaded, what it changes against the list it was compared with (the
+/// list in use when it was downloaded, which the list searched now normally is), and
 /// why it's held. Confirming or rejecting it takes an administrator (<c>/admin</c>, or
 /// <c>tools/lists.ps1 confirm|reject -Import</c>).</summary>
 public sealed record HeldUpdateResponse(int ImportId, int RecordCount, DateTimeOffset DownloadedAt, string? Reason, int? Added, int? Removed, int? Changed);

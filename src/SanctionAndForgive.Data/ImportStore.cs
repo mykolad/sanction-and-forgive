@@ -376,7 +376,8 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
     /// <summary>Counts what changed between two imports' records (<c>@new</c> against <c>@old</c>, which may be null)
     /// and stores it on <c>@new</c>. A record's content is its fields, names and addresses, hashed in a fixed order and
     /// compared byte for byte (binary collation: a change of case is a change); null and empty differ. External ids
-    /// match exactly. The same statement backfilled the counts (migration <c>ImportChangeCounts</c>).</summary>
+    /// match exactly: a binary collation still ignores trailing spaces in a comparison, so their lengths must match too,
+    /// as <see cref="Deduplicate"/> keeps <c>X-1</c> and <c>X-1 </c> apart. The same statement backfilled the counts (migration <c>ImportChangeCounts</c>).</summary>
     public const string ChangeCountSql = @"
         WITH Signatures AS (
             SELECT s.ImportId, s.ExternalId,
@@ -402,7 +403,7 @@ public sealed class ImportStore(ListsDbContext context, TimeProvider clock)
                 ISNULL(SUM(CASE WHEN n.ExternalId IS NOT NULL AND o.ExternalId IS NOT NULL AND n.Signature <> o.Signature THEN 1 ELSE 0 END), 0) AS Changed
             FROM (SELECT ExternalId, Signature FROM Signatures WHERE ImportId = @new) n
             FULL OUTER JOIN (SELECT ExternalId, Signature FROM Signatures WHERE ImportId = @old) o
-                ON o.ExternalId COLLATE Latin1_General_BIN2 = n.ExternalId COLLATE Latin1_General_BIN2)
+                ON o.ExternalId COLLATE Latin1_General_BIN2 = n.ExternalId COLLATE Latin1_General_BIN2 AND DATALENGTH(o.ExternalId) = DATALENGTH(n.ExternalId))
         UPDATE Imports SET AddedCount = Counted.Added, RemovedCount = Counted.Removed, ChangedCount = Counted.Changed
         FROM Counted
         WHERE Imports.Id = @new;

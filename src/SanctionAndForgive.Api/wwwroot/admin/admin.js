@@ -80,7 +80,7 @@ function heldCard(list) {
     el("p", {}, `Downloaded ${utc(list.held.downloadedAt)}: ${list.held.recordCount.toLocaleString()} records, against ${list.recordCount.toLocaleString()} in the list searched now (${drop}% fewer).`),
     list.held.reason ? el("p", { class: "muted" }, list.held.reason) : null,
     list.held.added !== null && list.held.added !== undefined
-      ? el("p", {}, `Against the list searched now: ${list.held.added.toLocaleString()} entries added, ${list.held.removed.toLocaleString()} removed, ${list.held.changed.toLocaleString()} changed.`)
+      ? el("p", {}, `Against the list it was compared with (the list in use when it was downloaded): ${list.held.added.toLocaleString()} entries added, ${list.held.removed.toLocaleString()} removed, ${list.held.changed.toLocaleString()} changed.`)
       : null,
     el("p", {}, link(list.homepage, "The publisher's page"), list.fileUrl ? " · " : "", link(list.fileUrl, "the file"), " · ", link(`/lists?list=${encodeURIComponent(list.code)}`, "browse the list searched now")),
     actions,

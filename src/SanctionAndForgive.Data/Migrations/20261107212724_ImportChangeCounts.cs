@@ -81,7 +81,7 @@ JOIN (
         SELECT n.ExternalId AS NewExternalId, o.ExternalId AS OldExternalId, n.Signature AS NewSignature, o.Signature AS OldSignature
         FROM (SELECT ExternalId, Signature FROM #Signatures WHERE ImportId = pr.NewId) n
         FULL OUTER JOIN (SELECT ExternalId, Signature FROM #Signatures WHERE ImportId = pr.OldId) o
-            ON o.ExternalId COLLATE Latin1_General_BIN2 = n.ExternalId COLLATE Latin1_General_BIN2) j
+            ON o.ExternalId COLLATE Latin1_General_BIN2 = n.ExternalId COLLATE Latin1_General_BIN2 AND DATALENGTH(o.ExternalId) = DATALENGTH(n.ExternalId)) j
     GROUP BY pr.NewId) c ON c.NewId = i.Id;
 
 DROP TABLE #Signatures;

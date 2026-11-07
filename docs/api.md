@@ -128,7 +128,7 @@ Every list a screening searches, then every known feed that isn't imported, with
 - `lastCheckedAt`: the last successful check, changed or not; freshness counts from it. `updatedAt`: when the
   list's content last changed here. `version`: the active import's id, as in the screening responses.
 - `held`: an update held for review, if one is waiting (`importId`, `recordCount`, `downloadedAt`, `reason`, and
-  `added`, `removed`, `changed` against the list searched now), however
+  `added`, `removed`, `changed` against the list it was compared with: the list in use when it was downloaded), however
   many checks came after it. An update with more than 20% fewer records than the list it would replace is written but
   not searched. Screenings keep using the active list while it's current; it still turns Not checked after its
   allowed age. An administrator confirms or rejects the held one (`tools/lists.ps1 confirm|reject -Import <id>`).
