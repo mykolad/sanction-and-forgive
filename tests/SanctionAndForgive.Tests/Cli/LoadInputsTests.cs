@@ -12,6 +12,8 @@ public class LoadInputsTests
     [InlineData("OOO «Romashka»", "Romashka")]
     [InlineData("State Grid Co., Ltd.", "State Grid")]
     [InlineData("Public Joint Stock Company Aeroflot", "Aeroflot")]
+    [InlineData("Example Public Joint Stock Company", "Example")]
+    [InlineData("Example Closed Joint Stock Company", "Example")]
     [InlineData("Limited", "Limited")]
     public void LegalForms_AreStrippedAsWholePhrases(string name, string expected) =>
         Assert.Equal(expected, string.Join(' ', LegalForms.Strip(name)));

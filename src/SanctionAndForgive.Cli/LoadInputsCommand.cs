@@ -229,6 +229,7 @@ public static class LegalForms
     // "Public Works LLC" keeps "Public Works" and "Example Limited Liability Company" loses all three words.
     private static readonly string[][] TrailingLegalForms = [.. new[]
     {
+        "OPEN JOINT STOCK COMPANY", "CLOSED JOINT STOCK COMPANY", "PUBLIC JOINT STOCK COMPANY", "PRIVATE JOINT STOCK COMPANY",
         "LIMITED LIABILITY COMPANY", "LIMITED LIABILITY PARTNERSHIP", "JOINT STOCK COMPANY", "PUBLIC LIMITED COMPANY", "PRIVATE LIMITED",
         "CO LTD", "SDN BHD", "SA DE CV", "PTE LTD", "PVT LTD",
         "LLC", "LTD", "LIMITED", "INC", "INCORPORATED", "CORP", "CORPORATION", "CO", "COMPANY", "GMBH", "SA", "AG", "JSC", "OJSC", "PJSC", "CJSC",
