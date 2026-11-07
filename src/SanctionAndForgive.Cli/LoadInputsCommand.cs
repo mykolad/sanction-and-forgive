@@ -59,16 +59,6 @@ internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter outpu
         "Kowalski", "Jansen", "Andersson", "Nielsen", "Virtanen", "Novak", "Horvath", "Silva", "Martin", "Wilson", "Taylor",
     ];
 
-    // Legal forms as listed companies end or begin with them ("... Corporation", "Limited Liability Company ..."), to
-    // drop or swap for a short form.
-    private static readonly HashSet<string> TrailingLegalWords = new(
-        ["LLC", "LTD", "LIMITED", "INC", "INCORPORATED", "CORP", "CORPORATION", "CO", "COMPANY", "GMBH", "SA", "AG", "JSC", "OJSC", "PJSC", "CJSC", "PLC", "LLP", "BV", "NV", "SRL", "SPA", "OOO", "AO", "TOO", "FZE", "FZCO", "PTE", "PVT", "SDN", "BHD", "DMCC", "LTDA", "SAS"],
-        StringComparer.OrdinalIgnoreCase);
-
-    private static readonly HashSet<string> LeadingLegalWords = new(
-        ["LIMITED", "LIABILITY", "COMPANY", "JOINT", "STOCK", "OPEN", "CLOSED", "PUBLIC", "PRIVATE", "THE", "LLC", "JSC", "OJSC", "PJSC", "CJSC", "OOO", "OAO", "ZAO", "PAO", "AO", "TOO", "FEDERAL", "STATE", "UNITARY", "ENTERPRISE"],
-        StringComparer.OrdinalIgnoreCase);
-
     public async Task<int> RunAsync(string path, int count, int seed, CancellationToken cancellationToken)
     {
         var activeImports = await context.Sources.Where(source => source.ActiveImportId != null).Select(source => source.ActiveImportId!.Value).ToListAsync(cancellationToken);
@@ -84,7 +74,10 @@ internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter outpu
         var random = new Random(seed);
         var cyrillicNames = subjects.SelectMany(subject => subject.Names.Where(name => name.Script == NameScript.Cyrillic).Select(name => (subject, name.FullName))).ToList();
         var withAddress = subjects.Where(subject => subject.Addresses.Count > 0).ToList();
-        var latinEntities = subjects.Where(subject => subject.Type == SubjectType.Entity && subject.PrimaryName.All(c => c < 0x0400 || c > 0x04FF)).ToList();
+        // Latin by the script the import recorded for the primary name (not merely "not Cyrillic": Chinese, Arabic or
+        // Greek names aren't the regular Latin case either).
+        var latinEntities = subjects.Where(subject => subject.Type == SubjectType.Entity
+            && subject.Names.Any(name => name.FullName == subject.PrimaryName && name.Script == NameScript.Latin)).ToList();
         var rows = new List<(string? Receiver, string? Company, string? Address, string Kind)>(count);
         while (rows.Count < count)
         {
@@ -185,18 +178,7 @@ internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter outpu
     /// the first word ("AAA Corporation": "AAA Inc.", "AAA").</summary>
     private static string Shorten(string name, Random random)
     {
-        static string Bare(string word) => word.Trim('.', ',', '(', ')').Replace(".", string.Empty, StringComparison.Ordinal);
-        var words = name.Replace('"', ' ').Replace('«', ' ').Replace('»', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
-        while (words.Count > 1 && TrailingLegalWords.Contains(Bare(words[^1])))
-        {
-            words.RemoveAt(words.Count - 1);
-        }
-
-        while (words.Count > 1 && LeadingLegalWords.Contains(Bare(words[0])))
-        {
-            words.RemoveAt(0);
-        }
-
+        var words = LegalForms.Strip(name);
         var core = string.Join(' ', words).TrimEnd(',');
         return random.Next(3) switch
         {
@@ -205,7 +187,6 @@ internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter outpu
             _ => words.Count >= 2 && words[0].Trim(',').Length >= 3 ? words[0].Trim(',') : core,
         };
     }
-
     /// <summary>A common surname with initials, half in Cyrillic: the case with the most candidates.</summary>
     private static string Initials(Random random) => random.Next(2) == 0
         ? $"{CyrillicSurnames[random.Next(CyrillicSurnames.Length)]} {CyrillicGivenNames[random.Next(CyrillicGivenNames.Length)][0]}.{CyrillicGivenNames[random.Next(CyrillicGivenNames.Length)][0]}."
@@ -239,4 +220,51 @@ internal sealed class LoadInputsCommand(ListsDbContext context, TextWriter outpu
 
     private static string Csv(string? value) =>
         value is null ? string.Empty : "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ') + "\"";
+}
+
+/// <summary>Company legal forms for the load test's shortened names (<see cref="LoadInputsCommand"/>).</summary>
+public static class LegalForms
+{
+    // Legal forms as whole phrases (upper case, without dots), longest first: a word goes only as part of one, so
+    // "Public Works LLC" keeps "Public Works" and "Example Limited Liability Company" loses all three words.
+    private static readonly string[][] TrailingLegalForms = [.. new[]
+    {
+        "LIMITED LIABILITY COMPANY", "LIMITED LIABILITY PARTNERSHIP", "JOINT STOCK COMPANY", "PUBLIC LIMITED COMPANY", "PRIVATE LIMITED",
+        "CO LTD", "SDN BHD", "SA DE CV", "PTE LTD", "PVT LTD",
+        "LLC", "LTD", "LIMITED", "INC", "INCORPORATED", "CORP", "CORPORATION", "CO", "COMPANY", "GMBH", "SA", "AG", "JSC", "OJSC", "PJSC", "CJSC",
+        "PLC", "LLP", "BV", "NV", "SRL", "SPA", "OOO", "AO", "TOO", "FZE", "FZCO", "DMCC", "LTDA", "SAS",
+    }.Select(form => form.Split(' ')).OrderByDescending(form => form.Length)];
+
+    // At the start only the phrases and abbreviations that never begin an ordinary name ("Public" or "State" alone stay).
+    private static readonly string[][] LeadingLegalForms = [.. new[]
+    {
+        "OPEN JOINT STOCK COMPANY", "CLOSED JOINT STOCK COMPANY", "PUBLIC JOINT STOCK COMPANY", "PRIVATE JOINT STOCK COMPANY", "JOINT STOCK COMPANY",
+        "FEDERAL STATE UNITARY ENTERPRISE", "STATE UNITARY ENTERPRISE", "LIMITED LIABILITY COMPANY", "LIMITED LIABILITY PARTNERSHIP",
+        "LLC", "JSC", "OJSC", "PJSC", "CJSC", "OOO", "OAO", "ZAO", "PAO", "AO", "TOO",
+    }.Select(form => form.Split(' ')).OrderByDescending(form => form.Length)];
+
+    /// <summary>A company name's words without its legal form at either end (whole phrases, longest first; always at
+    /// least one word left), and without quotes.</summary>
+    public static List<string> Strip(string name)
+    {
+        static string Bare(string word) => word.Trim('.', ',', '(', ')').Replace(".", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
+        var words = name.Replace('"', ' ').Replace('«', ' ').Replace('»', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+
+        // The longest legal-form phrase at that end, if one is there and leaves a word.
+        int Phrase(string[][] forms, bool atEnd) => forms
+            .Where(form => form.Length < words.Count)
+            .FirstOrDefault(form => form.Select((word, i) => Bare(words[atEnd ? words.Count - form.Length + i : i]) == word).All(same => same))?.Length ?? 0;
+
+        for (var length = Phrase(TrailingLegalForms, atEnd: true); length > 0; length = Phrase(TrailingLegalForms, atEnd: true))
+        {
+            words.RemoveRange(words.Count - length, length);
+        }
+
+        for (var length = Phrase(LeadingLegalForms, atEnd: false); length > 0; length = Phrase(LeadingLegalForms, atEnd: false))
+        {
+            words.RemoveRange(0, length);
+        }
+
+        return words;
+    }
 }
