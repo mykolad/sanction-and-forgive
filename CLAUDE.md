@@ -153,7 +153,14 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   (`ADMIN_CLIENT_ID` and `ADMIN_SIGN_IN_READY`: the deploy that creates it leaves the flag off and deploys again;
   `infra/admin-sign-in.ps1`, run by the owner). Reviewing held updates needs the `Lists.Admin` app role and the
   `X-Requested-By: sanction-and-forgive-admin` header (CSRF). `IImportReview` reviews then reloads the lists;
-  `ListLoader.RefreshAsync` runs one at a time. Tests: `AdminTests` (a fake `IImportReview`).
+  `ListLoader.RefreshAsync` runs one at a time. Tests: `AdminTests` (fakes of `IImportReview` and `IListSwitch`).
+- **Switching a list off** (owner's decision 2026-11-09: a person's decision, from the admin page): `Sources`'
+  `SwitchedOffAt`, `SwitchedOffBy`, `SwitchedOffReason` (`Data/SourceSwitch.cs`, one conditional update),
+  `Admin/ListSwitch.cs` (then a reload), `POST /api/v1/admin/lists/{code}/switch-off` (a reason is required) and
+  `…/switch-on`. `LoadedList.SwitchedOff`: not searched (`IsSearched` false), no cells at all (so never `Incomplete`),
+  state `SwitchedOff`, the summary "Not searched: UK (switched off by an administrator: <reason>)", `off` in the audit
+  line. Still imported, shown and browsable, and the allow-list still checks a new entry against it. The person who
+  switched it is logged, never public.
 - **Allow-list** (owner's decision 2026-11-06; `Matching/AllowList.cs`, `Data/AllowListStore.cs`, table
   `AllowListEntries`, `Admin/AllowListAdmin.cs`, `wwwroot/allow-list/`): an entered receiver or company that is an
   allow-listed name (same tokens as screening reads them) has its **Review** cells marked `Allowed`, which don't raise
