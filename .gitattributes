@@ -7,3 +7,10 @@
 
 # Conformance golden files: written by the reference implementation (docs/conformance.md), one JSON per line.
 tests/conformance/golden/** text eol=lf linguist-generated=true
+
+# The matcher dictionaries as LF everywhere: their bytes are hashed into the matcher version, so a Windows checkout
+# (CRLF) would report a different version from the same dictionaries (docs/conformance.md).
+src/SanctionAndForgive.Matching/Data/** text eol=lf
+
+# The Go port: LF, as gofmt writes it.
+ports/go/** text eol=lf

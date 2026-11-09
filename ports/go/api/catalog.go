@@ -1,0 +1,300 @@
+package api
+
+import (
+	"context"
+	"database/sql"
+	"log/slog"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"sanctionandforgive/matching"
+	"sanctionandforgive/store"
+)
+
+// SwitchedOff says when an administrator switched a list off, and why.
+type SwitchedOff struct {
+	At     time.Time
+	Reason string
+}
+
+// LoadedList is one list as the API holds it in memory (LoadedList in the reference).
+type LoadedList struct {
+	Code           string
+	Name           string
+	URL            *string
+	MaxAgeHours    *int
+	ActiveImportID *int
+	LastCheckedAt  *time.Time
+	UpdatedAt      *time.Time
+	RecordCount    int
+	Index          *matching.ListIndex
+	SwitchedOff    *SwitchedOff
+}
+
+// IsSearched: switched on, with an index. Fail closed.
+func (l *LoadedList) IsSearched() bool { return l.SwitchedOff == nil && l.Index != nil }
+
+// IsOverdue: searched, but a feed whose last successful check is older than its allowed age.
+func (l *LoadedList) IsOverdue(now time.Time) bool {
+	return l.IsSearched() && l.MaxAgeHours != nil && (l.LastCheckedAt == nil || now.Sub(*l.LastCheckedAt) > time.Duration(*l.MaxAgeHours)*time.Hour)
+}
+
+// State is Current, Overdue, NotChecked or SwitchedOff.
+func (l *LoadedList) State(now time.Time) string {
+	switch {
+	case l.SwitchedOff != nil:
+		return "SwitchedOff"
+	case !l.IsSearched():
+		return "NotChecked"
+	case l.IsOverdue(now):
+		return "Overdue"
+	}
+	return "Current"
+}
+
+type snapshot struct {
+	lists []*LoadedList
+	ready bool
+}
+
+// Catalog holds one snapshot of the lists, swapped whole, plus the history, held updates and the allow-list.
+type Catalog struct {
+	snapshot  atomic.Pointer[snapshot]
+	history   atomic.Pointer[map[string][]store.HistoryEntry]
+	held      atomic.Pointer[map[string]store.HistoryEntry]
+	allowList atomic.Pointer[matching.AllowList]
+}
+
+func NewCatalog() *Catalog {
+	c := &Catalog{}
+	c.snapshot.Store(&snapshot{})
+	c.history.Store(&map[string][]store.HistoryEntry{})
+	c.held.Store(&map[string]store.HistoryEntry{})
+	c.allowList.Store(matching.EmptyAllowList)
+	return c
+}
+
+func (c *Catalog) IsReady() bool                             { return c.snapshot.Load().ready }
+func (c *Catalog) Lists() []*LoadedList                      { return c.snapshot.Load().lists }
+func (c *Catalog) Replace(lists []*LoadedList)               { c.snapshot.Store(&snapshot{lists, true}) }
+func (c *Catalog) History() map[string][]store.HistoryEntry  { return *c.history.Load() }
+func (c *Catalog) Held() map[string]store.HistoryEntry       { return *c.held.Load() }
+func (c *Catalog) AllowList() *matching.AllowList            { return c.allowList.Load() }
+func (c *Catalog) ReplaceAllowList(list *matching.AllowList) { c.allowList.Store(list) }
+
+// Find returns the loaded list with this code (ignoring case), or nil.
+func (c *Catalog) Find(code string) *LoadedList {
+	for _, list := range c.Lists() {
+		if strings.EqualFold(list.Code, code) {
+			return list
+		}
+	}
+	return nil
+}
+
+// HistoryShown is how many updates GET /api/v1/sources shows per list.
+const HistoryShown = 10
+
+// Loader loads the lists from SQL into the catalog: only lists whose active import changed are rebuilt, one at a time.
+type Loader struct {
+	db      *sql.DB
+	catalog *Catalog
+	logger  *slog.Logger
+	gate    sync.Mutex
+}
+
+func NewLoader(db *sql.DB, catalog *Catalog, logger *slog.Logger) *Loader {
+	return &Loader{db: db, catalog: catalog, logger: logger}
+}
+
+// Refresh reloads the lists; one refresh at a time.
+func (l *Loader) Refresh(ctx context.Context) error {
+	l.gate.Lock()
+	defer l.gate.Unlock()
+	return l.refreshOnce(ctx)
+}
+
+// ReloadAllowList reloads the allow-list only (after an edit), under the refresh gate. With withoutID (a removal),
+// that entry stops applying first.
+func (l *Loader) ReloadAllowList(ctx context.Context, withoutID *int) bool {
+	l.gate.Lock()
+	defer l.gate.Unlock()
+	if withoutID != nil {
+		l.catalog.ReplaceAllowList(l.catalog.AllowList().Without(*withoutID))
+	}
+	return l.tryLoadAllowList(ctx)
+}
+
+// UnderGate runs fn under the refresh gate (an allow-list addition: the lists can't change between check and insert).
+func (l *Loader) UnderGate(fn func()) {
+	l.gate.Lock()
+	defer l.gate.Unlock()
+	fn()
+}
+
+func (l *Loader) tryLoadAllowList(ctx context.Context) bool {
+	if err := l.loadAllowList(ctx); err != nil {
+		l.logger.Warn("Reloading the allow-list after an edit failed; the next refresh retries", "error", err.Error())
+		return false
+	}
+	return true
+}
+
+func (l *Loader) loadAllowList(ctx context.Context) error {
+	entries, version, err := store.AllowListCurrent(ctx, l.db)
+	if err != nil {
+		return err
+	}
+	list := make([]matching.AllowListEntry, len(entries))
+	for i, e := range entries {
+		list[i] = matching.AllowListEntry{ID: e.ID, Name: e.Name, Reason: e.Reason}
+	}
+	l.catalog.ReplaceAllowList(matching.BuildAllowList(list, version))
+	return nil
+}
+
+func (l *Loader) refreshOnce(ctx context.Context) error {
+	sources, err := store.Sources(ctx, l.db)
+	if err != nil {
+		return err
+	}
+	if err := l.loadAllowList(ctx); err != nil {
+		return err
+	}
+	history, err := store.History(ctx, l.db, "")
+	if err != nil {
+		return err
+	}
+	heldEntries, err := store.Held(ctx, l.db)
+	if err != nil {
+		return err
+	}
+	held := map[string]store.HistoryEntry{}
+	for _, h := range heldEntries {
+		if _, seen := held[h.SourceCode]; !seen {
+			held[h.SourceCode] = h
+		}
+	}
+	l.catalog.held.Store(&held)
+	byCode := map[string][]store.HistoryEntry{}
+	for _, h := range history {
+		byCode[h.SourceCode] = append(byCode[h.SourceCode], h)
+	}
+	l.catalog.history.Store(&byCode)
+
+	current := map[string]*LoadedList{}
+	for _, list := range l.catalog.Lists() {
+		current[list.Code] = list
+	}
+	lists := make([]*LoadedList, len(sources))
+	type pendingBuild struct {
+		position int
+		target   *LoadedList
+	}
+	var pending []pendingBuild
+	for i, source := range sources {
+		var switchedOff *SwitchedOff
+		if source.SwitchedOffAt != nil {
+			reason := ""
+			if source.SwitchedOffReason != nil {
+				reason = *source.SwitchedOffReason
+			}
+			switchedOff = &SwitchedOff{*source.SwitchedOffAt, reason}
+		}
+		target := &LoadedList{Code: source.Code, Name: source.Name, URL: source.URL, MaxAgeHours: source.MaxAgeHours, ActiveImportID: source.ActiveImportID,
+			LastCheckedAt: source.LastCheckedAt, UpdatedAt: source.UpdatedAt, RecordCount: source.RecordCount, SwitchedOff: switchedOff}
+		existing := current[source.Code]
+		if existing != nil && equalIDs(existing.ActiveImportID, source.ActiveImportID) && (existing.Index != nil || source.ActiveImportID == nil) {
+			target.Index = existing.Index
+			lists[i] = target
+			continue
+		}
+		if existing == nil {
+			lists[i] = target
+		} else {
+			copy := *existing
+			copy.SwitchedOff = switchedOff
+			lists[i] = &copy
+		}
+		if source.ActiveImportID != nil {
+			pending = append(pending, pendingBuild{i, target})
+		}
+	}
+	for _, p := range pending {
+		if index := l.build(ctx, p.target.Code, *p.target.ActiveImportID, p.target.RecordCount); index != nil {
+			built := *p.target
+			built.Index = index
+			lists[p.position] = &built
+		}
+		if l.catalog.IsReady() {
+			l.catalog.Replace(append([]*LoadedList{}, lists...))
+		}
+	}
+	l.catalog.Replace(lists)
+	return nil
+}
+
+func equalIDs(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func (l *Loader) build(ctx context.Context, code string, importID, expected int) *matching.ListIndex {
+	subjects, err := store.ActiveSubjects(ctx, l.db, code, importID)
+	if err != nil {
+		l.logger.Error("Building the index failed", "code", code, "importId", importID, "error", err.Error())
+		return nil
+	}
+	if subjects == nil || len(subjects) != expected {
+		l.logger.Warn("The import changed while loading; it stays Not checked until the next refresh", "code", code, "importId", importID, "loaded", len(subjects), "expected", expected)
+		return nil
+	}
+	listed := make([]*matching.ListedSubject, len(subjects))
+	for i, s := range subjects {
+		listed[i] = toListed(s)
+	}
+	index := matching.Build(listed)
+	l.logger.Info("Built the index", "code", code, "importId", importID, "subjects", len(subjects), "aliases", index.AliasCount())
+	return index
+}
+
+func toListed(s store.Subject) *matching.ListedSubject {
+	kind := matching.Unknown
+	switch s.Type {
+	case 0:
+		kind = matching.Individual
+	case 1:
+		kind = matching.Entity
+	}
+	names := make([]matching.ListedName, len(s.Names))
+	for i, n := range s.Names {
+		names[i] = matching.ListedName{FullName: n.FullName, IsWeak: n.IsWeak}
+	}
+	addresses := make([]matching.ListedAddress, len(s.Addresses))
+	for i, a := range s.Addresses {
+		code := ""
+		if a.CountryCode != nil {
+			code = strings.TrimSpace(*a.CountryCode)
+		}
+		addresses[i] = matching.ListedAddress{Raw: a.Raw, CountryCode: code}
+	}
+	return &matching.ListedSubject{ExternalID: s.ExternalID, Kind: kind, PrimaryName: s.PrimaryName, Names: names, Addresses: addresses, Programme: s.Programmes, SourceURL: s.SourceURL}
+}
+
+// RunRefresh loads the lists at startup, then every interval.
+func (l *Loader) RunRefresh(ctx context.Context, interval time.Duration) {
+	for {
+		if err := l.Refresh(ctx); err != nil && ctx.Err() == nil {
+			l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has", "error", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
