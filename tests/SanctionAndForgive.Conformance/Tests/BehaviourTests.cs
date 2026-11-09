@@ -174,29 +174,34 @@ public sealed class BehaviourTests
     [ConformanceFact]
     public async Task WhatWasEntered_IsNeverLogged_ButEachScreeningIsAudited_ByReference()
     {
-        if (Settings.ApiLog is not { } log)
+        if (Settings.ApiLogs.Count == 0)
         {
             return;
         }
 
         await Suite.ReadyAsync();
-        var reference = $"audit-{Guid.NewGuid():N}"[..24];
+        var run = Guid.NewGuid().ToString("N")[..16];
+        var single = $"single-{run}";
+        var streamed = $"stream-{run}";
 
-        await Suite.ScreenAsync(new { reference, receiverName = "Qwertyuiop Logmarker", companyName = "Asdfghjkl Logmarker LLC", address = "Zxcvbnm Street 1, Logmarkertown" });
-        await Suite.StreamAsync([new { reference = reference + "s", receiverName = "Qwertyuiop Logmarker" }]);
+        await Suite.ScreenAsync(new { reference = single, receiverName = "Qwertyuiop Logmarker", companyName = "Asdfghjkl Logmarker LLC", address = "Zxcvbnm Street 1, Logmarkertown" });
+        await Suite.StreamAsync([new { reference = streamed, receiverName = "Qwertyuiop Logmarker" }]);
         await Task.Delay(1000);
 
-        // The implementation still has the file open: read it shared.
-        string text;
-        await using (var file = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-        using (var reader = new StreamReader(file))
+        // Standard output and error both: input logged to either is a leak. The files are still open: read them shared.
+        var text = new StringBuilder();
+        foreach (var log in Settings.ApiLogs.Where(File.Exists))
         {
-            text = await reader.ReadToEndAsync();
+            await using var file = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(file);
+            text.Append(await reader.ReadToEndAsync()).Append('\n');
         }
 
-        Assert.Contains(reference, text, StringComparison.Ordinal);
-        Assert.Contains(reference + "s", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("Logmarker", text, StringComparison.Ordinal);
-        Assert.DoesNotContain("Qwertyuiop", text, StringComparison.Ordinal);
+        // One audit line per screening ("Screening <reference>: <outcome>; …", docs/api.md), under its own reference.
+        var lines = text.ToString().Split('\n');
+        Assert.Single(lines, line => line.Contains($"Screening {single}:", StringComparison.Ordinal));
+        Assert.Single(lines, line => line.Contains($"Screening {streamed}:", StringComparison.Ordinal));
+        Assert.DoesNotContain("Logmarker", text.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Qwertyuiop", text.ToString(), StringComparison.Ordinal);
     }
 }

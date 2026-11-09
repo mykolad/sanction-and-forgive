@@ -89,7 +89,7 @@ try {
     $env:CONFORMANCE_CLI = $cli
     $env:CONFORMANCE_FEEDS = $feeds
     $env:CONFORMANCE_CLI_FEEDS = '/feeds'
-    $env:CONFORMANCE_API_LOG = $log
+    $env:CONFORMANCE_API_LOG = "$log;$log.err"
     $env:CONFORMANCE_UPDATE_GOLDEN = if ($UpdateGolden) { '1' } else { '' }
     dotnet test (Join-Path $root 'tests/SanctionAndForgive.Conformance') --logger 'console;verbosity=normal' @TestArguments
     $result = $LASTEXITCODE

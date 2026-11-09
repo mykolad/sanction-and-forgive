@@ -34,8 +34,11 @@ public static class Settings
     /// <c>/feeds</c>).</summary>
     public static string CliFeeds => Environment.GetEnvironmentVariable("CONFORMANCE_CLI_FEEDS") is { Length: > 0 } feeds ? feeds : Feeds;
 
-    /// <summary>Optional: a file the API's console output goes to, for the logging checks.</summary>
-    public static string? ApiLog => Environment.GetEnvironmentVariable("CONFORMANCE_API_LOG") is { Length: > 0 } log ? log : null;
+    /// <summary>Optional: the files the API's console output goes to (standard output and error, separated by
+    /// <c>;</c>), for the logging checks.</summary>
+    public static IReadOnlyList<string> ApiLogs => Environment.GetEnvironmentVariable("CONFORMANCE_API_LOG") is { Length: > 0 } logs
+        ? logs.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        : [];
 
     /// <summary>Set to 1 to write the golden files from this implementation instead of comparing with them.</summary>
     public static bool UpdateGolden => Environment.GetEnvironmentVariable("CONFORMANCE_UPDATE_GOLDEN") == "1";
@@ -126,7 +129,8 @@ public static class Suite
     public static IReadOnlyList<FixtureSubject> ManualSubjects => Fixtures.For(FeedFiles.ManualCode, 25);
 
     /// <summary>Imports every feed's base file and the manual CSV (unchanged ones only move their last check), then
-    /// waits until the API serves exactly that: every list Current, nothing switched off, no allow-list entry.</summary>
+    /// waits until the API serves exactly that: every list Current at the import now active in the database (its
+    /// version), with the base record count and no update held, nothing switched off, no allow-list entry.</summary>
     public static async Task RestoreBaseAsync()
     {
         foreach (var (code, _) in FeedFiles.Feeds)
@@ -140,13 +144,24 @@ public static class Suite
         var manual = await CliAsync($"add --source {FeedFiles.ManualCode} --file {Quote(ManualPath("base"))}");
         Assert.True(manual.ExitCode == 0, $"add: exit {manual.ExitCode}{Environment.NewLine}{manual.Output}");
 
+        var active = new Dictionary<string, int>(StringComparer.Ordinal);
         await using (var connection = await OpenSqlAsync())
         {
             await ExecuteAsync(connection, "UPDATE Sources SET SwitchedOffAt = NULL, SwitchedOffBy = NULL, SwitchedOffReason = NULL WHERE SwitchedOffAt IS NOT NULL");
+            await using var command = new SqlCommand("SELECT Code, ActiveImportId FROM Sources WHERE ActiveImportId IS NOT NULL", connection);
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                active[reader.GetString(0)] = reader.GetInt32(1);
+            }
         }
 
-        await WaitForListsAsync(lists => FeedFiles.Feeds.All(feed => lists.TryGetValue(feed.Code, out var list) && list.GetProperty("state").GetString() == "Current")
-            && lists.TryGetValue(FeedFiles.ManualCode, out var manualList) && manualList.GetProperty("state").GetString() == "Current"
+        var expected = FeedFiles.Feeds.Append((FeedFiles.ManualCode, ManualSubjects.Count)).ToList();
+        await WaitForListsAsync(lists => expected.All(feed => lists.TryGetValue(feed.Item1, out var list)
+                && list.GetProperty("state").GetString() == "Current"
+                && list.GetProperty("version").ValueKind == JsonValueKind.Number && list.GetProperty("version").GetInt32() == active[feed.Item1]
+                && list.GetProperty("recordCount").GetInt32() == feed.Item2
+                && (!list.TryGetProperty("held", out var held) || held.ValueKind == JsonValueKind.Null))
             && lists.Values.All(list => list.GetProperty("state").GetString() is "Current" or "NotImported"));
         await RemoveAllowListEntriesAsync();
     }

@@ -79,7 +79,8 @@ The suite reads and sets the database directly only where the API can't, for exa
   - the stream's framing, errors and record limit;
   - each list's full history with change counts;
   - sign-in from the platform's header;
-  - with `CONFORMANCE_API_LOG`, that a screening is audited by reference and its input never logged.
+  - with `CONFORMANCE_API_LOG` (the API's standard output and error files, separated by `;`), that each screening
+    has exactly one audit line under its reference and its input is in neither.
 - **Changes**, each put back afterwards:
   - who may switch lists, review updates and edit the allow-list;
   - switching a list off and on;

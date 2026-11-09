@@ -351,6 +351,8 @@ public sealed class ChangeTests
         }
         finally
         {
+            // Adding upserts, so restoring the base CSV wouldn't take the extra record out: remove it (again) first.
+            await Suite.CliAsync($"remove --source {FeedFiles.ManualCode} --external-id M-{extra.Number}");
             await Suite.RestoreBaseAsync();
         }
     }
