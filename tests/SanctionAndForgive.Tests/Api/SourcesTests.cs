@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using SanctionAndForgive.Lists;
 using SanctionAndForgive.Api.Lists;
+using SanctionAndForgive.Lists;
 using SanctionAndForgive.Matching;
 using static SanctionAndForgive.Tests.Api.ApiFactory;
 
