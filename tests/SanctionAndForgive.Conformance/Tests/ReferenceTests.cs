@@ -72,6 +72,12 @@ public sealed class ReferenceTests(ITestOutputHelper output)
         var (expected, expectedTime) = await StreamAsync(Reference, ndjson);
 
         output.WriteLine($"{names.Count} names; {requests.Count} screenings: {actualTime.TotalMilliseconds / requests.Count:F2} ms each here, {expectedTime.TotalMilliseconds / requests.Count:F2} ms in the reference");
+
+        // One answer per request on both sides, and every one a screening: a rejected or missing record can't quietly
+        // shrink the comparison.
+        Assert.Equal(requests.Count, expected.Count);
+        Assert.Equal(requests.Count, actual.Count);
+        Assert.All(expected, line => Assert.Equal("result", line?["type"]?.GetValue<string>()));
         var differences = expected.Zip(actual)
             .Where(pair => !JsonNode.DeepEquals(pair.First, pair.Second))
             .Select(pair => $"{pair.First?["reference"]}: {GoldenFiles.Difference(pair.First, pair.Second, "$")}")
@@ -88,7 +94,9 @@ public sealed class ReferenceTests(ITestOutputHelper output)
         var text = await response.Content.ReadAsStringAsync();
         clock.Stop();
         Assert.True(response.IsSuccessStatusCode, $"Stream: {(int)response.StatusCode}");
-        var results = text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonNode.Parse(line)).Where(line => line?["type"]?.GetValue<string>() == "result").ToList();
+        // Every per-record answer, errors included: two implementations could reject a record differently.
+        var results = text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonNode.Parse(line))
+            .Where(line => line?["type"]?.GetValue<string>() is "result" or "error").ToList();
         var end = JsonNode.Parse(text.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1]);
         Assert.False(end?["truncated"]?.GetValue<bool>(), "The stream stopped at its limit: raise Screening__StreamMaxRecords to 2000 or more.");
         return (results, clock.Elapsed);
