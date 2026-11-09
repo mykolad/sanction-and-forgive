@@ -1,0 +1,97 @@
+{
+  "state": "ready",
+  "version": "*",
+  "matcherVersion": "*",
+  "lists": [
+    {
+      "code": "ca-sema",
+      "name": "Canada autonomous sanctions (SEMA)",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 70,
+      "url": "https://www.international.gc.ca/world-monde/assets/office_docs/international_relations-relations_internationales/sanctions/sema-lmes.xml"
+    },
+    {
+      "code": "ch-seco",
+      "name": "Switzerland SECO",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 90,
+      "url": "https://www.sesam.search.admin.ch/sesam-search-web/pages/downloadXmlGesamtliste.xhtml?lang=en&action=downloadXmlGesamtlisteAction"
+    },
+    {
+      "code": "conformance-manual",
+      "name": "Conformance manual list",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 25,
+      "url": null
+    },
+    {
+      "code": "eu",
+      "name": "EU consolidated financial sanctions",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 160,
+      "url": "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
+    },
+    {
+      "code": "ofac-cons",
+      "name": "OFAC consolidated (non-SDN)",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 60,
+      "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_ENHANCED.XML"
+    },
+    {
+      "code": "ofac-sdn",
+      "name": "OFAC SDN",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 200,
+      "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN_ENHANCED.XML"
+    },
+    {
+      "code": "ua-sfms",
+      "name": "Ukraine SFMS terrorism list",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 50,
+      "url": "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml"
+    },
+    {
+      "code": "uk",
+      "name": "UK Sanctions List",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 140,
+      "url": "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.xml"
+    },
+    {
+      "code": "un",
+      "name": "UN Security Council consolidated",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 80,
+      "url": "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
+    },
+    {
+      "code": "us-export",
+      "name": "US export screening (BIS, State)",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 120,
+      "url": "https://data.trade.gov/downloadable_consolidated_screening_list/v1/consolidated.json"
+    }
+  ]
+}

@@ -218,12 +218,13 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
 }
 
 /// <summary>Loads the lists at startup (in the background: the API listens at once and answers 503 until then),
-/// then checks every <c>Lists:RefreshMinutes</c> (15) for changed imports and fresher check times.</summary>
+/// then checks every <c>Lists:RefreshMinutes</c> (15) for changed imports and fresher check times. A fraction is
+/// allowed: the conformance run uses 0.05 (3 seconds) so it sees each change it makes without waiting.</summary>
 public sealed class ListRefreshService(ListLoader loader, IConfiguration configuration, ILogger<ListRefreshService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var interval = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15));
+        var interval = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
         while (!stoppingToken.IsCancellationRequested)
         {
             try

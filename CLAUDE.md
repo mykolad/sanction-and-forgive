@@ -43,6 +43,7 @@ src/SanctionAndForgive.Data       EF Core DbContext, entities, migrations, repos
 src/SanctionAndForgive.Cli        Console app: imports, manual records, probe, evaluate
 tests/SanctionAndForgive.Tests        xUnit: matching golden tests, parser tests on small fixtures, HTTP tests
 tests/SanctionAndForgive.SmokeTests   Run against the deployed app by the deploy workflow
+tests/SanctionAndForgive.Conformance  Black-box suite for any implementation (any language); golden files in tests/conformance
 tests/load                k6 script and input generator
 infra/                    Bicep (infra/README.md)
 tools/lists.ps1           The script the owner runs to manage lists
@@ -195,6 +196,19 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   working set reached the limit under load, `docs/load-test.md`); a larger size is the owner's decision too.
 - **Tests:** `Api/ApiTests.cs` with `ApiFactory` (the real `Program`, environment `Testing`, refresh off, a fake clock,
   a database that counts connection attempts).
+
+## Conformance suite (`docs/conformance.md`)
+
+The owner's experiment (2026-11-09): port the whole application to Go, then Rust, one deployed at a time, and compare.
+`tests/SanctionAndForgive.Conformance` tests an implementation as a black box through its HTTP API, its CLI and the
+shared database, references no app project, and compares with golden files from the .NET reference
+(`tests/conformance/golden`): 600 screenings through the stream, 60 single ones, the catalogue, browsing. Then
+behaviour, then changes that it puts back. Fictional feeds in all nine formats come from a fixed seed (`Feeds/`).
+`tests/conformance/run.ps1` builds the image, makes a fresh database, starts the API with the conformance settings
+(`Lists__RefreshMinutes=0.05`, rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
+containers from the same image, and runs the suite. CI job `conformance`, not required. A change in what the reference
+answers updates the golden files in the same PR (`run.ps1 -Build -UpdateGolden`, review the diff); another
+implementation never rewrites them.
 
 ## Docker
 
