@@ -90,6 +90,19 @@ public sealed class FeedDownloaderTests : IDisposable
         Assert.Equal(3, server.Requests);
     }
 
+    [Fact]
+    public async Task AWaitThatOverrunsTheBudget_StartsNoFurtherAttempt()
+    {
+        // Each attempt takes 3 minutes. The second wait, 30 s from 6:15, is allowed (6:45), but it overruns by 4 minutes
+        // to 10:45: past the budget, so the third attempt never starts.
+        time.Overrun = [TimeSpan.Zero, TimeSpan.FromMinutes(4)];
+        var server = new FakeServer(time, [.. Enumerable.Repeat<HttpStatusCode?>(HttpStatusCode.InternalServerError, 10)]) { Takes = TimeSpan.FromMinutes(3) };
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => Downloader(server).DownloadAsync("eu", Url, CancellationToken.None));
+
+        Assert.Equal(2, server.Requests);
+    }
+
     /// <summary>Answers each request with the next status (null: the connection breaks), "&lt;list /&gt;" on 200.</summary>
     private sealed class FakeServer(InstantTime time, params HttpStatusCode?[] answers) : HttpMessageHandler
     {
@@ -114,6 +127,9 @@ public sealed class FeedDownloaderTests : IDisposable
 
         public List<TimeSpan> Waits { get; } = [];
 
+        /// <summary>How much longer than asked each wait takes, in turn (a timer only promises a minimum).</summary>
+        public List<TimeSpan> Overrun { get; set; } = [];
+
         public void Pass(TimeSpan span) => ticks += span.Ticks;
 
         public override long TimestampFrequency => TimeSpan.TicksPerSecond;
@@ -123,7 +139,7 @@ public sealed class FeedDownloaderTests : IDisposable
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
             Waits.Add(dueTime);
-            Pass(dueTime);
+            Pass(dueTime + (Waits.Count <= Overrun.Count ? Overrun[Waits.Count - 1] : TimeSpan.Zero));
             ThreadPool.QueueUserWorkItem(_ => callback(state));
             return new Fired();
         }

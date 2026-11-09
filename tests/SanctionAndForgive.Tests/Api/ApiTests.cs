@@ -73,7 +73,7 @@ public sealed class ApiTests : IDisposable
         var row = result.GetProperty("lists").EnumerateArray().Single(list => list.GetProperty("code").GetString() == "uk");
         Assert.Equal("Overdue", row.GetProperty("state").GetString());
         Assert.EndsWith(
-            "Warning: UK couldn't be updated within 72 hours and was searched as of 3 Nov 2026 04:00 UTC.",
+            "Warning: couldn't be updated within 72 hours, so searched as last downloaded: UK, as of 3 Nov 2026 04:00 UTC.",
             result.GetProperty("summary").GetString(),
             StringComparison.Ordinal);
         Assert.Equal("eu", result.GetProperty("lists")[0].GetProperty("code").GetString());
@@ -94,7 +94,7 @@ public sealed class ApiTests : IDisposable
         var row = result.GetProperty("lists").EnumerateArray().Single(list => list.GetProperty("code").GetString() == "uk");
         Assert.Equal("SwitchedOff", row.GetProperty("state").GetString());
         Assert.Equal(
-            "No match found in: EU, as of 6 Nov 2026 10:00 UTC. Not searched: UK (switched off by an administrator: The file is known to be wrong.).",
+            "No match found in: EU, as of 6 Nov 2026 10:00 UTC. Not searched: UK (switched off by an administrator: The file is known to be wrong).",
             result.GetProperty("summary").GetString());
         var audit = Assert.Single(factory.Logs.GetSnapshot(), record => record.Message.Contains("TX-OFF-1", StringComparison.Ordinal));
         Assert.Matches(@"uk@\S+ off", audit.Message);
@@ -110,7 +110,7 @@ public sealed class ApiTests : IDisposable
         Assert.Equal("Match", result.GetProperty("outcome").GetString());
         Assert.Equal("Match", Cell(result, "uk").GetProperty("outcome").GetString());
         Assert.Contains("Possible match on UK.", result.GetProperty("summary").GetString(), StringComparison.Ordinal);
-        Assert.Contains("Warning: UK couldn't be updated", result.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Warning: couldn't be updated within 72 hours, so searched as last downloaded: UK,", result.GetProperty("summary").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -127,7 +127,7 @@ public sealed class ApiTests : IDisposable
         Assert.DoesNotContain("not sanctioned", summary, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Warning", summary, StringComparison.Ordinal);
         Assert.Equal("NoMatch", stale.GetProperty("outcome").GetString());
-        Assert.Contains("UK, as of 3 Nov 2026 04:00 UTC. Warning: UK couldn't be updated within 72 hours", stale.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.EndsWith("UK, as of 3 Nov 2026 04:00 UTC. Warning: couldn't be updated within 72 hours, so searched as last downloaded: UK, as of 3 Nov 2026 04:00 UTC.", stale.GetProperty("summary").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

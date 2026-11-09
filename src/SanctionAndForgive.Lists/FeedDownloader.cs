@@ -59,6 +59,12 @@ public sealed class FeedDownloader(HttpClient httpClient, TimeSpan timeout, Down
                 await log.WriteLineAsync(string.Create(CultureInfo.InvariantCulture,
                     $"{source}: download attempt {attempt} of {retry.Delays.Count + 1} got {Describe(exception)}; trying again in {delay.TotalSeconds:N0} s."));
                 await Task.Delay(delay, time, cancellationToken);
+
+                // A delay is a minimum: if it overran the budget, no attempt starts after it.
+                if (time.GetElapsedTime(started) > retry.Budget)
+                {
+                    throw;
+                }
             }
         }
     }

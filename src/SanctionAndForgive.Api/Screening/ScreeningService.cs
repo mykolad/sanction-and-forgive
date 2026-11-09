@@ -122,13 +122,14 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
     {
         var checkedLists = lists.Where(list => list.IsSearched).Select(list => $"{list.Name}, as of {AsOf(list.LastCheckedAt)}").ToList();
         var notChecked = lists.Where(list => list.SwitchedOff is null && !list.IsSearched).Select(list => list.Name).ToList();
-        var switchedOff = lists.Where(list => list.SwitchedOff is not null).Select(list => $"{list.Name} (switched off by an administrator: {list.SwitchedOff!.Reason})").ToList();
-        var overdue = lists.Where(list => list.IsOverdue(now))
-            .Select(list => string.Create(CultureInfo.InvariantCulture, $"{list.Name} couldn't be updated within {list.MaxAgeHours} hours and was searched as of {AsOf(list.LastCheckedAt)}"))
-            .ToList();
+        // The administrator's reason in brackets, without its own final full stop.
+        var switchedOff = lists.Where(list => list.SwitchedOff is not null).Select(list => $"{list.Name} (switched off by an administrator: {list.SwitchedOff!.Reason.TrimEnd('.')})").ToList();
+        // One sentence per allowed age (72 hours for every daily list), naming each list that couldn't be updated in it.
+        var overdue = lists.Where(list => list.IsOverdue(now)).GroupBy(list => list.MaxAgeHours)
+            .Select(group => string.Create(CultureInfo.InvariantCulture, $" Warning: couldn't be updated within {group.Key} hours, so searched as last downloaded: {string.Join("; ", group.Select(list => $"{list.Name}, as of {AsOf(list.LastCheckedAt)}"))}."));
         var gap = (notChecked.Count > 0 ? $" Not checked: {string.Join(", ", notChecked)}." : string.Empty)
             + (switchedOff.Count > 0 ? $" Not searched: {string.Join("; ", switchedOff)}." : string.Empty)
-            + (overdue.Count > 0 ? $" Warning: {string.Join("; ", overdue)}." : string.Empty);
+            + string.Concat(overdue);
         var hits = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Outcome is Outcome.Match or Outcome.Review && !cell.Allowed)
             .Select(cell => lists.First(list => list.Code == cell.List).Name).Distinct().ToList();
         var allowedOn = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Allowed)
