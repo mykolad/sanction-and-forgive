@@ -1,0 +1,4 @@
+# Copied from the .NET projects by build.ps1 and the Dockerfile: their single source of truth.
+matching/data/
+api/wwwroot/
+bin/

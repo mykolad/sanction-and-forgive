@@ -144,12 +144,23 @@ jobs:
         env:
           SQLSERVER_TEST_CONNECTION: ${{ env.SQL_SERVER }}
         run: dotnet test tests/SanctionAndForgive.Tests -c Release --no-build --filter "FullyQualifiedName~SanctionAndForgive.Tests.Data|FullyQualifiedName~ListLoaderTests" --logger "console;verbosity=normal"
-  # The conformance suite (docs/conformance.md): the image built from this commit, run as a black box with a fresh
-  # database, compared with the golden files. Not a required check yet: it's the yardstick for other implementations.
+  # The conformance suite (docs/conformance.md): each implementation's image built from this commit, run as a black
+  # box with a fresh database, compared with the golden files. Not a required check yet: it's the yardstick for the
+  # implementations in other languages (ports/).
   conformance:
-    name: conformance
+    name: conformance (${{ matrix.implementation }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - implementation: dotnet
+            dockerfile: Dockerfile
+            cli: '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll'
+          - implementation: go
+            dockerfile: ports/go/Dockerfile
+            cli: '--entrypoint /app/cli {image}'
 
     services:
       sqlserver:
@@ -178,4 +189,6 @@ jobs:
 
       - name: Conformance suite
         shell: pwsh
-        run: ./tests/conformance/run.ps1 -Build -SqlServer 'localhost,1433' -ContainerSqlServer 'host.docker.internal,1433'
+        run: >-
+          ./tests/conformance/run.ps1 -Build -Image 'conformance-${{ matrix.implementation }}' -Dockerfile '${{ matrix.dockerfile }}'
+          -CliCommand '${{ matrix.cli }}' -SqlServer 'localhost,1433' -ContainerSqlServer 'host.docker.internal,1433'

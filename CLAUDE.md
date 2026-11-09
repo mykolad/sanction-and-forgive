@@ -44,6 +44,7 @@ src/SanctionAndForgive.Cli        Console app: imports, manual records, probe, e
 tests/SanctionAndForgive.Tests        xUnit: matching golden tests, parser tests on small fixtures, HTTP tests
 tests/SanctionAndForgive.SmokeTests   Run against the deployed app by the deploy workflow
 tests/SanctionAndForgive.Conformance  Black-box suite for any implementation (any language); golden files in tests/conformance
+ports/go                  The whole application in Go (ports/go/README.md): passes the conformance suite
 tests/load                k6 script and input generator
 infra/                    Bicep (infra/README.md)
 tools/lists.ps1           The script the owner runs to manage lists
@@ -208,7 +209,10 @@ behaviour, then changes that it puts back. Fictional feeds in all nine formats c
 (`Lists__RefreshMinutes=0.05`, rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
 containers from the same image, and runs the suite. CI job `conformance`, not required. A change in what the reference
 answers updates the golden files in the same PR (`run.ps1 -Build -UpdateGolden`, review the diff); another
-implementation never rewrites them.
+implementation never rewrites them. **A change to the .NET app is a change to every port** (`ports/go`): the CI job
+runs the suite against each, so a behaviour change lands in all of them in the same PR, or the port's job fails.
+The dictionaries and `wwwroot` are copied into the ports at build time; never edit copies. The dictionaries are LF
+in every checkout (`.gitattributes`): their bytes are hashed into the matcher version.
 
 ## Docker
 

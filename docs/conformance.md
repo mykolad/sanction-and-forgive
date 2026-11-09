@@ -35,6 +35,15 @@ The script:
 
 A plain `dotnet test` of the solution skips every conformance test: they need `CONFORMANCE_BASE_URL`.
 
+## Implementations
+
+| Implementation | Where | Image | CLI in the image | Conformance |
+|---|---|---|---|---|
+| .NET (reference) | `src/` | `Dockerfile`, 356 MB | `dotnet SanctionAndForgive.Cli.dll` | 23 of 23 |
+| Go | `ports/go/` | `ports/go/Dockerfile`, 68 MB | `/app/cli` | 23 of 23 |
+
+The CI job `conformance` runs the suite against each of them on every pull request.
+
 ## What an implementation must provide
 
 **One image**: the API on port 8080 as its entry point, and the CLI in the same image (the job runs it with another
@@ -113,6 +122,27 @@ Everything else must match exactly. A failure names the input and the first diff
 - Entra ID itself (the platform's job);
 - `probe`, `evaluate` and `load-inputs`;
 - speed, which the load test covers (`docs/load-test.md`).
+
+## Against the reference, on real lists
+
+The fictional lists can't hold every quirk of real data. With `CONFORMANCE_REFERENCE_URL` set to the reference
+(.NET) running against the same database as the implementation under test, `ReferenceTests` builds 2,000 screenings
+from that database's own lists (names as listed, in lower case, with a letter dropped, and ordinary names with an
+address) and compares every result with the reference's, field for field. Against a copy of the real lists it found
+two things the golden set didn't: .NET's invariant casing leaves the Turkish `İ` and `ı` as they are, and Go's
+`math.Log` differs from the C library's in the last bit for some arguments, which turned a 99% into a 98% on a band's
+edge (the Go image now calls the C library's `log`, as .NET does). Run it with both images on the real lists:
+
+```powershell
+$cs = "Server=host.docker.internal,14333;Database=sanctions_local;User ID=sa;Password=Throwaway-container-2026!;TrustServerCertificate=True"
+docker run -d --name ref --add-host=host.docker.internal:host-gateway -p 5299:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive:conformance
+docker run -d --name go --add-host=host.docker.internal:host-gateway -p 5399:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive-go:conformance
+$env:CONFORMANCE_BASE_URL = 'http://localhost:5399'; $env:CONFORMANCE_REFERENCE_URL = 'http://localhost:5299'
+dotnet test tests/SanctionAndForgive.Conformance --filter FullyQualifiedName~ReferenceTests
+```
+
+It also prints each one's time per screening, one stream at a time. On the real lists (2026-11-09, both as Linux
+containers on one desktop): .NET 14.3 ms, Go 16.5 ms; about 350 MiB of memory each with all ten lists loaded.
 
 ## Changing the golden files
 

@@ -8,14 +8,19 @@
   ./tests/conformance/run.ps1 -Build
 
 .EXAMPLE
+  # The Go implementation (ports/go), its CLI at /app/cli in the image:
+  ./tests/conformance/run.ps1 -Build -Image sanction-and-forgive-go:conformance -Dockerfile ports/go/Dockerfile -CliCommand '--entrypoint /app/cli {image}'
+
+.EXAMPLE
   # Rewrite the golden files from the reference implementation after a deliberate change (review the diff):
   ./tests/conformance/run.ps1 -Build -UpdateGolden
 #>
 param(
     # The image to test. Its entry point serves the API on 8080; -CliCommand runs its CLI.
     [string] $Image = 'sanction-and-forgive:conformance',
-    # Build $Image from this repository's Dockerfile first.
+    # Build $Image from this repository first, with -Dockerfile (the .NET implementation's by default).
     [switch] $Build,
+    [string] $Dockerfile = 'Dockerfile',
     # How the CLI is started inside the image (the .NET image: dotnet SanctionAndForgive.Cli.dll).
     [string] $CliCommand = '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll',
     # SQL Server as this machine reaches it, and as the containers do.
@@ -42,7 +47,7 @@ $hostConnection = "Server=$SqlServer;Database=$Database;User ID=sa;Password=$Sql
 $containerConnection = "Server=$ContainerSqlServer;Database=$Database;User ID=sa;Password=$SqlPassword;TrustServerCertificate=True"
 
 if ($Build) {
-    docker build -t $Image --build-arg VERSION=conformance $root
+    docker build -f (Join-Path $root $Dockerfile) -t $Image --build-arg VERSION=conformance $root
     if ($LASTEXITCODE -ne 0) { throw 'docker build failed.' }
 }
 
