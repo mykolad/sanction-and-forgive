@@ -30,7 +30,8 @@ public sealed record ScreeningResponse(
 }
 
 /// <param name="State"><c>Current</c>; <c>Overdue</c> (searched as last downloaded, but not updated within its allowed
-/// age: the summary warns); or <c>NotChecked</c> (not loaded, or its load failed: no percentage).</param>
+/// age: the summary warns); <c>NotChecked</c> (not loaded, or its load failed: no percentage); or <c>SwitchedOff</c>
+/// (by an administrator: not searched, and its entries have no cell for it; the summary says why).</param>
 /// <param name="AsOf">The list's last successful check.</param>
 /// <param name="Version">The import the answer was computed from (immutable: a changed list is a new import).</param>
 public sealed record ListResponse(string Code, string Name, DateTimeOffset? AsOf, string State, int? Version, int RecordCount, string? Url)

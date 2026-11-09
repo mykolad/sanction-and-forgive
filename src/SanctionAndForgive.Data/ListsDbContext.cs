@@ -26,6 +26,8 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
             source.HasIndex(s => s.Code).IsUnique();
             source.Property(s => s.Name).HasMaxLength(200);
             source.Property(s => s.Url).HasMaxLength(1000);
+            source.Property(s => s.SwitchedOffBy).HasMaxLength(256);
+            source.Property(s => s.SwitchedOffReason).HasMaxLength(SourceSwitch.MaxReason);
             source.HasMany(s => s.Imports).WithOne(i => i.Source).HasForeignKey(i => i.SourceId).OnDelete(DeleteBehavior.Cascade);
             source.HasOne(s => s.ActiveImport).WithMany().HasForeignKey(s => s.ActiveImportId).OnDelete(DeleteBehavior.NoAction);
         });

@@ -4,13 +4,14 @@ using SanctionAndForgive.Data;
 
 namespace SanctionAndForgive.Api.Controllers;
 
-/// <summary><c>/api/v1/admin</c>: who is signed in, reviewing list updates held for review, and the allow-list.
+/// <summary><c>/api/v1/admin</c>: who is signed in, reviewing list updates held for review, switching lists off and
+/// on, and the allow-list.
 /// Sign-in is Container Apps' built-in Microsoft Entra ID authentication (<see cref="AdminAccess"/>); everything but
 /// <c>me</c> needs the <see cref="AdminAccess.Role"/> app role, and every change the site's own request header.
 /// Screening never needs sign-in.</summary>
 [ApiController]
 [Route("api/v1/admin")]
-public sealed partial class AdminController(AdminAccess access, IImportReview review, IAllowListAdmin allowList, ILogger<AdminController> logger) : ControllerBase
+public sealed partial class AdminController(AdminAccess access, IImportReview review, IAllowListAdmin allowList, IListSwitch lists, ILogger<AdminController> logger) : ControllerBase
 {
     private const string SignInPath = "/.auth/login/aad?post_login_redirect_uri=/admin";
 
@@ -18,6 +19,8 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
 
     // A key is a source code (up to 32 characters), a slash and an external id (up to 200): room to spare.
     private const int MaxKey = 256;
+
+    private const int SourceCodeMaxLength = 32;
 
     [HttpGet("me")]
     public AdminMeResponse Me()
@@ -33,6 +36,60 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
     /// <summary>Discards a held update; the active list stays.</summary>
     [HttpPost("imports/{importId:int}/reject")]
     public Task<IActionResult> Reject(int importId, CancellationToken cancellationToken) => ReviewAsync(importId, confirm: false, cancellationToken);
+
+    /// <summary>Switches a list off: it isn't searched (results say so, with the reason), but it's still imported,
+    /// shown and browsable. 409 if it's already off.</summary>
+    [HttpPost("lists/{code}/switch-off")]
+    public async Task<IActionResult> SwitchOff(string code, ListSwitchOffRequest body, CancellationToken cancellationToken)
+    {
+        if (Refuse(change: true, out var user) is { } refusal)
+        {
+            return refusal;
+        }
+
+        if (body.Reason?.Trim() is not { Length: > 0 and <= SourceSwitch.MaxReason })
+        {
+            return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>(StringComparer.Ordinal)
+            {
+                [nameof(body.Reason)] = [$"1 to {SourceSwitch.MaxReason} characters: why it's switched off. Every result shows it."],
+            }));
+        }
+
+        return await SwitchAsync(code, off: true, body.Reason.Trim(), user!, cancellationToken);
+    }
+
+    /// <summary>Switches a list on again: searched from the next screening. 409 if it's already on.</summary>
+    [HttpPost("lists/{code}/switch-on")]
+    public async Task<IActionResult> SwitchOn(string code, CancellationToken cancellationToken)
+    {
+        if (Refuse(change: true, out var user) is { } refusal)
+        {
+            return refusal;
+        }
+
+        return await SwitchAsync(code, off: false, reason: null, user!, cancellationToken);
+    }
+
+    private async Task<IActionResult> SwitchAsync(string code, bool off, string? reason, AdminUser user, CancellationToken cancellationToken)
+    {
+        if (code.Length > SourceCodeMaxLength)
+        {
+            return NotFound();
+        }
+
+        var outcome = await lists.SwitchAsync(code, off, reason, user.Name, cancellationToken);
+        if (outcome.Result == SwitchResult.Switched)
+        {
+            ListSwitched(logger, code, off ? "off" : "on", user.Name);
+        }
+
+        return outcome.Result switch
+        {
+            SwitchResult.Switched => Ok(new ListSwitchResponse(code, off ? "SwitchedOff" : "On", outcome.Reloaded)),
+            SwitchResult.NotFound => NotFound(),
+            _ => Conflict(new ListSwitchResponse(code, off ? "AlreadyOff" : "AlreadyOn", Reloaded: false)),
+        };
+    }
 
     /// <summary>The allow-list: entries in force and removed ones, newest first. Administrators only: entries can be
     /// people's names.</summary>
@@ -173,6 +230,10 @@ public sealed partial class AdminController(AdminAccess access, IImportReview re
     [LoggerMessage(Level = LogLevel.Information, Message = "Import {ImportId} review: {Result} by {Reviewer}")]
     private static partial void Reviewed(ILogger logger, int importId, ReviewResult result, string reviewer);
 
+    // Who switched a list, and which way: the reason is on the source (and on the status page).
+    [LoggerMessage(Level = LogLevel.Information, Message = "List {Code} switched {Direction} by {Administrator}")]
+    private static partial void ListSwitched(ILogger logger, string code, string direction, string administrator);
+
     // By id only: an entry's name can be a person's.
     [LoggerMessage(Level = LogLevel.Information, Message = "Allow-list entry {Id} {Change} by {Administrator}")]
     private static partial void AllowListChanged(ILogger logger, int id, string change, string administrator);
@@ -189,6 +250,14 @@ public sealed record AdminMeResponse(bool Enabled, bool SignedIn, string? Name, 
 /// <param name="Reloaded">Whether the lists were reloaded at once; if not, the review stands and the next refresh
 /// (within 15 minutes) shows it.</param>
 public sealed record ReviewResponse(int ImportId, string Result, bool Reloaded);
+
+/// <param name="Reason">Why the list is switched off, 1-500 characters: every result shows it while it's off.</param>
+public sealed record ListSwitchOffRequest(string? Reason);
+
+/// <param name="Result"><c>SwitchedOff</c> or <c>On</c>; 409 with <c>AlreadyOff</c> or <c>AlreadyOn</c>.</param>
+/// <param name="Reloaded">Whether the lists were reloaded at once; if not, the switch stands and the next refresh
+/// (within 15 minutes) applies it.</param>
+public sealed record ListSwitchResponse(string Code, string Result, bool Reloaded);
 
 /// <param name="Confirmed">The keys of the possible matches the administrator has seen and accepts (from a 409 with
 /// code <c>confirm</c>); omitted the first time.</param>

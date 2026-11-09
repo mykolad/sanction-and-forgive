@@ -30,6 +30,7 @@ builder.Services.AddSingleton<ScreeningService>();
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.AdminAccess>();
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.IImportReview, SanctionAndForgive.Api.Admin.ImportReview>();
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.IAllowListAdmin, SanctionAndForgive.Api.Admin.AllowListAdmin>();
+builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.IListSwitch, SanctionAndForgive.Api.Admin.ListSwitch>();
 if (builder.Configuration.GetValue("Lists:RefreshEnabled", true))
 {
     builder.Services.AddHostedService<ListRefreshService>();

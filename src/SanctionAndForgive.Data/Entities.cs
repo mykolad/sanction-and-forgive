@@ -23,6 +23,16 @@ public sealed class Source
     /// <summary>The last successful check of the feed, changed or not. Staleness counts from here.</summary>
     public DateTimeOffset? LastCheckedAt { get; set; }
 
+    /// <summary>When an administrator switched the list off: it isn't searched, but it's still imported, shown and
+    /// browsable. Null: on (<see cref="SourceSwitch"/>).</summary>
+    public DateTimeOffset? SwitchedOffAt { get; set; }
+
+    /// <summary>Who switched it off (never public).</summary>
+    public string? SwitchedOffBy { get; set; }
+
+    /// <summary>Why, in the administrator's words: shown with every result while it's off.</summary>
+    public string? SwitchedOffReason { get; set; }
+
     public List<Import> Imports { get; } = [];
 }
 

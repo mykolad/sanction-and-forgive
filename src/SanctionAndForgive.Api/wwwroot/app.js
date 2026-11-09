@@ -50,6 +50,7 @@ function showState(text, isError) {
 // When a list was last checked; an Overdue list (searched, but not updated within its allowed age) says so.
 function listAsOf(list) {
   if (list.state === "NotChecked") return "not checked";
+  if (list.state === "SwitchedOff") return "switched off";
   return list.state === "Overdue" ? `⚠ out of date: ${asOf(list.asOf)}` : asOf(list.asOf);
 }
 
@@ -175,6 +176,12 @@ function render(result) {
   for (const list of result.lists) {
     const row = el("tr", {}, el("td", { class: "list-name" }, list.name,
       el("span", { class: list.state === "Overdue" ? "as-of overdue" : "as-of" }, listAsOf(list))));
+    if (list.state === "SwitchedOff") {
+      // Not searched at all, so no cells: one note across the row (the summary gives the administrator's reason).
+      row.append(el("td", { colspan: String(result.entries.length), class: "switched-off" }, "Not searched: switched off by an administrator"));
+      body.append(row);
+      continue;
+    }
     for (const entry of result.entries) {
       const cell = entry.cells.find((candidate) => candidate.list === list.code);
       row.append(el("td", {}, cellButton(cell, entry, list)));

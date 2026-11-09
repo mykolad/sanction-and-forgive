@@ -113,6 +113,8 @@ function render(page) {
   $("results-title").textContent = `${page.list.name}: ${page.total.toLocaleString()} ${page.total === 1 ? "entry" : "entries"}`;
   $("list-note").textContent = page.list.state === "Current"
     ? `As of ${utc(page.list.asOf)}, version ${page.list.version}. These are the entries a screening compares against.`
+    : page.list.state === "SwitchedOff"
+      ? `Switched off by an administrator: screenings don't search this list. As of ${utc(page.list.asOf)}, version ${page.list.version}; it's still updated daily.`
     : page.list.state === "Overdue"
       ? `Out of date: as of ${utc(page.list.asOf)}, version ${page.list.version}. It couldn't be updated within its allowed age; screenings still search these entries, and every result warns about it.`
       : `This list is Not checked: it isn't loaded, so screenings don't search it. The entries below may be out of date.`;

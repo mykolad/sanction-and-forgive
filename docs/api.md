@@ -19,6 +19,10 @@ is `Overdue` instead of `Current`, its cells are answered as usual, and the summ
 loaded (its load failed, or it's still loading) is `NotChecked`: no percentage, never 0%, and the result is
 `Incomplete`.
 
+A list an administrator **switched off** (below, "Admin") isn't searched at all: its `state` is `SwitchedOff`, the
+entries have no cell for it (so it doesn't make a result `Incomplete`), and the summary says "Not searched: UK
+(switched off by an administrator: <their reason>)." The audit line has `off` after its version.
+
 ## Batches: `POST /api/v1/screenings/stream`
 
 For many records at once. The request is **NDJSON**: one screening per line, each the same object as the single
@@ -132,7 +136,8 @@ Every list a screening searches, then every known feed that isn't imported, with
    "reason":"The UN's terms allow personal, non-commercial use only. …","recordCount":null, …}]}
 ```
 
-- `state`: `Current` (searched now), `Overdue` (searched as last downloaded, but not updated within `maxAgeHours`:
+- `state`: `Current` (searched now), `SwitchedOff` (an administrator switched it off: not searched; `reason` says
+  when and why), `Overdue` (searched as last downloaded, but not updated within `maxAgeHours`:
   results warn, and `reason` says so), `NotChecked` (loaded but not built yet, or its load failed: its cells say Not
   checked, and `reason` says which), or `NotImported`.
 - `status`: the catalogue's decision: `Active`, `TermsUnclear` (the terms seem to rule out this use; waiting for
@@ -197,6 +202,12 @@ on (`Admin:SignInEnabled`): otherwise nobody is signed in, whatever a request sa
   import; 409 `NotPending` (already reviewed, superseded, or held against a list that has changed since). Confirming
   makes it the active list (searched while it's current: the status page shows whether it is) and reloads the lists
   at once; the review is logged with the reviewer's sign-in name.
+- `POST /api/v1/admin/lists/{code}/switch-off` (`{"reason": "…"}`, 1-500 characters, required) and
+  `…/switch-on`: an administrator's decision to stop or resume searching a list (owner's decision, 2026-11-09). An
+  off list is still imported daily, shown on the status page (`SwitchedOff`, with when and the reason) and browsable;
+  every result names it as not searched, with the reason. Same role and header as reviewing. 200
+  `{code, result: "SwitchedOff"|"On", reloaded}`; 409 `AlreadyOff` / `AlreadyOn` (switching off again keeps the first
+  reason); 404 for an unknown list. Logged with the administrator's sign-in name, which isn't public.
 
 ## The allow-list
 

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using SanctionAndForgive.Api.Lists;
 using SanctionAndForgive.Lists;
 using SanctionAndForgive.Matching;
 using static SanctionAndForgive.Tests.Api.ApiFactory;
@@ -49,6 +50,20 @@ public sealed class SourcesTests : IDisposable
         Assert.Equal("Overdue", uk.GetProperty("state").GetString());
         Assert.Contains("within 72 hours", uk.GetProperty("reason").GetString(), StringComparison.Ordinal);
         Assert.Contains("still searched", uk.GetProperty("reason").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ASwitchedOffList_IsStillShown_WithWhenAndWhy()
+    {
+        factory.Load(Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity)) with
+        {
+            SwitchedOff = new ListSwitchedOff(DateTimeOffset.Parse("2026-11-06T09:15:00Z", System.Globalization.CultureInfo.InvariantCulture), "The file is known to be wrong."),
+        });
+
+        var eu = (await SourcesAsync())["eu"];
+
+        Assert.Equal(("SwitchedOff", 1), (eu.GetProperty("state").GetString(), eu.GetProperty("recordCount").GetInt32()));
+        Assert.StartsWith("Switched off by an administrator on 6 Nov 2026 09:15 UTC: The file is known to be wrong.", eu.GetProperty("reason").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

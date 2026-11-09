@@ -5,6 +5,7 @@
 const STATE = {
   Current: { symbol: "✓", label: "Searched" },
   Overdue: { symbol: "!", label: "Searched, out of date" },
+  SwitchedOff: { symbol: "○", label: "Switched off" },
   NotChecked: { symbol: "–", label: "Not checked" },
 };
 const WHY = {

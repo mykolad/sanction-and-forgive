@@ -1,6 +1,7 @@
 // The admin page: plain JS, no build step. Sign-in is Container Apps' (Microsoft Entra ID): /.auth/login/aad and
-// /.auth/logout, and GET /api/v1/admin/me says who is signed in. Reviewing posts to /api/v1/admin/imports/{id}/...
-// with the site's own header (X-Requested-By), which another site can't send. Every value goes in as text.
+// /.auth/logout, and GET /api/v1/admin/me says who is signed in. Reviewing posts to /api/v1/admin/imports/{id}/...,
+// switching a list to /api/v1/admin/lists/{code}/switch-off|switch-on, with the site's own header (X-Requested-By),
+// which another site can't send. Every value goes in as text.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -53,22 +54,97 @@ async function loadAccount() {
 
 async function loadHeld() {
   const box = $("held");
+  const switches = $("switches");
   let body;
   try {
     const response = await fetch("/api/v1/sources", { headers: { Accept: "application/json" } });
     if (response.status === 503) {
-      box.textContent = "The lists are loading…";
+      box.textContent = switches.textContent = "The lists are loading…";
       setTimeout(loadHeld, 3000);
       return;
     }
     body = await response.json();
   } catch {
-    box.textContent = "The service isn't answering. Try again in a moment.";
+    box.textContent = switches.textContent = "The service isn't answering. Try again in a moment.";
     return;
   }
 
+  const loaded = body.lists.filter((list) => list.state !== "NotImported");
+  switches.replaceChildren(...(loaded.length ? loaded.map(switchRow) : [el("p", { class: "muted" }, "No lists are loaded.")]));
   const held = body.lists.filter((list) => list.held);
   box.replaceChildren(...(held.length ? held.map(heldCard) : [el("p", { class: "muted" }, "No updates are held for review.")]));
+}
+
+const STATES = { Current: "Searched", Overdue: "Searched, out of date", NotChecked: "Not checked (not loaded)", SwitchedOff: "Switched off" };
+
+// One row per loaded list: its state, and (for an administrator) a switch. Switching off needs a reason.
+function switchRow(list) {
+  const status = el("p", { class: "review-status", "aria-live": "polite" });
+  const actions = el("div", { class: "actions" });
+  const row = el("article", { class: "switch-row" },
+    el("h3", {}, list.name, " ", el("span", { class: `state-badge ${list.state}` }, STATES[list.state] ?? list.state)),
+    list.state === "SwitchedOff" && list.reason ? el("p", { class: "muted" }, list.reason) : null,
+    actions,
+    status);
+  if (me?.isAdmin) showSwitch(actions, status, list);
+  return row;
+}
+
+function showSwitch(actions, status, list) {
+  if (list.state === "SwitchedOff") {
+    actions.replaceChildren(el("button", { type: "button", class: "primary", onclick: () => switchList(actions, status, list, false, null) }, "Switch on: search it again"));
+    return;
+  }
+
+  actions.replaceChildren(el("button", { type: "button", class: "secondary", onclick: () => askReason(actions, status, list) }, "Switch off: stop searching it"));
+}
+
+// Two steps, like a review: the first click asks why, the second switches it off.
+function askReason(actions, status, list) {
+  const id = `reason-${list.code}`;
+  const reason = el("input", { id, type: "text", maxlength: "500", placeholder: "Every result will show this" });
+  const confirm = () => {
+    if (!reason.value.trim()) {
+      status.textContent = "Say why: every result shows the reason while it's off.";
+      reason.focus();
+      return;
+    }
+    switchList(actions, status, list, true, reason.value.trim());
+  };
+  const cancel = () => {
+    status.textContent = "";
+    showSwitch(actions, status, list);
+  };
+  actions.replaceChildren(
+    el("label", { for: id }, "Why "), reason,
+    el("button", { type: "button", class: "secondary", onclick: confirm }, "Yes, switch it off"),
+    el("button", { type: "button", class: "secondary", onclick: cancel }, "Cancel"));
+  reason.focus();
+}
+
+async function switchList(actions, status, list, off, reason) {
+  actions.replaceChildren();
+  status.textContent = off ? "Switching it off…" : "Switching it on…";
+  try {
+    const response = await fetch(`/api/v1/admin/lists/${encodeURIComponent(list.code)}/${off ? "switch-off" : "switch-on"}`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json", "X-Requested-By": "sanction-and-forgive-admin" },
+      body: off ? JSON.stringify({ reason }) : undefined,
+    });
+    const body = response.ok ? await response.json() : null;
+    const later = body && !body.reloaded ? " It applies within 15 minutes." : "";
+    status.textContent = response.ok
+      ? (off ? `Switched off: screenings don't search ${list.name}.${later}` : `Switched on: screenings search ${list.name} again.${later}`)
+      : response.status === 409 ? (off ? "It's already off." : "It's already on.")
+      : response.status === 401 || response.status === 403 ? "Your sign-in doesn't allow this. Sign in again as a lists administrator."
+      : response.status === 400 ? "Say why, in at most 500 characters."
+      : "That didn't work. Try again in a moment.";
+    if (response.ok || response.status === 409) setTimeout(loadHeld, 1500);
+    else showSwitch(actions, status, list);
+  } catch {
+    status.textContent = "The service isn't answering. Try again in a moment.";
+    showSwitch(actions, status, list);
+  }
 }
 
 function heldCard(list) {

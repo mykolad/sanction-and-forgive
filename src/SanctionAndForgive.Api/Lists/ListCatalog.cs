@@ -17,9 +17,13 @@ public sealed record LoadedList(
     int RecordCount,
     ListIndex? Index)
 {
-    /// <summary>Searched: it has an index. Without one (not loaded, or its load failed) its cells say Not checked.
-    /// Fail closed.</summary>
-    public bool IsSearched => Index is not null;
+    /// <summary>Switched off by an administrator (when, and why): not searched, no cells, and the summary says so. Still
+    /// imported, shown and browsable.</summary>
+    public ListSwitchedOff? SwitchedOff { get; init; }
+
+    /// <summary>Searched: switched on, and it has an index. On without one (not loaded, or its load failed), its cells
+    /// say Not checked. Fail closed.</summary>
+    public bool IsSearched => SwitchedOff is null && Index is not null;
 
     /// <summary>Searched, but a feed whose last successful check is older than its allowed age: it's searched as last
     /// downloaded, however old, and every result says so (owner's decision, 2026-11-09: serve the old list with a
@@ -27,9 +31,14 @@ public sealed record LoadedList(
     public bool IsOverdue(DateTimeOffset now) =>
         IsSearched && MaxAgeHours is { } hours && (LastCheckedAt is not { } checkedAt || now - checkedAt > TimeSpan.FromHours(hours));
 
-    /// <summary><c>Current</c>, <c>Overdue</c> (searched, with a warning) or <c>NotChecked</c>.</summary>
-    public string State(DateTimeOffset now) => !IsSearched ? "NotChecked" : IsOverdue(now) ? "Overdue" : "Current";
+    /// <summary><c>Current</c>, <c>Overdue</c> (searched, with a warning), <c>NotChecked</c>, or <c>SwitchedOff</c>.</summary>
+    public string State(DateTimeOffset now) =>
+        SwitchedOff is not null ? "SwitchedOff" : !IsSearched ? "NotChecked" : IsOverdue(now) ? "Overdue" : "Current";
 }
+
+/// <summary>An administrator switched the list off, at <paramref name="At"/>, for <paramref name="Reason"/>. Who did
+/// isn't kept here: it isn't public.</summary>
+public sealed record ListSwitchedOff(DateTimeOffset At, string Reason);
 
 /// <summary>Every list's current index, swapped whole when the refresh changes anything: a request reads one
 /// consistent snapshot and never touches the database. Empty and not ready until the first load completes.</summary>

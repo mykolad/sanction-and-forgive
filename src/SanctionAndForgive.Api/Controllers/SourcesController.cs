@@ -73,8 +73,8 @@ public sealed record SourceHistoryResponse(string Code, string Name, IReadOnlyLi
 public sealed record SourcesResponse(DateTimeOffset Now, IReadOnlyList<SourceResponse> Lists);
 
 /// <param name="State"><c>Current</c> (searched), <c>Overdue</c> (searched as last downloaded, though not updated
-/// within its allowed age: results warn), <c>NotChecked</c> (no index: its cells say Not checked), or
-/// <c>NotImported</c>.</param>
+/// within its allowed age: results warn), <c>NotChecked</c> (no index: its cells say Not checked), <c>SwitchedOff</c>
+/// (by an administrator: not searched, no cells; <c>reason</c> says when and why), or <c>NotImported</c>.</param>
 /// <param name="Status">The catalogue's <see cref="FeedStatus"/> (<c>Active</c>, <c>TermsUnclear</c>,
 /// <c>NeedsAccess</c>), or <c>Manual</c> for a source maintained by hand.</param>
 /// <param name="Reason">Why it isn't searched, when it isn't.</param>
@@ -110,6 +110,7 @@ public sealed record SourceResponse(
     {
         var state = list.State(now);
         string? reason = state == "Current" ? null
+            : list.SwitchedOff is { } off ? $"Switched off by an administrator on {off.At.ToUniversalTime().ToString("d MMM yyyy HH:mm 'UTC'", System.Globalization.CultureInfo.InvariantCulture)}: {off.Reason} It isn't searched until it's switched on again, and it's still updated daily."
             : list.ActiveImportId is null ? "No completed import yet."
             : list.Index is null ? "Loading, or its last load failed. Its cells say Not checked until it loads."
             : $"Couldn't be updated within {list.MaxAgeHours} hours. It's still searched as last downloaded, and every result warns about it until a check succeeds.";
