@@ -20,7 +20,7 @@
         <a href="https://github.com/mykolad/sanction-and-forgive/blob/master/docs/api.md">API</a>
       </nav>
       <h1>Admin</h1>
-      <p class="tagline">For the demo's administrators: list updates held for review. Screening never needs sign-in.</p>
+      <p class="tagline">For the demo's administrators: which lists are searched, and list updates held for review. Screening never needs sign-in.</p>
     </div>
   </header>
 
@@ -28,6 +28,14 @@
     <section class="panel" aria-labelledby="account-title">
       <h2 id="account-title">Sign-in</h2>
       <div id="account" aria-live="polite">Checking…</div>
+    </section>
+
+    <section class="panel" aria-labelledby="switches-title">
+      <h2 id="switches-title">Lists searched</h2>
+      <p class="section-note">Switch a list off if it shouldn't be searched, for example while its publisher's file is known to be wrong.
+        It stays on the status page and in Browse lists and is still updated daily, but screenings don't search it: every result
+        says it wasn't searched, and shows your reason. Switch it on again to search it from the next screening.</p>
+      <div id="switches" aria-live="polite"></div>
     </section>
 
     <section class="panel" aria-labelledby="held-title">

@@ -106,7 +106,7 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
         await using var scope = scopes.CreateAsyncScope();
         var context = scope.ServiceProvider.GetRequiredService<ListsDbContext>();
         var sources = await context.Sources.AsNoTracking().OrderBy(source => source.Code)
-            .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport != null ? source.ActiveImport!.RecordCount : 0, UpdatedAt = source.ActiveImport != null ? source.ActiveImport!.CompletedAt : null })
+            .Select(source => new { source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, RecordCount = source.ActiveImport != null ? source.ActiveImport!.RecordCount : 0, UpdatedAt = source.ActiveImport != null ? source.ActiveImport!.CompletedAt : null, source.SwitchedOffAt, source.SwitchedOffReason })
             .ToListAsync(cancellationToken);
 
         await LoadAllowListAsync(context, cancellationToken);
@@ -125,7 +125,11 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
         for (var i = 0; i < sources.Count; i++)
         {
             var source = sources[i];
-            var target = new LoadedList(source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, source.UpdatedAt, source.RecordCount, Index: null);
+            var switchedOff = source.SwitchedOffAt is { } at ? new ListSwitchedOff(at, source.SwitchedOffReason ?? string.Empty) : null;
+            var target = new LoadedList(source.Code, source.Name, source.Url, source.MaxAgeHours, source.ActiveImportId, source.LastCheckedAt, source.UpdatedAt, source.RecordCount, Index: null)
+            {
+                SwitchedOff = switchedOff,
+            };
             var existing = current.GetValueOrDefault(source.Code);
             if (existing is not null && existing.ActiveImportId == source.ActiveImportId && (existing.Index is not null || source.ActiveImportId is null))
             {
@@ -135,8 +139,9 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
             }
 
             // Changed or new: until its new index is built, a changed list serves its previous one (with its previous
-            // version and check time), and a new list is Not checked. A list never disappears from the rows.
-            lists[i] = existing ?? target;
+            // version and check time), and a new list is Not checked. A list never disappears from the rows. Switching
+            // off or on applies at once either way.
+            lists[i] = existing is null ? target : existing with { SwitchedOff = switchedOff };
             if (source.ActiveImportId is not null)
             {
                 pending.Add((i, target));

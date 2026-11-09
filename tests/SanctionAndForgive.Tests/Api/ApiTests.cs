@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using SanctionAndForgive.Api.Lists;
 using SanctionAndForgive.Matching;
 using static SanctionAndForgive.Tests.Api.ApiFactory;
 
@@ -76,6 +77,27 @@ public sealed class ApiTests : IDisposable
             result.GetProperty("summary").GetString(),
             StringComparison.Ordinal);
         Assert.Equal("eu", result.GetProperty("lists")[0].GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task ASwitchedOffList_IsNotSearched_HasNoCells_AndTheSummarySaysWhy()
+    {
+        factory.Load(
+            Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity)),
+            Feed("uk", "UK", Now.AddHours(-1), Subject("Volga Trade", SubjectKind.Entity)) with { SwitchedOff = new ListSwitchedOff(Now.AddHours(-5), "The file is known to be wrong.") });
+
+        var result = await ScreenAsync(new { reference = "TX-OFF-1", companyName = "Volga Trade" });
+
+        // Listed on the switched-off list only: not searched there, so no hit, and no Not checked cell to make it Incomplete.
+        Assert.Equal("NoMatch", result.GetProperty("outcome").GetString());
+        Assert.Equal(["eu"], result.GetProperty("entries")[0].GetProperty("cells").EnumerateArray().Select(cell => cell.GetProperty("list").GetString()));
+        var row = result.GetProperty("lists").EnumerateArray().Single(list => list.GetProperty("code").GetString() == "uk");
+        Assert.Equal("SwitchedOff", row.GetProperty("state").GetString());
+        Assert.Equal(
+            "No match found in: EU, as of 6 Nov 2026 10:00 UTC. Not searched: UK (switched off by an administrator: The file is known to be wrong.).",
+            result.GetProperty("summary").GetString());
+        var audit = Assert.Single(factory.Logs.GetSnapshot(), record => record.Message.Contains("TX-OFF-1", StringComparison.Ordinal));
+        Assert.Matches(@"uk@\S+ off", audit.Message);
     }
 
     [Fact]

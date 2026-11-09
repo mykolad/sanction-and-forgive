@@ -155,6 +155,17 @@ namespace SanctionAndForgive.Data.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
+                    b.Property<DateTimeOffset?>("SwitchedOffAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SwitchedOffBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("SwitchedOffReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<string>("Url")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");

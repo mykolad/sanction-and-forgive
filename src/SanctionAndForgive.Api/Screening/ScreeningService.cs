@@ -83,7 +83,8 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
     private (ScreeningResult Result, List<ListResponse> Rows, DateTimeOffset Now) Run(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists, AllowList allowList)
     {
         var now = clock.GetUtcNow();
-        var screened = lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.Index)).ToList();
+        // A list an administrator switched off isn't searched at all: no cells, so it never makes a result Incomplete.
+        var screened = lists.Where(list => list.SwitchedOff is null).Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.Index)).ToList();
         var result = screener.Screen(new ScreeningRequest(body.ReceiverName, body.CompanyName, body.Address), screened, allowList);
 
         // Rows with hits first (best percentage across the entries), then the others in their usual order.
@@ -101,7 +102,7 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
     /// (docs/api.md, "Finding a screening in the logs"). The entered text never appears.</summary>
     private void Audit(string reference, ScreeningResult result, List<ListResponse> rows)
     {
-        var lists = string.Join(", ", rows.Select(row => $"{row.Code}@{row.Version?.ToString(CultureInfo.InvariantCulture) ?? "-"}{(row.State == "Overdue" ? " overdue" : string.Empty)}"));
+        var lists = string.Join(", ", rows.Select(row => $"{row.Code}@{row.Version?.ToString(CultureInfo.InvariantCulture) ?? "-"}{row.State switch { "Overdue" => " overdue", "SwitchedOff" => " off", _ => string.Empty }}"));
         var results = new StringBuilder();
         foreach (var entry in result.Entries)
         {
@@ -120,11 +121,13 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
     private static string Summary(ScreeningResult result, IReadOnlyList<LoadedList> lists, DateTimeOffset now)
     {
         var checkedLists = lists.Where(list => list.IsSearched).Select(list => $"{list.Name}, as of {AsOf(list.LastCheckedAt)}").ToList();
-        var notChecked = lists.Where(list => !list.IsSearched).Select(list => list.Name).ToList();
+        var notChecked = lists.Where(list => list.SwitchedOff is null && !list.IsSearched).Select(list => list.Name).ToList();
+        var switchedOff = lists.Where(list => list.SwitchedOff is not null).Select(list => $"{list.Name} (switched off by an administrator: {list.SwitchedOff!.Reason})").ToList();
         var overdue = lists.Where(list => list.IsOverdue(now))
             .Select(list => string.Create(CultureInfo.InvariantCulture, $"{list.Name} couldn't be updated within {list.MaxAgeHours} hours and was searched as of {AsOf(list.LastCheckedAt)}"))
             .ToList();
         var gap = (notChecked.Count > 0 ? $" Not checked: {string.Join(", ", notChecked)}." : string.Empty)
+            + (switchedOff.Count > 0 ? $" Not searched: {string.Join("; ", switchedOff)}." : string.Empty)
             + (overdue.Count > 0 ? $" Warning: {string.Join("; ", overdue)}." : string.Empty);
         var hits = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Outcome is Outcome.Match or Outcome.Review && !cell.Allowed)
             .Select(cell => lists.First(list => list.Code == cell.List).Name).Distinct().ToList();

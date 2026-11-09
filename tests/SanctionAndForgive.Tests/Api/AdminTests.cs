@@ -18,13 +18,14 @@ public sealed class AdminTests : IDisposable
     private readonly ApiFactory parent = new();
     private readonly FakeReview review = new();
     private readonly FakeAllowList allowList = new();
+    private readonly FakeSwitch switches = new();
 
     public void Dispose() => parent.Dispose();
 
     private HttpClient Client(bool signInEnabled) => parent.WithWebHostBuilder(builder =>
     {
         builder.UseSetting("Admin:SignInEnabled", signInEnabled ? "true" : "false");
-        builder.ConfigureTestServices(services => services.AddSingleton<IImportReview>(review).AddSingleton<IAllowListAdmin>(allowList));
+        builder.ConfigureTestServices(services => services.AddSingleton<IImportReview>(review).AddSingleton<IAllowListAdmin>(allowList).AddSingleton<IListSwitch>(switches));
     }).CreateClient();
 
     /// <summary>The header Container Apps sends for a signed-in Entra user: base64 JSON of the token's claims.</summary>
@@ -121,6 +122,56 @@ public sealed class AdminTests : IDisposable
 
         Assert.Equal(expected, response.StatusCode);
         Assert.Equal((7, confirm, "owner@example.invalid"), Assert.Single(review.Calls));
+    }
+
+    [Theory]
+    [InlineData(false, false, true, HttpStatusCode.Unauthorized)]
+    [InlineData(true, false, true, HttpStatusCode.Forbidden)]
+    [InlineData(true, true, false, HttpStatusCode.BadRequest)]
+    public async Task SwitchingAList_NeedsSignIn_TheRole_AndTheSitesHeader(bool signedIn, bool admin, bool fromThisSite, HttpStatusCode expected)
+    {
+        using var client = Client(signInEnabled: true);
+        var principal = signedIn ? (admin ? Principal("owner@example.invalid", AdminAccess.Role) : Principal("visitor@example.invalid")) : null;
+
+        using var off = await SendAsync(client, HttpMethod.Post, "/api/v1/admin/lists/eu/switch-off", principal, fromThisSite, new { reason = "The file is known to be wrong." });
+        using var on = await PostAsync(client, "/api/v1/admin/lists/eu/switch-on", principal, fromThisSite);
+
+        Assert.Equal((expected, expected), (off.StatusCode, on.StatusCode));
+        Assert.Empty(switches.Calls);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public async Task SwitchingAListOff_NeedsAReason(string? reason)
+    {
+        using var client = Client(signInEnabled: true);
+
+        using var response = await SendAsync(client, HttpMethod.Post, "/api/v1/admin/lists/eu/switch-off", Principal("owner@example.invalid", AdminAccess.Role), fromThisSite: true, new { reason });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Empty(switches.Calls);
+    }
+
+    [Theory]
+    [InlineData("switch-off", true, SwitchResult.Switched, HttpStatusCode.OK, "SwitchedOff")]
+    [InlineData("switch-on", false, SwitchResult.Switched, HttpStatusCode.OK, "On")]
+    [InlineData("switch-off", true, SwitchResult.Unchanged, HttpStatusCode.Conflict, "AlreadyOff")]
+    [InlineData("switch-on", false, SwitchResult.Unchanged, HttpStatusCode.Conflict, "AlreadyOn")]
+    [InlineData("switch-off", true, SwitchResult.NotFound, HttpStatusCode.NotFound, null)]
+    public async Task AnAdmin_SwitchesAListOffOrOn_AsThemselves(string action, bool off, SwitchResult result, HttpStatusCode expected, string? answer)
+    {
+        switches.Result = result;
+        using var client = Client(signInEnabled: true);
+
+        using var response = await SendAsync(client, HttpMethod.Post, $"/api/v1/admin/lists/eu/{action}", Principal("owner@example.invalid", AdminAccess.Role), fromThisSite: true, new { reason = " The file is known to be wrong. " });
+
+        Assert.Equal(expected, response.StatusCode);
+        Assert.Equal(("eu", off, off ? "The file is known to be wrong." : null, "owner@example.invalid"), Assert.Single(switches.Calls));
+        if (answer is not null)
+        {
+            Assert.Equal(answer, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("result").GetString());
+        }
     }
 
     [Fact]
@@ -277,6 +328,19 @@ public sealed class AdminTests : IDisposable
 
             Removed.Add((id, removedBy));
             return Task.FromResult(new AllowListRemoveResult(Removed: true, Reloaded: true));
+        }
+    }
+
+    private sealed class FakeSwitch : IListSwitch
+    {
+        public SwitchResult Result { get; set; } = SwitchResult.Switched;
+
+        public List<(string Code, bool Off, string? Reason, string By)> Calls { get; } = [];
+
+        public Task<SwitchOutcome> SwitchAsync(string code, bool off, string? reason, string by, CancellationToken cancellationToken)
+        {
+            Calls.Add((code, off, reason, by));
+            return Task.FromResult(new SwitchOutcome(Result, Reloaded: true));
         }
     }
 
