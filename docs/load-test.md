@@ -39,6 +39,30 @@ what stopped the run.
 
 ## Results
 
+### Azure, one 0.5 vCPU / 1 GiB replica (since 2026-11-07)
+
+Half hard, half regular inputs (#26): 2,000 from the 6 active lists (37,370 subjects), 979 of them regular.
+
+| Date | Image | Sustained screenings/s | p95 at that rate | CPU | Memory | Stopped by |
+|---|---|---|---|---|---|---|
+| 2026-11-07 | f86757c (after #25) | **32** (every step passed) | 0.22 s (p50 23 ms) | up to 0.38 of 0.5 vCPU (highest 1-minute value) | 510-570 MiB working set of 1 GiB, no restarts | p95 2.2 s at 48/s (a second run with steps 48, 64, 96) |
+
+| Step | Screenings | p50 | p95 | p99 |
+|---|---|---|---|---|
+| 1-16/s | 139-2,200 a step | 21-23 ms | 45-55 ms | 100-153 ms |
+| 24/s | 3,279 | 21 ms | 95 ms | 259 ms |
+| 32/s | 4,401 | 23 ms | 219 ms | 457 ms |
+| 48/s | 945 (stopped 31 s in) | 778 ms | 2.2 s | 2.6 s |
+
+By half, over the whole first run (14,390 screenings, none failed, none dropped): hard p50 23 ms, p95 128 ms, p99
+361 ms; regular p50 20 ms, p95 97 ms, p99 281 ms. So the regular half is only a little cheaper than the hard one:
+most of a screening's cost is scoring each name's candidates on six lists, which ordinary names have too.
+
+The limit is between 32 and 48 a second, four times the 8 measured on the smaller size, but not a like-for-like
+comparison: that run had 274d26e (before #25's 22% less CPU per screening) and only hard inputs, this one #25 and
+half regular inputs. Twice the CPU is most of the gain; the rest is #25 and the lighter half. Memory is no longer
+close to its limit (about 45% free). The per-IP rate limit (120 a minute) is a sixteenth of the capacity.
+
 ### Azure, one 0.25 vCPU replica
 
 | Date | Image | Lists | Sustained screenings/s | p95 at that rate | CPU | Memory | Stopped by |
