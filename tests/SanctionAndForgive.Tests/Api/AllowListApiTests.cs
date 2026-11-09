@@ -81,7 +81,7 @@ public sealed class AllowListApiTests : IDisposable
     {
         factory.Load(
             Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity)),
-            Feed("uk", "UK", Now.AddHours(-80), Subject("Volga Trade", SubjectKind.Entity)));
+            Feed("uk", "UK", Now, Subject("Volga Trade", SubjectKind.Entity)) with { Index = null });
         var admin = factory.Services.GetRequiredService<IAllowListAdmin>();
 
         var result = await admin.AddAsync("Volga Trade", "test", "owner@example.invalid", new HashSet<string>(), CancellationToken.None);

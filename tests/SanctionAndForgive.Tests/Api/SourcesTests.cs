@@ -31,7 +31,7 @@ public sealed class SourcesTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadedLists_ShowCountFreshnessAndPage_StaleOnesSayWhy()
+    public async Task LoadedLists_ShowCountFreshnessAndPage_OverdueOnesSayWhy()
     {
         factory.Load(
             Feed("eu", "EU", Now.AddHours(-2), Subject("Romashka LLC", SubjectKind.Entity), Subject("Volga Trade", SubjectKind.Entity)),
@@ -46,8 +46,9 @@ public sealed class SourcesTests : IDisposable
         Assert.Equal(JsonValueKind.Null, eu.GetProperty("reason").ValueKind);
         Assert.EndsWith("token=" + ListSources.EuPublicToken, eu.GetProperty("fileUrl").GetString(), StringComparison.Ordinal);
         var uk = lists["uk"];
-        Assert.Equal("NotChecked", uk.GetProperty("state").GetString());
-        Assert.Contains("72 hours", uk.GetProperty("reason").GetString(), StringComparison.Ordinal);
+        Assert.Equal("Overdue", uk.GetProperty("state").GetString());
+        Assert.Contains("within 72 hours", uk.GetProperty("reason").GetString(), StringComparison.Ordinal);
+        Assert.Contains("still searched", uk.GetProperty("reason").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]

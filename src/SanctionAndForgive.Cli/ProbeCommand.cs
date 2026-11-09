@@ -39,7 +39,7 @@ internal sealed class ProbeCommand(FeedDownloader downloader, string euToken, Te
         string? path = file;
         try
         {
-            path ??= await downloader.DownloadAsync(new Uri(source.Url!.Replace("{token}", euToken, StringComparison.Ordinal)), cancellationToken);
+            path ??= await downloader.DownloadAsync(source.Code, new Uri(source.Url!.Replace("{token}", euToken, StringComparison.Ordinal)), cancellationToken);
             var bytes = new FileInfo(path).Length;
             var root = FeedStatistics.RootElement(path) ?? "?";
             FeedStatistics statistics;

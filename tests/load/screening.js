@@ -91,8 +91,8 @@ export const options = {
 export function setup() {
   const status = http.get(`${BASE_URL}/api/v1/status`).json();
   if (status.state !== 'ready') throw new Error(`The app isn't ready: ${status.state}`);
-  // Lists that aren't Current are Not checked: every screening would answer without matching anything.
-  if (!status.lists.some(list => list.state === 'Current')) throw new Error('No list is Current: import the lists first.');
+  // Lists that are Not checked aren't searched: every screening would answer without matching anything.
+  if (!status.lists.some(list => list.state !== 'NotChecked')) throw new Error('No list is searched: import the lists first.');
   console.log(`Lists: ${status.lists.map(list => `${list.code} ${list.state} ${list.recordCount}`).join(', ')}`);
 }
 

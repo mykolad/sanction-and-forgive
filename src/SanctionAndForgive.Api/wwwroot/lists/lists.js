@@ -113,7 +113,9 @@ function render(page) {
   $("results-title").textContent = `${page.list.name}: ${page.total.toLocaleString()} ${page.total === 1 ? "entry" : "entries"}`;
   $("list-note").textContent = page.list.state === "Current"
     ? `As of ${utc(page.list.asOf)}, version ${page.list.version}. These are the entries a screening compares against.`
-    : `This list is Not checked: its last successful check (${utc(page.list.asOf)}) is too old, so screenings don't search it. The entries below may be out of date.`;
+    : page.list.state === "Overdue"
+      ? `Out of date: as of ${utc(page.list.asOf)}, version ${page.list.version}. It couldn't be updated within its allowed age; screenings still search these entries, and every result warns about it.`
+      : `This list is Not checked: it isn't loaded, so screenings don't search it. The entries below may be out of date.`;
   const rows = page.entries.flatMap((entry, i) => entryRows(entry, `entry-${page.offset + i}`));
   $("entries").tBodies[0].replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: "4", class: "muted" }, "No entries match."))]));
   $("range").textContent = page.total ? `${(page.offset + 1).toLocaleString()}–${(page.offset + page.entries.length).toLocaleString()} of ${page.total.toLocaleString()}` : "";

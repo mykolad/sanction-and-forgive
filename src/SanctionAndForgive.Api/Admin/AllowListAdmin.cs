@@ -23,7 +23,7 @@ public enum AllowListAddOutcome
     /// <summary>Added (<see cref="AllowListAddResult.Id"/>).</summary>
     Added,
 
-    /// <summary>Not added: a list can't be checked right now (loading, stale, or not built), so the name couldn't be
+    /// <summary>Not added: a list can't be checked right now (loading, or its load failed), so the name couldn't be
     /// checked against it. Try again later.</summary>
     Unavailable,
 
@@ -100,8 +100,7 @@ public sealed class AllowListAdmin(IServiceScopeFactory scopes, ListLoader loade
     {
         // A name that is a Match on a list, as a person or as an entity, would allow-list the listed party itself. It
         // can only be checked against lists that can be searched: until every list can, nothing is added.
-        var now = clock.GetUtcNow();
-        var lists = catalog.Lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? list.Index : null)).ToList();
+        var lists = catalog.Lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.Index)).ToList();
         if (!catalog.IsReady || lists.Count == 0 || lists.Any(list => list.Index is null))
         {
             return AllowListAddResult.Refused(AllowListAddOutcome.Unavailable);

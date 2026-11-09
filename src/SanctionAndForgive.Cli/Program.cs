@@ -52,7 +52,7 @@ Console.CancelKeyPress += (_, eventArgs) =>
 };
 
 using var httpClient = FeedDownloader.CreateHttpClient(AppVersion.Current);
-var downloader = new FeedDownloader(httpClient, TimeSpan.FromMinutes(10));
+var downloader = new FeedDownloader(httpClient, TimeSpan.FromMinutes(10), DownloadRetry.Default, TimeProvider.System, Console.Out);
 
 if (args[0] == "probe")
 {

@@ -158,7 +158,7 @@ with each entry referring to its lists would hold fewer names.
   114,723 names and aliases, 21% repeat.
 - So at most about 15-20% less memory (of 128 MB) and fewer aliases to score, but not for free: each list's index
   weights a word by how rare it is in that list, so one index would change every percentage (a calibration change,
-  the golden tests and evaluation to redo, the owner's approval), and a list that's stale must still be Not checked on
+  the golden tests and evaluation to redo, the owner's approval), and a list that isn't loaded must still be Not checked on
   its own, so each candidate would carry its lists. The speed-up above was larger and changed nothing; combining stays
   an option if more lists are added and memory runs short.
 

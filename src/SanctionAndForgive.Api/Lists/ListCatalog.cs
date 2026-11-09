@@ -17,10 +17,18 @@ public sealed record LoadedList(
     int RecordCount,
     ListIndex? Index)
 {
-    /// <summary>Searchable now: an index, and (for a feed) a last successful check within its allowed age.
-    /// Otherwise its cells say Not checked. Fail closed.</summary>
-    public bool IsCurrent(DateTimeOffset now) =>
-        Index is not null && (MaxAgeHours is null || (LastCheckedAt is { } checkedAt && now - checkedAt <= TimeSpan.FromHours(MaxAgeHours.Value)));
+    /// <summary>Searched: it has an index. Without one (not loaded, or its load failed) its cells say Not checked.
+    /// Fail closed.</summary>
+    public bool IsSearched => Index is not null;
+
+    /// <summary>Searched, but a feed whose last successful check is older than its allowed age: it's searched as last
+    /// downloaded, however old, and every result says so (owner's decision, 2026-11-09: serve the old list with a
+    /// warning rather than Not checked). Manual lists never age.</summary>
+    public bool IsOverdue(DateTimeOffset now) =>
+        IsSearched && MaxAgeHours is { } hours && (LastCheckedAt is not { } checkedAt || now - checkedAt > TimeSpan.FromHours(hours));
+
+    /// <summary><c>Current</c>, <c>Overdue</c> (searched, with a warning) or <c>NotChecked</c>.</summary>
+    public string State(DateTimeOffset now) => !IsSearched ? "NotChecked" : IsOverdue(now) ? "Overdue" : "Current";
 }
 
 /// <summary>Every list's current index, swapped whole when the refresh changes anything: a request reads one

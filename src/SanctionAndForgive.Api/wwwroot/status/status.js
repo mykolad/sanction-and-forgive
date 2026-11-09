@@ -4,6 +4,7 @@
 
 const STATE = {
   Current: { symbol: "✓", label: "Searched" },
+  Overdue: { symbol: "!", label: "Searched, out of date" },
   NotChecked: { symbol: "–", label: "Not checked" },
 };
 const WHY = {
@@ -85,7 +86,7 @@ function held(list) {
     el("span", { class: "state-badge Held" }, el("span", { "aria-hidden": "true" }, "!"), " Update held for review"),
     el("span", { class: "sub" },
       `${list.held.recordCount.toLocaleString()} records downloaded ${utc(list.held.downloadedAt)}, against ${list.recordCount.toLocaleString()} now. `,
-      "Screenings keep using the list above while it's current (it still turns Not checked after its allowed age) until an administrator confirms or rejects the update."));
+      "Screenings keep using the list above (past its allowed age too, with a warning) until an administrator confirms or rejects the update."));
 }
 
 const RESULTS = {
@@ -175,7 +176,7 @@ async function load() {
     const body = await response.json();
     const now = new Date(body.now);
     const searched = body.lists.filter((list) => list.state !== "NotImported");
-    const current = searched.filter((list) => list.state === "Current");
+    const current = searched.filter((list) => list.state === "Current" || list.state === "Overdue");
     $("sources-table").tBodies[0].replaceChildren(...searched.map((list) => searchedRow(list, now)));
     $("not-imported-table").tBodies[0].replaceChildren(...body.lists.filter((list) => list.state === "NotImported").map(notImportedRow));
     $("history").replaceChildren(...searched.map((list) => historyBlock(list, now)));

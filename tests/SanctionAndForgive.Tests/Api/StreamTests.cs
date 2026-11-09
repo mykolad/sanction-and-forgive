@@ -19,7 +19,7 @@ public sealed class StreamTests : IDisposable
 
     private void Load() => factory.Load(
         Feed("eu", "EU", Now.AddHours(-1), Subject("Romashka LLC", SubjectKind.Entity), Subject("Taras Shevchenko", SubjectKind.Individual)),
-        Feed("uk", "UK", Now.AddHours(-80), Subject("Volga Trade", SubjectKind.Entity)));
+        Feed("uk", "UK", Now.AddHours(-1), Subject("Volga Trade", SubjectKind.Entity)) with { Index = null });
 
     private static async Task<List<JsonElement>> StreamAsync(HttpClient client, string ndjson)
     {
