@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // SubjectKind says what a list says a subject is; Unknown subjects are matched both ways.
@@ -67,6 +68,17 @@ type ListIndex struct {
 	nameVocabulary       *fuzzyVocabulary
 	subjectsByAddressKey map[string][]int
 	addressVocabulary    *fuzzyVocabulary
+	memo                 sync.Map
+}
+
+// Memo returns what build makes for key, built once per index: a cache that goes when the index goes (the API's
+// browse order, as the reference's ConditionalWeakTable keyed by the index).
+func (x *ListIndex) Memo(key string, build func() any) any {
+	if value, ok := x.memo.Load(key); ok {
+		return value
+	}
+	value, _ := x.memo.LoadOrStore(key, build())
+	return value
 }
 
 func (x *ListIndex) Subjects() []*ListedSubject { return x.subjects }
@@ -225,7 +237,7 @@ func (v *orderedVotes) top(limit int) []int {
 }
 
 func (x *ListIndex) weight(token *Token, o *Options) float64 {
-	return math.Max(o.MinTokenWeight, math.Log(float64(max(len(x.aliases), 1))/float64(max(x.documentFrequency[token.Key()], 1))))
+	return math.Max(o.MinTokenWeight, ln(float64(max(len(x.aliases), 1))/float64(max(x.documentFrequency[token.Key()], 1))))
 }
 
 func (x *ListIndex) candidates(query *preparedName, o *Options) []int {

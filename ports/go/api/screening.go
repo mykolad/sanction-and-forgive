@@ -41,17 +41,8 @@ func deref(s *string) string {
 
 var referencePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$`)
 
-// utf16Len counts as .NET's string.Length does.
-func utf16Len(s string) int {
-	n := 0
-	for _, r := range s {
-		n += utf16.RuneLen(r)
-		if utf16.RuneLen(r) < 0 {
-			n += 2
-		}
-	}
-	return n
-}
+// utf16Len counts as .NET's string.Length does (UTF-16 code units).
+func utf16Len(s string) int { return len(utf16.Encode([]rune(s))) }
 
 func isBlank(s *string) bool { return s == nil || strings.TrimFunc(*s, unicode.IsSpace) == "" }
 

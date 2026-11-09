@@ -173,15 +173,30 @@ func badRequest(w http.ResponseWriter, errors map[string][]string) {
 	writeJSON(w, http.StatusBadRequest, validationProblem{"https://tools.ietf.org/html/rfc9110#section-15.5.1", "One or more validation errors occurred.", 400, errors})
 }
 
-func (s *Server) screen(w http.ResponseWriter, r *http.Request) {
+// limited answers 429 with Retry-After when the client is over its per-minute quota, and says whether it did.
+func (s *Server) limited(w http.ResponseWriter, r *http.Request) bool {
 	if wait := s.limiter.allow(clientIP(r), time.Now()); wait > 0 {
 		w.Header().Set("Retry-After", itoa(wait))
 		w.WriteHeader(http.StatusTooManyRequests)
+		return true
+	}
+	return false
+}
+
+func (s *Server) screen(w http.ResponseWriter, r *http.Request) {
+	if s.limited(w, r) {
 		return
 	}
 	var body ScreeningRequestBody
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	if err := decoder.Decode(&body); err != nil || decoder.More() {
+	// One JSON object and nothing after it: a trailing "]" or a second object is a malformed request (4).
+	err := decoder.Decode(&body)
+	if err == nil {
+		if _, next := decoder.Token(); !errors.Is(next, io.EOF) {
+			err = errors.New("content after the object")
+		}
+	}
+	if err != nil {
 		// The parser's message can quote the input: say only that the body isn't valid.
 		badRequest(w, map[string][]string{"$": {"The request body isn't a valid screening request."}})
 		return
@@ -277,7 +292,10 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	deadline := time.Now().Add(time.Duration(maxSeconds) * time.Second)
 	controller := http.NewResponseController(w)
 	controller.SetWriteDeadline(deadline.Add(20 * time.Second)) //nolint:errcheck // best effort
+	controller.SetReadDeadline(deadline)                        //nolint:errcheck // best effort
 	controller.EnableFullDuplex()                               //nolint:errcheck // HTTP/1 servers support it
+	// Whatever ends the stream (its record limit included) interrupts a read still waiting on the upload.
+	defer controller.SetReadDeadline(time.Now()) //nolint:errcheck // best effort
 	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	encoder := json.NewEncoder(w)
@@ -316,7 +334,13 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 			next := line + 1
 			nextLine = &next
 		}
-		if nextLine != nil || !ok || read.err != nil {
+		if nextLine != nil || !ok {
+			break
+		}
+		if read.err != nil {
+			// The upload broke off (or ran past the deadline) before it ended: resume from the next line.
+			next := line + 1
+			nextLine = &next
 			break
 		}
 		line++

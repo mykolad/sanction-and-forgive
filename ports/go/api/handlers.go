@@ -7,7 +7,6 @@ import (
 	"sanctionandforgive/lists"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -335,9 +334,10 @@ type browsable struct {
 	folded  []string
 }
 
-var sortedCache sync.Map // *matching.ListIndex → []browsable
-
 func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
+	if s.limited(w, r) {
+		return
+	}
 	if !s.Catalog.IsReady() {
 		writeJSON(w, http.StatusServiceUnavailable, warmingUp{"warmingUp"})
 		return
@@ -419,9 +419,10 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 }
 
 func inNameOrder(index *matching.ListIndex) []browsable {
-	if cached, ok := sortedCache.Load(index); ok {
-		return cached.([]browsable)
-	}
+	return index.Memo("browse", func() any { return buildNameOrder(index) }).([]browsable)
+}
+
+func buildNameOrder(index *matching.ListIndex) []browsable {
 	var entries []browsable
 	for _, subject := range index.Subjects() {
 		folded := make([]string, len(subject.Names))
@@ -437,7 +438,6 @@ func inNameOrder(index *matching.ListIndex) []browsable {
 		}
 		return entries[a].subject.ExternalID < entries[b].subject.ExternalID
 	})
-	sortedCache.Store(index, entries)
 	return entries
 }
 
@@ -465,7 +465,7 @@ func fold(text string) string {
 			}
 			continue
 		}
-		b.WriteRune(unicode.ToLower(c))
+		b.WriteRune(matching.LowerInvariant(c))
 		lastSpace = false
 	}
 	return strings.TrimRightFunc(b.String(), unicode.IsSpace)

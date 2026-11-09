@@ -8,13 +8,14 @@ RUN go mod download
 COPY ports/go/ ./
 COPY src/SanctionAndForgive.Matching/Data/ matching/data/
 COPY src/SanctionAndForgive.Api/wwwroot/ api/wwwroot/
-RUN go vet ./... && go test ./...
+RUN CGO_ENABLED=1 go vet ./... && CGO_ENABLED=1 go test ./...
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/api ./cmd/api \
- && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/cli ./cmd/cli
+# With cgo: the matcher's logarithm is the C library's, as .NET's is (matching/log_cgo.go).
+RUN CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o /out/api ./cmd/api \
+ && CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o /out/cli ./cmd/cli
 
-# Distroless: no shell, CA certificates for the feeds and Azure, non-root.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Distroless with glibc (for the logarithm): no shell, CA certificates for the feeds and Azure, non-root.
+FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/api /out/cli /app/
 EXPOSE 8080

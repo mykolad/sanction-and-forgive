@@ -193,7 +193,7 @@ func (b *builder) AddAddress(raw *string, countryCode *string) {
 	cleaned := Clean(raw)
 	var code *string
 	if c := Clean(countryCode); c != nil {
-		upper := strings.ToUpper(*c)
+		upper := strings.Map(upperInvariant, *c)
 		code = &upper
 	}
 	if cleaned == nil && code == nil {
@@ -320,6 +320,9 @@ func records(reader io.Reader, expectedRoot string, depth int, each func(*Elemen
 		case xml.StartElement:
 			level++
 			if level == 0 {
+				if rootSeen {
+					return formatError("The list has more than one root element.")
+				}
 				rootSeen = true
 				if t.Name.Local != expectedRoot {
 					return formatError("Expected root element <%s>, found <%s>.", expectedRoot, t.Name.Local)
@@ -362,3 +365,19 @@ func records(reader io.Reader, expectedRoot string, depth int, each func(*Elemen
 }
 
 func isXMLSpace(c rune) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
+
+// upperInvariant is .NET's char.ToUpperInvariant: the Turkish dotless ı (U+0131) stays as it is.
+func upperInvariant(c rune) rune {
+	if c == 'ı' {
+		return c
+	}
+	return unicode.ToUpper(c)
+}
+
+// lowerInvariant is .NET's char.ToLowerInvariant: the Turkish capital İ (U+0130) stays as it is.
+func lowerInvariant(c rune) rune {
+	if c == 'İ' {
+		return c
+	}
+	return unicode.ToLower(c)
+}

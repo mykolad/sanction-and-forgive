@@ -7,7 +7,9 @@ experiment (2026-11-09): the same application in .NET, Go and Rust, one deployed
 It's a port of the .NET reference, not a redesign. The conformance suite (`docs/conformance.md`) is the yardstick, and
 it passes in full: the same 600 + 60 screenings field for field, the same pages, the same import rules. Where the
 reference's results depend on .NET details (its dictionaries' insertion order, stable sorts, UTF-16 lengths, the
-invariant culture's "20 %"), the port reproduces them; the comments say where.
+invariant culture's "20 %", its casing that leaves the Turkish `İ` and `ı` alone, the C library's logarithm), the port
+reproduces them; the comments say where. Against the real lists, 2,000 screenings match the reference result for
+result (`ReferenceTests`, docs/conformance.md).
 
 - **The same database.** The schema is the EF migrations'; this port never migrates. Imports hash content the same
   way, so a list imported by one implementation is `Unchanged` for the other: production can switch without
@@ -28,4 +30,6 @@ docker build -f ports/go/Dockerfile -t sanction-and-forgive-go .
 ./tests/conformance/run.ps1 -Build -Image sanction-and-forgive-go:conformance -Dockerfile ports/go/Dockerfile -CliCommand '--entrypoint /app/cli {image}'
 ```
 
-The image is a static binary on distroless (non-root), 41 MB against the .NET image's 356 MB; the CLI is `/app/cli`.
+The image is distroless with glibc (non-root), 68 MB against the .NET image's 356 MB; the CLI is `/app/cli`. It's
+built with cgo for one reason: the word weights' logarithm must be the C library's, which .NET's `Math.Log` calls (Go's
+own `math.Log` is a bit off for some arguments). A native build without a C compiler falls back to `math.Log`.

@@ -26,7 +26,7 @@ func ReadManualCsv(reader io.Reader) ([]ParsedSubject, error) {
 	}
 	header := make([]string, len(rows[0]))
 	for i, column := range rows[0] {
-		header[i] = strings.ToLower(strings.TrimFunc(column, isWhiteSpace))
+		header[i] = strings.Map(lowerInvariant, strings.TrimFunc(column, isWhiteSpace))
 	}
 	index := map[string]int{}
 	for _, column := range manualColumns {
@@ -72,16 +72,16 @@ func ReadManualCsv(reader io.Reader) ([]ParsedSubject, error) {
 		}
 		var kind SubjectType
 		switch t := field("type"); {
-		case t != nil && strings.ToLower(*t) == "individual":
+		case t != nil && strings.Map(lowerInvariant, *t) == "individual":
 			kind = Individual
-		case t != nil && strings.ToLower(*t) == "entity":
+		case t != nil && strings.Map(lowerInvariant, *t) == "entity":
 			kind = Entity
 		default:
-			return nil, formatError("Line %d: type must be Individual or Entity, not '%s'.", line+1, strings.ToLower(deref(t)))
+			return nil, formatError("Line %d: type must be Individual or Entity, not '%s'.", line+1, strings.Map(lowerInvariant, deref(t)))
 		}
 		country := field("country")
 		if country != nil {
-			upper := strings.ToUpper(*country)
+			upper := strings.Map(upperInvariant, *country)
 			country = &upper
 			if len(upper) != 2 || !isUpperASCII(upper[0]) || !isUpperASCII(upper[1]) {
 				return nil, formatError("Line %d: country must be a two-letter ISO code, not '%s'.", line+1, upper)

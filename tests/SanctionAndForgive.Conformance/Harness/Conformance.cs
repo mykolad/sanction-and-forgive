@@ -94,6 +94,9 @@ public sealed class BehaviourRun;
 [CollectionDefinition("3 Changes")]
 public sealed class ChangesRun;
 
+[CollectionDefinition("4 Reference")]
+public sealed class ReferenceRun;
+
 public sealed record CliResult(int ExitCode, string Output);
 
 /// <summary>The implementation under test: its API, its CLI and its database, set up once with the fictional lists.</summary>

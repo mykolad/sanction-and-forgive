@@ -72,14 +72,32 @@ func Words(value string) []string {
 	return words
 }
 
-// toLowerInvariant maps each character to its simple lower case, as .NET's ToLowerInvariant does.
-func toLowerInvariant(s string) string {
-	return strings.Map(unicode.ToLower, s)
+// ToLowerInvariant maps each character to its simple lower case, as .NET's ToLowerInvariant does: like Go's, except
+// that .NET leaves the Turkish capital İ (U+0130) as it is.
+func ToLowerInvariant(s string) string { return strings.Map(LowerInvariant, s) }
+
+// ToUpperInvariant is .NET's ToUpperInvariant: like Go's, except that the Turkish dotless ı (U+0131) stays as it is.
+func ToUpperInvariant(s string) string { return strings.Map(UpperInvariant, s) }
+
+// LowerInvariant is .NET's char.ToLowerInvariant.
+func LowerInvariant(c rune) rune {
+	if c == 'İ' {
+		return c
+	}
+	return unicode.ToLower(c)
 }
 
-func toUpperInvariant(s string) string {
-	return strings.Map(unicode.ToUpper, s)
+// UpperInvariant is .NET's char.ToUpperInvariant.
+func UpperInvariant(c rune) rune {
+	if c == 'ı' {
+		return c
+	}
+	return unicode.ToUpper(c)
 }
+
+func toLowerInvariant(s string) string { return ToLowerInvariant(s) }
+
+func toUpperInvariant(s string) string { return ToUpperInvariant(s) }
 
 // isLetterOrDigit is .NET's char.IsLetterOrDigit: a letter (L) or a decimal digit (Nd).
 func isLetterOrDigit(c rune) bool {

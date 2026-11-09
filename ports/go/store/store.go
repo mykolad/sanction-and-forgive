@@ -300,6 +300,9 @@ func readSubjectsFrom(ctx context.Context, tx querier, importID int) ([]Subject,
 		subjects[byID[subjectID]].Names = append(subjects[byID[subjectID]].Names, n)
 	}
 	names.Close()
+	if err := names.Err(); err != nil {
+		return nil, err
+	}
 
 	addresses, err := tx.QueryContext(ctx, `SELECT a.SubjectId, a.Raw, a.CountryCode FROM SubjectAddresses a JOIN Subjects s ON s.Id = a.SubjectId WHERE s.ImportId = @id ORDER BY a.SubjectId, a.Id`, sql.Named("id", importID))
 	if err != nil {
@@ -315,5 +318,8 @@ func readSubjectsFrom(ctx context.Context, tx querier, importID int) ([]Subject,
 		subjects[byID[subjectID]].Addresses = append(subjects[byID[subjectID]].Addresses, a)
 	}
 	addresses.Close()
+	if err := addresses.Err(); err != nil {
+		return nil, err
+	}
 	return subjects, nil
 }
