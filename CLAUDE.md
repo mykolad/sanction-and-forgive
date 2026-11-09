@@ -17,8 +17,9 @@ each phase's end. Still ask the owner before upsizing the container, dropping a 
 
 ### Non-negotiable behaviour
 
-1. **Fail closed.** A list that failed to load, is older than its `MaxAgeHours`, or whose index isn't ready shows
-   `Not checked` (no percentage, never `0%`); overall `Incomplete` / `Unavailable`.
+1. **Fail closed.** A list that failed to load or whose index isn't ready shows `Not checked` (no percentage, never
+   `0%`); overall `Incomplete` / `Unavailable`. A list older than its `MaxAgeHours` is still searched as last
+   downloaded, but `Overdue`, and every result warns about it (owner's decision, 2026-11-09).
 2. **Wording.** "No match found in: EU (as of …), …". Never "not sanctioned", "cleared", "forgiven", "absolved".
 3. **Disclaimer on every result**: demo list check, not a legal determination; no ownership/control or embargoes;
    a person must review possible matches.
@@ -60,7 +61,11 @@ tools/lists.ps1           The script the owner runs to manage lists
   free-text string plus an ISO alpha-2 code when the source gives one. Parsers stream (`Parsers/Xml.Records`: one
   record element at a time) and leave out vessels and aircraft. A wrong root element is a `ListFormatException`.
 - `FeedDownloader` identifies itself honestly (`sanction-and-forgive/<version>`). Never disguise the client as a
-  browser to get past a site that refuses it: report the source as `NeedsAccess` instead.
+  browser to get past a site that refuses it: report the source as `NeedsAccess` instead. A passing fault (5xx, 408,
+  429, a broken connection, a timeout) is retried with exponential backoff (`DownloadRetry.Default`: 15 s doubling,
+  five retries, none starting more than 10 minutes after the first attempt; owner's decision, 2026-11-09); a refusal
+  (403, 404) isn't. A retry's log line never says "failed" (the import alert looks for it). The job's
+  `replicaTimeout` is an hour to leave room.
 - `probe` (`dotnet SanctionAndForgive.Cli.dll probe [--source <code>|all] [--file <path>] [--keep <dir>]`) downloads,
   parses and prints counts per feed. It writes nothing else. It exits 1 if an `Active` feed failed.
 - Parser tests: `tests/SanctionAndForgive.Tests/Lists/ParserTests.cs`, one small fictional fixture per format.
@@ -118,9 +123,12 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `LastCheckedAt`, count, `ListIndex`), swapped whole. `ListLoader.RefreshAsync` reads `Sources` and rebuilds only the
   lists whose active import changed (one at a time); `ListRefreshService` runs it at startup in the background and
   every `Lists:RefreshMinutes` (15). One swap per refresh, every source in it, so a list is never missing from the
-  rows; the first swap makes the API ready. If SQL is down, the catalog keeps serving and lists age out.
-- **Fail closed:** `LoadedList.IsCurrent(now)`: an index, and a last successful check within `MaxAgeHours` (manual
-  sources never age). Otherwise the screener gets no index and the cell is `NotChecked`, with no percentage.
+  rows; the first swap makes the API ready. If SQL is down, the catalog keeps serving and lists become overdue.
+- **Fail closed:** `LoadedList.IsSearched`: it has an index; otherwise the screener gets none and the cell is
+  `NotChecked`, with no percentage. `IsOverdue(now)`: searched, but its last successful check is older than
+  `MaxAgeHours` (manual sources never age): the list's `State` is `Overdue`, its cells are answered as usual, the
+  summary ends "Warning: couldn't be updated within 72 hours, so searched as last downloaded: EU, as of …", and the audit line marks it
+  `overdue`. No age stops a list being searched (owner's decision, 2026-11-09).
 - **Endpoints** (controllers; every response a record in `Controllers/ApiResponses.cs`): `POST /api/v1/screenings`
   (`{receiverName, companyName, address}`, each optional up to 300 characters, at least one; 503 `{state:"warmingUp"}`
   before the first load; rows with hits first; a summary worded "No match found in: EU, as of …; …" and never
@@ -241,7 +249,7 @@ Spec sections 4 ("Import rules") and 6. The database holds parsed lists only, ne
 - **`ImportStore.ImportAsync`:** an application lock per source; the canonical hash (records sorted by external id,
   generation dates don't count) → `Unchanged` only moves `LastCheckedAt`; zero records → `Rejected`; a drop of more
   than 20% (owner's decision, 2026-11-06) → written in full but **held** (`PendingReview`, `ImportResult.HeldForReview`):
-  the old list keeps serving, `LastCheckedAt` doesn't move, so it still ages out after `MaxAgeHours`; the same update
+  the old list keeps serving, `LastCheckedAt` doesn't move, so it becomes overdue after `MaxAgeHours`; the same update
   again stays held without writing; a later update that needs no review, or the feed returning to the active list,
   supersedes it (`Rejected`, "superseded"), always in the same transaction as that activation or check (records
   later). A hold keeps `BasedOnImportId`, the list it was compared with: `ReviewAsync` confirms only while that's still

@@ -221,7 +221,7 @@ resource budget 'Microsoft.Consumption/budgets@2023-11-01' = {
 }
 
 // The daily import failed for a source (the CLI prints "FAILED" or a rejection), or the job execution itself failed.
-// A failed refresh keeps the old list, which then ages to Not checked: better to hear about it before a demo.
+// A failed refresh keeps the old list, which is searched with a warning once overdue: better to hear about it first.
 // union isfuzzy, column_ifexists and an empty datatable leg: the log tables only appear once something has been logged.
 resource importFailed 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
   name: '${name}-import-failed'

@@ -47,6 +47,12 @@ function showState(text, isError) {
   stateBox.classList.toggle("error", Boolean(isError));
 }
 
+// When a list was last checked; an Overdue list (searched, but not updated within its allowed age) says so.
+function listAsOf(list) {
+  if (list.state === "NotChecked") return "not checked";
+  return list.state === "Overdue" ? `⚠ out of date: ${asOf(list.asOf)}` : asOf(list.asOf);
+}
+
 async function loadStatus() {
   try {
     const response = await fetch("/api/v1/status", { headers: { Accept: "application/json" } });
@@ -54,7 +60,7 @@ async function loadStatus() {
     lists = status.lists;
     $("version").textContent = `Version ${status.version}, matcher ${status.matcherVersion}.`;
     $("sources").textContent = lists.length
-      ? lists.map((list) => `${list.name} (${list.state === "Current" ? asOf(list.asOf) : "not checked"})`).join("; ") + "."
+      ? lists.map((list) => `${list.name} (${listAsOf(list)})`).join("; ") + "."
       : "No lists loaded yet.";
     if (status.state !== "ready") {
       showState("The lists are loading. Screening starts as soon as they're in memory…");
@@ -167,7 +173,8 @@ function render(result) {
   const body = table.tBodies[0];
   body.replaceChildren();
   for (const list of result.lists) {
-    const row = el("tr", {}, el("td", { class: "list-name" }, list.name, el("span", { class: "as-of" }, list.state === "Current" ? asOf(list.asOf) : "not checked")));
+    const row = el("tr", {}, el("td", { class: "list-name" }, list.name,
+      el("span", { class: list.state === "Overdue" ? "as-of overdue" : "as-of" }, listAsOf(list))));
     for (const entry of result.entries) {
       const cell = entry.cells.find((candidate) => candidate.list === list.code);
       row.append(el("td", {}, cellButton(cell, entry, list)));

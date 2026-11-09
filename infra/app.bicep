@@ -178,7 +178,9 @@ resource importJob 'Microsoft.App/jobs@2024-03-01' = {
         parallelism: 1
         replicaCompletionCount: 1
       }
-      replicaTimeout: 1800
+      // An hour: a run takes about 3 minutes, but each feed may retry a passing fault for up to 10 minutes, and its
+      // last attempt may take up to 10 more (FeedDownloader, DownloadRetry.Default).
+      replicaTimeout: 3600
       replicaRetryLimit: 0
     }
     template: {

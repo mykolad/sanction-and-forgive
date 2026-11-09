@@ -29,13 +29,14 @@ public sealed record ScreeningResponse(
         + "listed party, based on the data entered; it isn't the chance that a shipment is lawful.";
 }
 
-/// <param name="State"><c>Current</c>, or <c>NotChecked</c> (failed to load, older than allowed, or no index).</param>
+/// <param name="State"><c>Current</c>; <c>Overdue</c> (searched as last downloaded, but not updated within its allowed
+/// age: the summary warns); or <c>NotChecked</c> (not loaded, or its load failed: no percentage).</param>
 /// <param name="AsOf">The list's last successful check.</param>
 /// <param name="Version">The import the answer was computed from (immutable: a changed list is a new import).</param>
 public sealed record ListResponse(string Code, string Name, DateTimeOffset? AsOf, string State, int? Version, int RecordCount, string? Url)
 {
     public static ListResponse From(LoadedList list, DateTimeOffset now) =>
-        new(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? "Current" : "NotChecked", list.Index is null ? null : list.ActiveImportId, list.RecordCount, SanctionAndForgive.Lists.ListSources.Find(list.Code)?.PublicUrl ?? list.Url);
+        new(list.Code, list.Name, list.LastCheckedAt, list.State(now), list.Index is null ? null : list.ActiveImportId, list.RecordCount, SanctionAndForgive.Lists.ListSources.Find(list.Code)?.PublicUrl ?? list.Url);
 }
 
 /// <param name="AllowedBy">The allow-list entry this receiver or company is: its possible matches are allowed.</param>

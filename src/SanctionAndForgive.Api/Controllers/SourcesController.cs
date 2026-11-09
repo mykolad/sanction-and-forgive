@@ -72,8 +72,9 @@ public sealed record SourceHistoryResponse(string Code, string Name, IReadOnlyLi
 
 public sealed record SourcesResponse(DateTimeOffset Now, IReadOnlyList<SourceResponse> Lists);
 
-/// <param name="State"><c>Current</c> (searched), <c>NotChecked</c> (loaded but stale or not built: its cells say
-/// Not checked), or <c>NotImported</c>.</param>
+/// <param name="State"><c>Current</c> (searched), <c>Overdue</c> (searched as last downloaded, though not updated
+/// within its allowed age: results warn), <c>NotChecked</c> (no index: its cells say Not checked), or
+/// <c>NotImported</c>.</param>
 /// <param name="Status">The catalogue's <see cref="FeedStatus"/> (<c>Active</c>, <c>TermsUnclear</c>,
 /// <c>NeedsAccess</c>), or <c>Manual</c> for a source maintained by hand.</param>
 /// <param name="Reason">Why it isn't searched, when it isn't.</param>
@@ -107,15 +108,15 @@ public sealed record SourceResponse(
 
     public static SourceResponse From(LoadedList list, ListSource? source, DateTimeOffset now)
     {
-        var current = list.IsCurrent(now);
-        string? reason = current ? null
+        var state = list.State(now);
+        string? reason = state == "Current" ? null
             : list.ActiveImportId is null ? "No completed import yet."
             : list.Index is null ? "Loading, or its last load failed. Its cells say Not checked until it loads."
-            : $"Not checked successfully for more than {list.MaxAgeHours} hours. Its cells say Not checked until a check succeeds.";
+            : $"Couldn't be updated within {list.MaxAgeHours} hours. It's still searched as last downloaded, and every result warns about it until a check succeeds.";
         return new(
             list.Code,
             list.Name,
-            current ? "Current" : "NotChecked",
+            state,
             source?.Status.ToString() ?? "Manual",
             reason,
             list.RecordCount,

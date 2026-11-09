@@ -83,7 +83,7 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
     private (ScreeningResult Result, List<ListResponse> Rows, DateTimeOffset Now) Run(ScreeningRequestBody body, IReadOnlyList<LoadedList> lists, AllowList allowList)
     {
         var now = clock.GetUtcNow();
-        var screened = lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.IsCurrent(now) ? list.Index : null)).ToList();
+        var screened = lists.Select(list => new ScreenedList(list.Code, list.Name, list.LastCheckedAt, list.Index)).ToList();
         var result = screener.Screen(new ScreeningRequest(body.ReceiverName, body.CompanyName, body.Address), screened, allowList);
 
         // Rows with hits first (best percentage across the entries), then the others in their usual order.
@@ -101,7 +101,7 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
     /// (docs/api.md, "Finding a screening in the logs"). The entered text never appears.</summary>
     private void Audit(string reference, ScreeningResult result, List<ListResponse> rows)
     {
-        var lists = string.Join(", ", rows.Select(row => $"{row.Code}@{row.Version?.ToString(CultureInfo.InvariantCulture) ?? "-"}"));
+        var lists = string.Join(", ", rows.Select(row => $"{row.Code}@{row.Version?.ToString(CultureInfo.InvariantCulture) ?? "-"}{(row.State == "Overdue" ? " overdue" : string.Empty)}"));
         var results = new StringBuilder();
         foreach (var entry in result.Entries)
         {
@@ -115,12 +115,16 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
         logger.LogInformation("Screening {Reference}: {Outcome}; matcher {MatcherVersion}; lists {ListVersions}; allow-list {AllowListVersion}; {Results}", reference, result.Outcome, result.MatcherVersion, lists, result.AllowListVersion, results.ToString().TrimEnd(' ', '|'));
     }
 
-    /// <summary>The summary line, worded precisely: never "not sanctioned" or "cleared", always which lists, as of when.</summary>
+    /// <summary>The summary line, worded precisely: never "not sanctioned" or "cleared", always which lists, as of when,
+    /// and a warning for each list searched although it couldn't be updated within its allowed age.</summary>
     private static string Summary(ScreeningResult result, IReadOnlyList<LoadedList> lists, DateTimeOffset now)
     {
-        var checkedLists = lists.Where(list => list.IsCurrent(now)).Select(list => $"{list.Name}, as of {AsOf(list.LastCheckedAt)}").ToList();
-        var notChecked = lists.Where(list => !list.IsCurrent(now)).Select(list => list.Name).ToList();
-        var gap = notChecked.Count > 0 ? $" Not checked: {string.Join(", ", notChecked)}." : string.Empty;
+        var checkedLists = lists.Where(list => list.IsSearched).Select(list => $"{list.Name}, as of {AsOf(list.LastCheckedAt)}").ToList();
+        var notChecked = lists.Where(list => !list.IsSearched).Select(list => list.Name).ToList();
+        // One sentence per allowed age (72 hours for every daily list), naming each list that couldn't be updated in it.
+        var overdue = lists.Where(list => list.IsOverdue(now)).GroupBy(list => list.MaxAgeHours)
+            .Select(group => string.Create(CultureInfo.InvariantCulture, $" Warning: couldn't be updated within {group.Key} hours, so searched as last downloaded: {string.Join("; ", group.Select(list => $"{list.Name}, as of {AsOf(list.LastCheckedAt)}"))}."));
+        var gap = (notChecked.Count > 0 ? $" Not checked: {string.Join(", ", notChecked)}." : string.Empty) + string.Concat(overdue);
         var hits = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Outcome is Outcome.Match or Outcome.Review && !cell.Allowed)
             .Select(cell => lists.First(list => list.Code == cell.List).Name).Distinct().ToList();
         var allowedOn = result.Entries.SelectMany(entry => entry.Cells).Where(cell => cell.Allowed)
@@ -135,8 +139,8 @@ public sealed partial class ScreeningService(ListCatalog catalog, Screener scree
             OverallOutcome.Review => $"Review needed: a similar listed party on {string.Join(", ", hits)}.{gap}{allowed}",
             OverallOutcome.Incomplete when checkedLists.Count == 0 => $"Incomplete: no list could be checked.{gap}",
             OverallOutcome.Incomplete => $"Incomplete. No match found in: {string.Join("; ", checkedLists)}.{gap}{allowed}",
-            _ when allowed.Length > 0 => $"No match found in: {string.Join("; ", checkedLists)}, apart from what the allow-list allows.{allowed}",
-            _ => $"No match found in: {string.Join("; ", checkedLists)}.",
+            _ when allowed.Length > 0 => $"No match found in: {string.Join("; ", checkedLists)}, apart from what the allow-list allows.{gap}{allowed}",
+            _ => $"No match found in: {string.Join("; ", checkedLists)}.{gap}",
         };
     }
 

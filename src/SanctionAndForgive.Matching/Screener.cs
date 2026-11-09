@@ -11,7 +11,7 @@ namespace SanctionAndForgive.Matching;
 public sealed record ScreeningRequest(string? ReceiverName, string? CompanyName, string? Address);
 
 /// <summary>A list as the screener sees it. <paramref name="Index"/> is null when the list may not be searched:
-/// it failed to load, it's older than its allowed age, or its index isn't ready. Its cells then say Not checked.</summary>
+/// it failed to load or its index isn't ready. Its cells then say Not checked.</summary>
 public sealed record ScreenedList(string Code, string Name, DateTimeOffset? AsOf, ListIndex? Index);
 
 public enum EntryKind

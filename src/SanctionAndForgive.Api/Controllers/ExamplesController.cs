@@ -10,7 +10,7 @@ namespace SanctionAndForgive.Api.Controllers;
 /// deterministically, so the same lists give the same examples; computed once per loaded snapshot.</summary>
 [ApiController]
 [Route("api/v1/examples")]
-public sealed class ExamplesController(ListCatalog catalog, TimeProvider clock) : ControllerBase
+public sealed class ExamplesController(ListCatalog catalog) : ControllerBase
 {
     private static readonly ConditionalWeakTable<IReadOnlyList<LoadedList>, List<ExampleResponse>> Cache = [];
 
@@ -18,8 +18,7 @@ public sealed class ExamplesController(ListCatalog catalog, TimeProvider clock) 
     public IReadOnlyList<ExampleResponse> Get()
     {
         var lists = catalog.Lists;
-        var now = clock.GetUtcNow();
-        return Cache.GetValue(lists, _ => Choose(lists.Where(list => list.IsCurrent(now)).ToList()));
+        return Cache.GetValue(lists, _ => Choose(lists.Where(list => list.IsSearched).ToList()));
     }
 
     private static List<ExampleResponse> Choose(List<LoadedList> lists)

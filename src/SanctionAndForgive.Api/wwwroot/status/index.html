@@ -29,8 +29,9 @@
 
     <section class="panel" aria-labelledby="searched-title">
       <h2 id="searched-title">Lists searched</h2>
-      <p class="section-note">Each list is checked for changes daily. A list that hasn't been checked successfully within its allowed age
-        (72 hours for the daily lists) shows <strong>Not checked</strong> in every result, never a percentage, until a check succeeds.</p>
+      <p class="section-note">Each list is checked for changes daily. A list that couldn't be updated within its allowed age
+        (72 hours for the daily lists) is still searched as last downloaded, marked <strong>out of date</strong>, and every result
+        warns about it until a check succeeds. A list that isn't loaded shows <strong>Not checked</strong>, never a percentage.</p>
       <div class="table-scroll">
         <table id="sources-table" class="sources">
           <thead>

@@ -58,7 +58,7 @@ public sealed class ApiTests : IDisposable
     }
 
     [Fact]
-    public async Task ListedOnEuOnly_UkStale_MatchWithNotCheckedRowAndTheGapStated()
+    public async Task ListedOnEuOnly_UkOverdue_IsStillSearched_AndTheSummaryWarns()
     {
         LoadStandardLists(ukStale: true);
 
@@ -68,15 +68,31 @@ public sealed class ApiTests : IDisposable
         Assert.Equal("Match", Cell(result, "eu").GetProperty("outcome").GetString());
         Assert.Equal("NoMatch", Cell(result, "ofac-sdn").GetProperty("outcome").GetString());
         var uk = Cell(result, "uk");
-        Assert.Equal("NotChecked", uk.GetProperty("state").GetString());
-        Assert.Equal(JsonValueKind.Null, uk.GetProperty("percent").ValueKind);
-        Assert.Equal(JsonValueKind.Null, uk.GetProperty("outcome").ValueKind);
-        Assert.Contains("Not checked: UK", result.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.Equal(("Checked", "NoMatch"), (uk.GetProperty("state").GetString(), uk.GetProperty("outcome").GetString()));
+        var row = result.GetProperty("lists").EnumerateArray().Single(list => list.GetProperty("code").GetString() == "uk");
+        Assert.Equal("Overdue", row.GetProperty("state").GetString());
+        Assert.EndsWith(
+            "Warning: couldn't be updated within 72 hours, so searched as last downloaded: UK, as of 3 Nov 2026 04:00 UTC.",
+            result.GetProperty("summary").GetString(),
+            StringComparison.Ordinal);
         Assert.Equal("eu", result.GetProperty("lists")[0].GetProperty("code").GetString());
     }
 
     [Fact]
-    public async Task UnlistedName_AllCurrent_NoMatchWithEveryListAndDate_StaleList_Incomplete()
+    public async Task AHitOnAnOverdueList_CountsAsUsual()
+    {
+        LoadStandardLists(ukStale: true);
+
+        var result = await ScreenAsync(new { companyName = "Volga Trade" });
+
+        Assert.Equal("Match", result.GetProperty("outcome").GetString());
+        Assert.Equal("Match", Cell(result, "uk").GetProperty("outcome").GetString());
+        Assert.Contains("Possible match on UK.", result.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.Contains("Warning: couldn't be updated within 72 hours, so searched as last downloaded: UK,", result.GetProperty("summary").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UnlistedName_AllCurrent_NoMatchWithEveryListAndDate_OverdueList_NoMatchWithAWarning()
     {
         LoadStandardLists(ukStale: false);
         var current = await ScreenAsync(new { receiverName = "Zephyrine Quillbrook" });
@@ -87,7 +103,9 @@ public sealed class ApiTests : IDisposable
         var summary = current.GetProperty("summary").GetString()!;
         Assert.StartsWith("No match found in: EU, as of 6 Nov 2026 10:00 UTC; OFAC SDN, as of", summary, StringComparison.Ordinal);
         Assert.DoesNotContain("not sanctioned", summary, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal("Incomplete", stale.GetProperty("outcome").GetString());
+        Assert.DoesNotContain("Warning", summary, StringComparison.Ordinal);
+        Assert.Equal("NoMatch", stale.GetProperty("outcome").GetString());
+        Assert.EndsWith("UK, as of 3 Nov 2026 04:00 UTC. Warning: couldn't be updated within 72 hours, so searched as last downloaded: UK, as of 3 Nov 2026 04:00 UTC.", stale.GetProperty("summary").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -99,6 +117,8 @@ public sealed class ApiTests : IDisposable
 
         Assert.Equal("Incomplete", result.GetProperty("outcome").GetString());
         Assert.Equal("NotChecked", Cell(result, "eu").GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, Cell(result, "eu").GetProperty("percent").ValueKind);
+        Assert.Contains("Not checked: EU.", result.GetProperty("summary").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -143,7 +163,8 @@ public sealed class ApiTests : IDisposable
         var audit = Assert.Single(records, record => record.Message.Contains("TX-2026-0001", StringComparison.Ordinal));
         Assert.Contains("Match", audit.Message, StringComparison.Ordinal);
         Assert.Contains("eu Match", audit.Message, StringComparison.Ordinal);
-        Assert.Contains("uk NotChecked", audit.Message, StringComparison.Ordinal);
+        Assert.Contains("uk NoMatch", audit.Message, StringComparison.Ordinal);
+        Assert.Matches(@"uk@\S+ overdue", audit.Message);
         foreach (var entered in new[] { "Шевченко", "Ромашка", "Хрещатик", "Київ" })
         {
             Assert.DoesNotContain(records, record => record.Message.Contains(entered, StringComparison.Ordinal) || (record.Exception?.ToString().Contains(entered, StringComparison.Ordinal) ?? false));

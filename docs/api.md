@@ -9,6 +9,16 @@ Every screening carries the caller's own **`reference`**: a transaction id, say.
 of letters, digits and `. _ : / -`, starting with a letter or digit. It's echoed back in the response, and it is how a
 screening is found in the logs later. **Never put personal data in it**: it's logged as it is.
 
+## Lists that couldn't be updated
+
+Each daily list is checked once a day (03:30 UTC, each download retried for up to 10 minutes after a passing fault)
+and has an allowed age, 72 hours. A list that couldn't be updated within it is **still searched, as last
+downloaded**, however old (owner's decision, 2026-11-09): its `state` in a response's `lists` (and a stream's header)
+is `Overdue` instead of `Current`, its cells are answered as usual, and the summary ends with a warning, e.g.
+"Warning: couldn't be updated within 72 hours, so searched as last downloaded: EU, as of 7 Nov 2026 03:30 UTC." A list that isn't
+loaded (its load failed, or it's still loading) is `NotChecked`: no percentage, never 0%, and the result is
+`Incomplete`.
+
 ## Batches: `POST /api/v1/screenings/stream`
 
 For many records at once. The request is **NDJSON**: one screening per line, each the same object as the single
@@ -82,13 +92,14 @@ every log record of a screening for the entered text (`ApiTests.Screening_IsLogg
 Each screening writes one audit line instead:
 
 ```
-Screening TX-2026-0001: Match; matcher 7ea1dd809393; lists eu@1, ofac-sdn@2, uk@4, …;
+Screening TX-2026-0001: Match; matcher 7ea1dd809393; lists eu@1, ofac-sdn@2, uk@4 overdue, …;
 Receiver: eu Review 70% [EU.1234.56]; ofac-sdn NoMatch 18%; uk NotChecked | Company: eu Match 99% [EU.987.12]; …
 ```
 
 The reference, the overall outcome, the matcher version, each list's version (its import id), and for each entry kind
 (Receiver, Company, Address) and list: the outcome, the percentage, and, from 20%, the best candidate's id on that list
-(the list's own id, not a name). A list that wasn't searched says `NotChecked`. With the versions, the same result
+(the list's own id, not a name). A list that wasn't searched says `NotChecked`; one searched past its allowed age has
+`overdue` after its version. With the versions, the same result
 can be reproduced later from the same lists.
 
 ### Finding a screening in the logs
@@ -121,8 +132,9 @@ Every list a screening searches, then every known feed that isn't imported, with
    "reason":"The UN's terms allow personal, non-commercial use only. …","recordCount":null, …}]}
 ```
 
-- `state`: `Current` (searched now), `NotChecked` (loaded, but older than `maxAgeHours` or not built yet: its
-  cells say Not checked, and `reason` says which), or `NotImported`.
+- `state`: `Current` (searched now), `Overdue` (searched as last downloaded, but not updated within `maxAgeHours`:
+  results warn, and `reason` says so), `NotChecked` (loaded but not built yet, or its load failed: its cells say Not
+  checked, and `reason` says which), or `NotImported`.
 - `status`: the catalogue's decision: `Active`, `TermsUnclear` (the terms seem to rule out this use; waiting for
   the owner), `NeedsAccess` (an API key, or a site that refuses automated clients), or `Manual` (kept by hand).
 - `lastCheckedAt`: the last successful check, changed or not; freshness counts from it. `updatedAt`: when the
@@ -130,8 +142,7 @@ Every list a screening searches, then every known feed that isn't imported, with
 - `held`: an update held for review, if one is waiting (`importId`, `recordCount`, `downloadedAt`, `reason`, and
   `added`, `removed`, `changed` against the list it was compared with: the list in use when it was downloaded), however
   many checks came after it. An update with more than 20% fewer records than the list it would replace is written but
-  not searched. Screenings keep using the active list while it's current; it still turns Not checked after its
-  allowed age. An administrator confirms or rejects the held one (`tools/lists.ps1 confirm|reject -Import <id>`).
+  not searched. Screenings keep using the active list, past its allowed age too (as `Overdue`). An administrator confirms or rejects the held one (`tools/lists.ps1 confirm|reject -Import <id>`).
 - `history`: the latest 10 updates, newest first, as of the API's last refresh (every 15 minutes), and
   `historyCount`, how many there are in all: `importId`,
   `result` (`Active`: the list in use; `Replaced`, `HeldForReview`, `Rejected`, `Failed`, `Running`), `startedAt`,
