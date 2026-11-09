@@ -50,6 +50,9 @@ if ($Build) {
 Push-Location $root
 try {
     dotnet tool restore | Out-Null
+    # dotnet ef needs the projects restored and built (a fresh checkout has neither).
+    dotnet build src/SanctionAndForgive.Api -v q
+    if ($LASTEXITCODE -ne 0) { throw 'The build failed.' }
     $env:ConnectionStrings__Lists = $hostConnection
     dotnet ef database drop --force --project src/SanctionAndForgive.Data --startup-project src/SanctionAndForgive.Api
     dotnet ef database update --project src/SanctionAndForgive.Data --startup-project src/SanctionAndForgive.Api
