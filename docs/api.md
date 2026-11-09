@@ -15,7 +15,7 @@ Each daily list is checked once a day (03:30 UTC, each download retried for up t
 and has an allowed age, 72 hours. A list that couldn't be updated within it is **still searched, as last
 downloaded**, however old (owner's decision, 2026-11-09): its `state` in a response's `lists` (and a stream's header)
 is `Overdue` instead of `Current`, its cells are answered as usual, and the summary ends with a warning, e.g.
-"Warning: EU couldn't be updated within 72 hours and was searched as of 7 Nov 2026 03:30 UTC." A list that isn't
+"Warning: couldn't be updated within 72 hours, so searched as last downloaded: EU, as of 7 Nov 2026 03:30 UTC." A list that isn't
 loaded (its load failed, or it's still loading) is `NotChecked`: no percentage, never 0%, and the result is
 `Incomplete`.
 

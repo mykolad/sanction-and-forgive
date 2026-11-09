@@ -127,7 +127,7 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Fail closed:** `LoadedList.IsSearched`: it has an index; otherwise the screener gets none and the cell is
   `NotChecked`, with no percentage. `IsOverdue(now)`: searched, but its last successful check is older than
   `MaxAgeHours` (manual sources never age): the list's `State` is `Overdue`, its cells are answered as usual, the
-  summary ends "Warning: EU couldn't be updated within 72 hours and was searched as of …", and the audit line marks it
+  summary ends "Warning: couldn't be updated within 72 hours, so searched as last downloaded: EU, as of …", and the audit line marks it
   `overdue`. No age stops a list being searched (owner's decision, 2026-11-09).
 - **Endpoints** (controllers; every response a record in `Controllers/ApiResponses.cs`): `POST /api/v1/screenings`
   (`{receiverName, companyName, address}`, each optional up to 300 characters, at least one; 503 `{state:"warmingUp"}`
