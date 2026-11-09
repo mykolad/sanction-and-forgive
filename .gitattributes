@@ -4,3 +4,6 @@
 # would deploy a different query from CI's (what-if would show it changing on every run).
 *.bicep text eol=lf
 *.bicepparam text eol=lf
+
+# Conformance golden files: written by the reference implementation (docs/conformance.md), one JSON per line.
+tests/conformance/golden/** text eol=lf linguist-generated=true

@@ -1,0 +1,30 @@
+[
+  {
+    "label": "A listed company",
+    "receiverName": null,
+    "companyName": "Baltic Engineering PJSC",
+    "address": null,
+    "list": "eu"
+  },
+  {
+    "label": "In Cyrillic",
+    "receiverName": null,
+    "companyName": "ООО «Урал Инвест»",
+    "address": null,
+    "list": "eu"
+  },
+  {
+    "label": "With an address",
+    "receiverName": null,
+    "companyName": "Dnipro Group Ltd",
+    "address": "Abay Avenue 15, Almaty, KAZAKHSTAN",
+    "list": "eu"
+  },
+  {
+    "label": "With a typo",
+    "receiverName": null,
+    "companyName": "Joint Stock Company Nortwind Energy",
+    "address": null,
+    "list": "eu"
+  }
+]

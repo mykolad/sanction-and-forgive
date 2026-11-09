@@ -7,6 +7,7 @@
     <Project Path="src/SanctionAndForgive.Matching/SanctionAndForgive.Matching.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/SanctionAndForgive.Conformance/SanctionAndForgive.Conformance.csproj" />
     <Project Path="tests/SanctionAndForgive.SmokeTests/SanctionAndForgive.SmokeTests.csproj" />
     <Project Path="tests/SanctionAndForgive.Tests/SanctionAndForgive.Tests.csproj" />
   </Folder>
