@@ -35,6 +35,15 @@ The script:
 
 A plain `dotnet test` of the solution skips every conformance test: they need `CONFORMANCE_BASE_URL`.
 
+## Implementations
+
+| Implementation | Where | Image | CLI in the image | Conformance |
+|---|---|---|---|---|
+| .NET (reference) | `src/` | `Dockerfile`, 356 MB | `dotnet SanctionAndForgive.Cli.dll` | 23 of 23 |
+| Go | `ports/go/` | `ports/go/Dockerfile`, 41 MB | `/app/cli` | 23 of 23 |
+
+The CI job `conformance` runs the suite against each of them on every pull request.
+
 ## What an implementation must provide
 
 **One image**: the API on port 8080 as its entry point, and the CLI in the same image (the job runs it with another

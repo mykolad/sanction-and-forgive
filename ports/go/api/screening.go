@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sanctionandforgive/lists"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,7 +95,7 @@ func listResponse(list *LoadedList, now time.Time) ListResponse {
 		version = list.ActiveImportID
 	}
 	url := list.URL
-	if source := FindSource(list.Code); source != nil {
+	if source := lists.FindSource(list.Code); source != nil {
 		url = source.PublicURL()
 	}
 	return ListResponse{list.Code, list.Name, list.LastCheckedAt, list.State(now), version, list.RecordCount, url}

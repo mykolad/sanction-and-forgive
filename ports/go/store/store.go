@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	mssql "github.com/microsoft/go-mssqldb"
+	_ "github.com/microsoft/go-mssqldb" // the sqlserver driver
 	"github.com/microsoft/go-mssqldb/azuread"
 )
 
@@ -70,8 +70,6 @@ func translate(ado string) (string, string) {
 	}
 	return driver, strings.Join(parts, ";")
 }
-
-var _ = mssql.Error{}
 
 // SourceRow is a source with its active import's count and completion.
 type SourceRow struct {
@@ -260,14 +258,14 @@ func ActiveSubjects(ctx context.Context, db *sql.DB, code string, importID int) 
 	if still == 0 {
 		return nil, nil
 	}
-	subjects, err := readSubjects(ctx, tx, importID)
+	subjects, err := readSubjectsFrom(ctx, tx, importID)
 	if err != nil {
 		return nil, err
 	}
 	return subjects, tx.Commit()
 }
 
-func readSubjects(ctx context.Context, tx *sql.Tx, importID int) ([]Subject, error) {
+func readSubjectsFrom(ctx context.Context, tx querier, importID int) ([]Subject, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT Id, ExternalId, Type, PrimaryName, Programmes, ListedOn, Remarks, SourceUrl FROM Subjects WHERE ImportId = @id ORDER BY Id`, sql.Named("id", importID))
 	if err != nil {
 		return nil, err

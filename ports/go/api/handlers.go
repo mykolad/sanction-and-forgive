@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sanctionandforgive/lists"
 	"sort"
 	"strings"
 	"sync"
@@ -78,25 +79,25 @@ type SourceResponse struct {
 	HistoryCount  int                    `json:"historyCount"`
 }
 
-func sourceResponse(list *LoadedList, source *ListSource, now time.Time) SourceResponse {
+func sourceResponse(list *LoadedList, source *lists.ListSource, now time.Time) SourceResponse {
 	state := list.State(now)
 	var reason *string
 	switch {
 	case state == "Current":
 	case list.SwitchedOff != nil:
-		reason = optional("Switched off by an administrator on " + list.SwitchedOff.At.UTC().Format("2 Jan 2006 15:04 UTC") + ": " + list.SwitchedOff.Reason + " It isn't searched until it's switched on again, and it's still updated daily.")
+		reason = lists.Optional("Switched off by an administrator on " + list.SwitchedOff.At.UTC().Format("2 Jan 2006 15:04 UTC") + ": " + list.SwitchedOff.Reason + " It isn't searched until it's switched on again, and it's still updated daily.")
 	case list.ActiveImportID == nil:
-		reason = optional("No completed import yet.")
+		reason = lists.Optional("No completed import yet.")
 	case list.Index == nil:
-		reason = optional("Loading, or its last load failed. Its cells say Not checked until it loads.")
+		reason = lists.Optional("Loading, or its last load failed. Its cells say Not checked until it loads.")
 	default:
-		reason = optional("Couldn't be updated within " + itoa(*list.MaxAgeHours) + " hours. It's still searched as last downloaded, and every result warns about it until a check succeeds.")
+		reason = lists.Optional("Couldn't be updated within " + itoa(*list.MaxAgeHours) + " hours. It's still searched as last downloaded, and every result warns about it until a check succeeds.")
 	}
 	status := "Manual"
 	var homepage, fileURL, terms *string
 	if source != nil {
 		status = string(source.Status)
-		homepage, fileURL, terms = optional(source.Homepage), source.PublicURL(), optional(source.TermsURL)
+		homepage, fileURL, terms = lists.Optional(source.Homepage), source.PublicURL(), lists.Optional(source.TermsURL)
 	}
 	var version *int
 	if list.Index != nil {
@@ -108,14 +109,14 @@ func sourceResponse(list *LoadedList, source *ListSource, now time.Time) SourceR
 		History: []HistoryEntryResponse{}}
 }
 
-func notImported(source *ListSource) SourceResponse {
+func notImported(source *lists.ListSource) SourceResponse {
 	reason := source.Note
 	if reason == "" {
 		reason = "Not imported yet."
 	}
 	age := source.MaxAgeHours
 	return SourceResponse{Code: source.Code, Name: source.Name, State: "NotImported", Status: string(source.Status), Reason: &reason, MaxAgeHours: &age,
-		Homepage: optional(source.Homepage), TermsURL: optional(source.TermsURL), History: []HistoryEntryResponse{}}
+		Homepage: lists.Optional(source.Homepage), TermsURL: lists.Optional(source.TermsURL), History: []HistoryEntryResponse{}}
 }
 
 type sourcesResponse struct {
@@ -130,9 +131,9 @@ func (s *Server) sources(w http.ResponseWriter, _ *http.Request) {
 	}
 	now := s.Screenings.Now()
 	history, heldUpdates := s.Catalog.History(), s.Catalog.Held()
-	lists := []SourceResponse{}
+	rows := []SourceResponse{}
 	for _, list := range s.Catalog.Lists() {
-		response := sourceResponse(list, FindSource(list.Code), now)
+		response := sourceResponse(list, lists.FindSource(list.Code), now)
 		if held, ok := heldUpdates[list.Code]; ok {
 			response.Held = &HeldUpdateResponse{held.ID, held.RecordCount, held.StartedAt, held.Message, held.Added, held.Removed, held.Changed}
 		}
@@ -144,14 +145,14 @@ func (s *Server) sources(w http.ResponseWriter, _ *http.Request) {
 			response.History = append(response.History, historyEntry(entry))
 		}
 		response.HistoryCount = len(entries)
-		lists = append(lists, response)
+		rows = append(rows, response)
 	}
-	for i := range Sources {
-		if s.Catalog.Find(Sources[i].Code) == nil {
-			lists = append(lists, notImported(&Sources[i]))
+	for i := range lists.Sources {
+		if s.Catalog.Find(lists.Sources[i].Code) == nil {
+			rows = append(rows, notImported(&lists.Sources[i]))
 		}
 	}
-	writeJSON(w, http.StatusOK, sourcesResponse{now, lists})
+	writeJSON(w, http.StatusOK, sourcesResponse{now, rows})
 }
 
 type sourceHistoryResponse struct {
@@ -223,7 +224,7 @@ func (s *Server) examples(w http.ResponseWriter, _ *http.Request) {
 	for _, p := range entities {
 		if n := wordCount(p.subject.PrimaryName); isLatin(p.subject.PrimaryName) && n >= 2 && n <= 5 {
 			latin = p.subject
-			examples = append(examples, exampleResponse{"A listed company", nil, optional(p.subject.PrimaryName), nil, p.list})
+			examples = append(examples, exampleResponse{"A listed company", nil, lists.Optional(p.subject.PrimaryName), nil, p.list})
 			break
 		}
 	}
@@ -236,7 +237,7 @@ func (s *Server) examples(w http.ResponseWriter, _ *http.Request) {
 			}
 		}
 		if found != "" {
-			examples = append(examples, exampleResponse{"In Cyrillic", nil, optional(found), nil, p.list})
+			examples = append(examples, exampleResponse{"In Cyrillic", nil, lists.Optional(found), nil, p.list})
 			break
 		}
 	}
@@ -247,7 +248,7 @@ func (s *Server) examples(w http.ResponseWriter, _ *http.Request) {
 		for _, a := range p.subject.Addresses {
 			if goodAddress(a) {
 				withAddress = p.subject
-				examples = append(examples, exampleResponse{"With an address", nil, optional(p.subject.PrimaryName), optional(a.Raw), p.list})
+				examples = append(examples, exampleResponse{"With an address", nil, lists.Optional(p.subject.PrimaryName), lists.Optional(a.Raw), p.list})
 				break
 			}
 		}
@@ -265,7 +266,7 @@ func (s *Server) examples(w http.ResponseWriter, _ *http.Request) {
 			long = long || utf16Len(word) >= 8
 		}
 		if long {
-			examples = append(examples, exampleResponse{"With a typo", nil, optional(withTypo(words)), nil, p.list})
+			examples = append(examples, exampleResponse{"With a typo", nil, lists.Optional(withTypo(words)), nil, p.list})
 			break
 		}
 	}
@@ -410,7 +411,7 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 		}
 		addresses := []browseAddress{}
 		for _, a := range subject.Addresses {
-			addresses = append(addresses, browseAddress{a.Raw, optional(a.CountryCode)})
+			addresses = append(addresses, browseAddress{a.Raw, lists.Optional(a.CountryCode)})
 		}
 		page = append(page, browseEntry{subject.ExternalID, kindNames[subject.Kind], subject.PrimaryName, names, addresses, subject.Programme, subject.SourceURL})
 	}

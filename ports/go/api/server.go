@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sanctionandforgive/lists"
 	"strconv"
 	"strings"
 	"sync"
@@ -89,7 +90,7 @@ type healthResponse struct {
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{"ok", s.Config.Version, optional(s.Config.Revision)})
+	writeJSON(w, http.StatusOK, healthResponse{"ok", s.Config.Version, lists.Optional(s.Config.Revision)})
 }
 
 func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
@@ -97,7 +98,7 @@ func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, warmingUp{"warmingUp"})
 		return
 	}
-	writeJSON(w, http.StatusOK, healthResponse{"ready", s.Config.Version, optional(s.Config.Revision)})
+	writeJSON(w, http.StatusOK, healthResponse{"ready", s.Config.Version, lists.Optional(s.Config.Revision)})
 }
 
 type statusResponse struct {

@@ -1,4 +1,5 @@
-package api
+// Package lists is the Go port of SanctionAndForgive.Lists: the feed catalogue, downloading, the parsers.
+package lists
 
 import "strings"
 
@@ -86,7 +87,8 @@ func FindSource(code string) *ListSource {
 	return nil
 }
 
-func optional(value string) *string {
+// Optional is nil for an empty string.
+func Optional(value string) *string {
 	if value == "" {
 		return nil
 	}

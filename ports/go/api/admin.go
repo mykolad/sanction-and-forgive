@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"sanctionandforgive/lists"
 	"time"
 
 	"sanctionandforgive/store"
@@ -24,18 +25,12 @@ type AdminService struct {
 func (a *AdminService) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/admin/me", a.me)
 	mux.HandleFunc("GET /api/v1/admin/allow-list", a.allowList)
-	notYet := func(w http.ResponseWriter, r *http.Request) {
-		if a.refuse(w, r, true) {
-			return
-		}
-		w.WriteHeader(http.StatusNotImplemented)
-	}
-	mux.HandleFunc("POST /api/v1/admin/imports/{id}/confirm", notYet)
-	mux.HandleFunc("POST /api/v1/admin/imports/{id}/reject", notYet)
-	mux.HandleFunc("POST /api/v1/admin/allow-list", notYet)
-	mux.HandleFunc("POST /api/v1/admin/allow-list/{id}/remove", notYet)
-	mux.HandleFunc("POST /api/v1/admin/lists/{code}/switch-off", notYet)
-	mux.HandleFunc("POST /api/v1/admin/lists/{code}/switch-on", notYet)
+	mux.HandleFunc("POST /api/v1/admin/imports/{id}/confirm", func(w http.ResponseWriter, r *http.Request) { a.review(w, r, true) })
+	mux.HandleFunc("POST /api/v1/admin/imports/{id}/reject", func(w http.ResponseWriter, r *http.Request) { a.review(w, r, false) })
+	mux.HandleFunc("POST /api/v1/admin/allow-list", a.addToAllowList)
+	mux.HandleFunc("POST /api/v1/admin/allow-list/{id}/remove", a.removeFromAllowList)
+	mux.HandleFunc("POST /api/v1/admin/lists/{code}/switch-off", func(w http.ResponseWriter, r *http.Request) { a.switchList(w, r, true) })
+	mux.HandleFunc("POST /api/v1/admin/lists/{code}/switch-on", func(w http.ResponseWriter, r *http.Request) { a.switchList(w, r, false) })
 }
 
 type adminMeResponse struct {
@@ -52,10 +47,10 @@ func (a *AdminService) me(w http.ResponseWriter, r *http.Request) {
 	user := a.Server.currentUser(r)
 	response := adminMeResponse{Enabled: enabled, SignedIn: user != nil}
 	if user != nil {
-		response.Name, response.IsAdmin, response.SignOutURL = &user.Name, user.IsAdmin, optional(signOutPath)
+		response.Name, response.IsAdmin, response.SignOutURL = &user.Name, user.IsAdmin, lists.Optional(signOutPath)
 	}
 	if enabled {
-		response.SignInURL = optional(signInPath)
+		response.SignInURL = lists.Optional(signInPath)
 	}
 	writeJSON(w, http.StatusOK, response)
 }
