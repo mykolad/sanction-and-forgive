@@ -41,15 +41,14 @@ func (a alignment) Capped() bool {
 // remembers the pairs it compared (by pointer: tokens are interned) in a direct-mapped cache: a pair that lands on
 // another's slot is compared again, which gives the same answer.
 type tokenComparer struct {
-	data       *MatcherData
-	pairs      []comparedPair
-	generation uint32             // a slot holds this search's pair only when it carries this generation
-	weights    map[*Token]float64 // the search's word weights, kept with it (the same index throughout)
+	data    *MatcherData
+	pairs   []comparedPair
+	written []uint16           // the slots this search wrote, emptied when it ends
+	weights map[*Token]float64 // the search's word weights, kept with it (the same index throughout)
 }
 
 type comparedPair struct {
 	query, listed *Token
-	generation    uint32
 	alignment     alignment
 }
 
@@ -58,7 +57,7 @@ const pairBits = 12 // 4,096 slots: 2^12 to 2^15 measured the same on the real l
 const pairSlots = 1 << pairBits
 
 func newTokenComparer(data *MatcherData) *tokenComparer {
-	return &tokenComparer{data: data, pairs: make([]comparedPair, pairSlots), generation: 1, weights: map[*Token]float64{}}
+	return &tokenComparer{data: data, pairs: make([]comparedPair, pairSlots), weights: map[*Token]float64{}}
 }
 
 // comparers keeps comparers between searches, so a search starts with its caches' room already made.
@@ -70,13 +69,13 @@ func borrowComparer(data *MatcherData) *tokenComparer {
 	return c
 }
 
-// release forgets the search (a new generation; the weights emptied) and returns the comparer to the pool.
+// release forgets the search and returns the comparer to the pool. Every slot it wrote is emptied and the weights
+// with it: a pooled comparer holds no token, so nothing entered outlives its screening (input is never stored).
 func (c *tokenComparer) release() {
-	c.generation++
-	if c.generation == 0 {
-		clear(c.pairs)
-		c.generation = 1
+	for _, slot := range c.written {
+		c.pairs[slot] = comparedPair{}
 	}
+	c.written = c.written[:0]
 	if len(c.weights) > 1<<12 {
 		c.weights = map[*Token]float64{}
 	} else {
@@ -90,12 +89,16 @@ func (c *tokenComparer) Compare(query, listed *Token) alignment {
 	h := uint64(uintptr(unsafe.Pointer(query)))*0x9E3779B97F4A7C15 ^ uint64(uintptr(unsafe.Pointer(listed)))
 	h ^= h >> 31
 	h *= 0xBF58476D1CE4E5B9
-	slot := &c.pairs[h>>(64-pairBits)]
-	if slot.generation == c.generation && slot.query == query && slot.listed == listed {
+	index := h >> (64 - pairBits)
+	slot := &c.pairs[index]
+	if slot.query == query && slot.listed == listed {
 		return slot.alignment
 	}
+	if slot.query == nil {
+		c.written = append(c.written, uint16(index))
+	}
 	a := c.compareOnce(query, listed)
-	*slot = comparedPair{query, listed, c.generation, a}
+	*slot = comparedPair{query, listed, a}
 	return a
 }
 
