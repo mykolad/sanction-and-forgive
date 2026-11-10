@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"sanctionandforgive/lists"
+	"sanctionandforgive/memlimit"
 	"sanctionandforgive/store"
 )
 
@@ -58,7 +59,10 @@ func parse(args []string) (map[string]*string, error) {
 	return values, nil
 }
 
-func main() { os.Exit(run()) }
+func main() {
+	memlimit.Apply()
+	os.Exit(run())
+}
 
 func run() int {
 	if len(os.Args) < 2 {

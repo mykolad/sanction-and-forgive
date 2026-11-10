@@ -18,11 +18,18 @@ type Token struct {
 	Folds      []string
 	IsCyrillic bool
 	IsNumber   bool
-	length     int
+	length     int32        // with the two flags, one word: a token is 80 bytes, and an index holds hundreds of thousands
+	groups     *tokenGroups // nil: in no spelling or cognate group (most words)
+}
+
+// tokenGroups is the spelling-pair and cognate groups a token belongs to, looked up once when it's made.
+type tokenGroups struct {
+	spelling []int // through its forms
+	cognates []int // through its fold keys, in the order the reference's set enumerates them (insertion order)
 }
 
 // Len is the number of letters (or digits) in the token.
-func (t *Token) Len() int { return t.length }
+func (t *Token) Len() int { return int(t.length) }
 
 // Key is the key for weights and postings: the first fold key, or the text itself.
 func (t *Token) Key() string {
@@ -262,7 +269,7 @@ func (f *tokenFactory) Create(text string) *Token {
 			}
 		}
 	}
-	return &Token{Text: text, Forms: distinct, Folds: folds, IsCyrillic: hasCyrillic, IsNumber: isNumber, length: len(runes)}
+	return &Token{Text: text, Forms: distinct, Folds: folds, IsCyrillic: hasCyrillic, IsNumber: isNumber, length: int32(len(runes))}
 }
 
 func contains(list []string, value string) bool {
@@ -305,12 +312,34 @@ func (t *tokenizer) Tokenize(value string, joinInitials bool) []RawToken {
 
 func (t *tokenizer) Get(text string) *Token {
 	if t.cache == nil {
-		return t.data.tokens.Create(text)
+		return t.data.token(text)
 	}
 	token, ok := t.cache[text]
 	if !ok {
-		token = t.data.tokens.Create(text)
+		token = t.data.token(text)
 		t.cache[text] = token
+	}
+	return token
+}
+
+// token makes a token with its groups.
+func (d *MatcherData) token(text string) *Token {
+	token := d.tokens.Create(text)
+	var spelling, cognates []int
+	for _, form := range token.Forms {
+		if group, ok := d.SpellingGroups[form]; ok && !containsInt(spelling, group) {
+			spelling = append(spelling, group)
+		}
+	}
+	for _, fold := range token.Folds {
+		for _, group := range d.CognateGroups[fold] {
+			if !containsInt(cognates, group) {
+				cognates = append(cognates, group)
+			}
+		}
+	}
+	if spelling != nil || cognates != nil {
+		token.groups = &tokenGroups{spelling, cognates}
 	}
 	return token
 }

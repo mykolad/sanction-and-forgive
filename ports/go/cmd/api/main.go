@@ -14,6 +14,7 @@ import (
 
 	"sanctionandforgive/api"
 	"sanctionandforgive/matching"
+	"sanctionandforgive/memlimit"
 	"sanctionandforgive/store"
 )
 
@@ -44,6 +45,10 @@ func main() {
 		}
 		return attr
 	}}))
+
+	if limit, source := memlimit.Apply(); source != "none" {
+		logger.Info("Memory limit for the heap", "megabytes", limit>>20, "from", source)
+	}
 
 	connection := os.Getenv("ConnectionStrings__Lists")
 	if connection == "" {

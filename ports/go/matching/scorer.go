@@ -23,7 +23,7 @@ type nameScoreDetails struct {
 	Notes       []string
 }
 
-// nameScore is a name's percentage against one listed alias; the explanation is built the first time it's read.
+// nameScore is a name's percentage against one listed alias, with its explanation (built the first time it's read).
 type nameScore struct {
 	Percent int
 	Ceiling int
@@ -39,13 +39,24 @@ func (s *nameScore) Details() nameScoreDetails {
 	return *s.details
 }
 
-func zeroScore(reason string) *nameScore {
-	return &nameScore{Percent: 0, Ceiling: 0, explain: func() nameScoreDetails {
-		return nameScoreDetails{[]string{reason}, []WordAlignment{}, []string{reason}}
-	}}
+// scoreValue is a name's percentage against one listed alias and the lowest cap on it: all a search needs to rank
+// the aliases. Explain gives the explanation of the few it reports.
+type scoreValue struct {
+	Percent int
+	Ceiling int
 }
 
-type cap struct {
+// evaluation is what scoring a name decided, kept to explain it: Score reuses the scorer's, Explain makes its own.
+type evaluation struct {
+	zero      string     // nothing to compare, and why
+	initials  *nameScore // the initials reading won
+	pairs     []pair
+	caps      []scoreCap
+	percent   int // before the caps
+	contained bool
+}
+
+type scoreCap struct {
 	Cap    int
 	Reason string
 }
@@ -55,45 +66,112 @@ type pair struct {
 	Alignment     alignment
 }
 
+// nameScorer scores names for one search, on one goroutine: its buffers are reused from one alias to the next.
 type nameScorer struct {
 	comparer *tokenComparer
 	options  *Options
+	scratch  evaluation
+	cells    []alignment
+	values   []float64
+	usable   []bool
+	columns  []int
+	best     []float64
 }
 
-func (s *nameScorer) Score(query, listed *nameForm, weakAlias bool, weight func(*Token) float64) *nameScore {
+// Score scores query against one listed alias. Nothing it computes outlives the call: it's the inner loop.
+func (s *nameScorer) Score(query, listed *nameForm, weakAlias bool, weight func(*Token) float64) scoreValue {
+	e := &s.scratch
+	e.zero, e.initials, e.pairs, e.caps, e.percent, e.contained = "", nil, e.pairs[:0], e.caps[:0], 0, false
+	return s.evaluate(query, listed, weakAlias, weight, e, false)
+}
+
+// Explain scores query against the alias again, the same way, and explains the result.
+func (s *nameScorer) Explain(query, listed *nameForm, weakAlias bool, weight func(*Token) float64) nameScoreDetails {
+	e := &evaluation{}
+	s.evaluate(query, listed, weakAlias, weight, e, true)
+	if e.zero != "" {
+		return nameScoreDetails{[]string{e.zero}, []WordAlignment{}, []string{e.zero}}
+	}
+	if e.initials != nil {
+		return e.initials.Details()
+	}
+
+	pairs := e.pairs
+	pairedQuery := make([]bool, len(query.Core))
+	pairedListed := make([]bool, len(listed.Core))
+	for _, p := range pairs {
+		pairedQuery[p.Query] = true
+		pairedListed[p.Listed] = true
+	}
+	explanation := []string{}
+	words := []WordAlignment{}
+	for _, p := range pairs {
+		explanation = append(explanation, describe(query.Core[p.Query], listed.Core[p.Listed], p.Alignment))
+		words = append(words, WordAlignment{intPtr(p.Query + 1), strPtr(listed.Core[p.Listed].Text), how(p.Alignment.Method)})
+	}
+	for i, t := range query.Core {
+		if !pairedQuery[i] {
+			explanation = append(explanation, t.Text+": not in the listed name")
+		}
+	}
+	for j, t := range listed.Core {
+		if !pairedListed[j] {
+			explanation = append(explanation, t.Text+": listed, not entered")
+		}
+	}
+	for i := range query.Core {
+		if !pairedQuery[i] {
+			words = append(words, WordAlignment{intPtr(i + 1), nil, "NotListed"})
+		}
+	}
+	for j, t := range listed.Core {
+		if !pairedListed[j] {
+			words = append(words, WordAlignment{nil, strPtr(t.Text), "NotEntered"})
+		}
+	}
+	if e.contained {
+		explanation = append(explanation, "One name contains the other")
+	}
+	for _, legal := range unionStrings(query.LegalClasses, listed.LegalClasses) {
+		explanation = append(explanation, "Legal form "+legal+" not compared")
+	}
+	notes := capNotes(e.percent, e.caps)
+	return nameScoreDetails{append(explanation, notes...), words, notes}
+}
+
+func (s *nameScorer) evaluate(query, listed *nameForm, weakAlias bool, weight func(*Token) float64, e *evaluation, explain bool) scoreValue {
 	o := s.options
 	if query.LegalOnly {
-		return zeroScore("Legal form only: nothing distinctive to compare")
+		e.zero = "Legal form only: nothing distinctive to compare"
+		return scoreValue{0, 0}
 	}
 	if query.IsEmpty() || listed.IsEmpty() {
-		return zeroScore("Nothing distinctive to compare")
+		e.zero = "Nothing distinctive to compare"
+		return scoreValue{0, 0}
 	}
 
 	hasInitials := query.IsPerson && listed.IsPerson && (len(query.Initials) > 0 || len(listed.Initials) > 0)
 	if hasInitials {
-		var readings []*nameScore
+		// The two readings in order; the first of equals wins.
+		var best *nameScore
 		if len(query.Initials) > 0 {
-			readings = append(readings, s.scoreInitials(query, listed, weakAlias, true))
-		} else {
-			readings = append(readings, nil)
+			if reading := s.scoreInitials(query, listed, weakAlias, true, explain); reading != nil {
+				best = reading
+			}
 		}
 		if len(listed.Initials) > 0 {
-			readings = append(readings, s.scoreInitials(listed, query, weakAlias, false))
-		} else {
-			readings = append(readings, nil)
-		}
-		var best *nameScore
-		for _, reading := range readings {
-			if reading != nil && (best == nil || reading.Percent > best.Percent) {
+			if reading := s.scoreInitials(listed, query, weakAlias, false, explain); reading != nil && (best == nil || reading.Percent > best.Percent) {
 				best = reading
 			}
 		}
 		if best != nil {
-			return best
+			e.initials = best
+			return scoreValue{best.Percent, best.Ceiling}
 		}
 	}
 
-	pairs := s.align(query.Core, listed.Core, weight)
+	e.pairs = s.align(query.Core, listed.Core, weight, e.pairs[:0])
+	pairs := e.pairs
 	aligned := 0.0
 	for _, p := range pairs {
 		aligned += p.Alignment.Similarity * (weight(query.Core[p.Query]) + weight(listed.Core[p.Listed]))
@@ -108,28 +186,10 @@ func (s *nameScorer) Score(query, listed *nameForm, weakAlias bool, weight func(
 	}
 	total += listedTotal
 	percent := toPercent(aligned/total, o)
-	var caps []cap
 
-	pairedQuery := make([]bool, len(query.Core))
-	pairedListed := make([]bool, len(listed.Core))
-	for _, p := range pairs {
-		pairedQuery[p.Query] = true
-		pairedListed[p.Listed] = true
-	}
-	var unalignedQueryIndexes []int
-	var unalignedQuery, unalignedListed []*Token
-	for i, t := range query.Core {
-		if !pairedQuery[i] {
-			unalignedQueryIndexes = append(unalignedQueryIndexes, i)
-			unalignedQuery = append(unalignedQuery, t)
-		}
-	}
-	for j, t := range listed.Core {
-		if !pairedListed[j] {
-			unalignedListed = append(unalignedListed, t)
-		}
-	}
-
+	// Every pair holds one query word and one listed word, each at most once: a side is all aligned when it has as
+	// many words as there are pairs.
+	unaligned := len(pairs) < len(query.Core) || len(pairs) < len(listed.Core)
 	shorter := min(len(query.Core), len(listed.Core))
 	contained := shorter >= 2 && len(pairs) == shorter && len(query.Core) != len(listed.Core)
 	if contained {
@@ -141,10 +201,11 @@ func (s *nameScorer) Score(query, listed *nameForm, weakAlias bool, weight func(
 			}
 		}
 	}
+	caps := e.caps
 	if contained {
 		percent = o.ContainedNamePercent
-	} else if len(unalignedQuery) > 0 || len(unalignedListed) > 0 {
-		caps = append(caps, cap{o.NotAllAlignedCap, "Not every distinctive word aligned"})
+	} else if unaligned {
+		caps = append(caps, scoreCap{o.NotAllAlignedCap, "Not every distinctive word aligned"})
 	}
 
 	if !query.IsPerson && !listed.IsPerson && len(query.Core) == 1 && len(listed.Core) == 1 && len(pairs) == 1 &&
@@ -153,54 +214,68 @@ func (s *nameScorer) Score(query, listed *nameForm, weakAlias bool, weight func(
 		if len(query.LegalClasses) == 0 {
 			reason = "Short name with no legal form"
 		}
-		caps = append(caps, cap{o.ThinCoreCap, reason})
+		caps = append(caps, scoreCap{o.ThinCoreCap, reason})
 	}
 	if !query.IsPerson && !listed.IsPerson && !equalStrings(query.Generic, listed.Generic) {
-		caps = append(caps, cap{o.GenericCap, "Generic words differ"})
+		caps = append(caps, scoreCap{o.GenericCap, "Generic words differ"})
 	}
 	if weakAlias {
-		caps = append(caps, cap{o.WeakAliasCap, "The list marks this alias as low quality"})
+		caps = append(caps, scoreCap{o.WeakAliasCap, "The list marks this alias as low quality"})
 	}
 	for _, p := range pairs {
 		if p.Alignment.Capped() {
-			caps = append(caps, cap{o.CappedMethodCap, "A word aligned only approximately"})
+			caps = append(caps, scoreCap{o.CappedMethodCap, "A word aligned only approximately"})
 			break
 		}
 	}
 	if hasInitials {
-		caps = append(caps, cap{o.NotAllAlignedCap, "Initials couldn't be checked against given names"})
+		caps = append(caps, scoreCap{o.NotAllAlignedCap, "Initials couldn't be checked against given names"})
+		unalignedQuery, unalignedListed := unpaired(query.Core, pairs, true), unpaired(listed.Core, pairs, false)
 		if s.contradicts(query.Initials, concatTokens(unalignedListed, listed.Initials)) || s.contradicts(listed.Initials, concatTokens(unalignedQuery, query.Initials)) {
-			caps = append(caps, cap{o.ContradictingInitialsPercent, "An initial contradicts a given name or initial"})
+			caps = append(caps, scoreCap{o.ContradictingInitialsPercent, "An initial contradicts a given name or initial"})
 		}
 	}
+	e.caps, e.percent, e.contained = caps, percent, contained
 
-	return finish(percent, caps, func() ([]string, []WordAlignment) {
-		explanation := []string{}
-		words := []WordAlignment{}
+	ceiling := math.MaxInt32
+	for _, c := range caps {
+		ceiling = min(ceiling, c.Cap)
+	}
+	return scoreValue{min(percent, ceiling), ceiling}
+}
+
+// unpaired is the tokens of one side (the query's, or the listed name's) that no pair holds, in order.
+func unpaired(tokens []*Token, pairs []pair, querySide bool) []*Token {
+	var out []*Token
+	for i, t := range tokens {
+		found := false
 		for _, p := range pairs {
-			explanation = append(explanation, describe(query.Core[p.Query], listed.Core[p.Listed], p.Alignment))
-			words = append(words, WordAlignment{intPtr(p.Query + 1), strPtr(listed.Core[p.Listed].Text), how(p.Alignment.Method)})
+			if (querySide && p.Query == i) || (!querySide && p.Listed == i) {
+				found = true
+				break
+			}
 		}
-		for _, t := range unalignedQuery {
-			explanation = append(explanation, t.Text+": not in the listed name")
+		if !found {
+			out = append(out, t)
 		}
-		for _, t := range unalignedListed {
-			explanation = append(explanation, t.Text+": listed, not entered")
+	}
+	return out
+}
+
+// capNotes says which caps lowered percent, lowest first (a stable sort: equal caps keep their order).
+func capNotes(percent int, caps []scoreCap) []string {
+	var applied []scoreCap
+	for _, c := range caps {
+		if c.Cap < percent {
+			applied = append(applied, c)
 		}
-		for _, i := range unalignedQueryIndexes {
-			words = append(words, WordAlignment{intPtr(i + 1), nil, "NotListed"})
-		}
-		for _, t := range unalignedListed {
-			words = append(words, WordAlignment{nil, strPtr(t.Text), "NotEntered"})
-		}
-		if contained {
-			explanation = append(explanation, "One name contains the other")
-		}
-		for _, legal := range unionStrings(query.LegalClasses, listed.LegalClasses) {
-			explanation = append(explanation, "Legal form "+legal+" not compared")
-		}
-		return explanation, words
-	})
+	}
+	sort.SliceStable(applied, func(i, j int) bool { return applied[i].Cap < applied[j].Cap })
+	notes := []string{}
+	for _, c := range applied {
+		notes = append(notes, fmt.Sprintf("Capped at %d%%: %s", c.Cap, c.Reason))
+	}
+	return notes
 }
 
 func concatTokens(a, b []*Token) []*Token {
@@ -252,12 +327,13 @@ func (s *nameScorer) matchInitials(initials []*Token, candidates []*Token) map[i
 	return matches
 }
 
-func (s *nameScorer) scoreInitials(initialsSide, otherSide *nameForm, weakAlias bool, queryHasInitials bool) *nameScore {
+// scoreInitials reads one side's initials against the other's given names; the explanation only when explain.
+func (s *nameScorer) scoreInitials(initialsSide, otherSide *nameForm, weakAlias bool, queryHasInitials bool, explain bool) *nameScore {
 	o := s.options
 	if len(initialsSide.Core) == 0 {
 		return nil
 	}
-	pairs := s.align(initialsSide.Core, otherSide.Core, func(*Token) float64 { return 1.0 })
+	pairs := s.align(initialsSide.Core, otherSide.Core, unitWeight, nil)
 	anyLong := false
 	for _, p := range pairs {
 		if initialsSide.Core[p.Query].Len() >= 4 {
@@ -273,6 +349,9 @@ func (s *nameScorer) scoreInitials(initialsSide, otherSide *nameForm, weakAlias 
 	pairedOther := map[int]bool{}
 	for _, p := range pairs {
 		pairedOther[p.Listed] = true
+		if !explain {
+			continue
+		}
 		if queryHasInitials {
 			explanation = append(explanation, describe(initialsSide.Core[p.Query], otherSide.Core[p.Listed], p.Alignment))
 			words = append(words, WordAlignment{intPtr(p.Query + 1), strPtr(otherSide.Core[p.Listed].Text), how(p.Alignment.Method)})
@@ -311,8 +390,15 @@ func (s *nameScorer) scoreInitials(initialsSide, otherSide *nameForm, weakAlias 
 	}
 	matched, contradicted := len(matches), 0
 	for i, initialToken := range initialsSide.Initials {
+		c, ok := matches[i]
+		if !ok && len(leftOver) > 0 {
+			contradicted++
+		}
+		if !explain {
+			continue
+		}
 		initial := toUpperInvariant(initialToken.Text)
-		if c, ok := matches[i]; ok {
+		if ok {
 			explanation = append(explanation, fmt.Sprintf("Initial %s matches %s", initial, candidates[c].Text))
 			if queryHasInitials {
 				words = append(words, WordAlignment{nil, strPtr(candidates[c].Text), "Initial"})
@@ -320,7 +406,6 @@ func (s *nameScorer) scoreInitials(initialsSide, otherSide *nameForm, weakAlias 
 				words = append(words, WordAlignment{candidatePosition(c), strPtr(initialToken.Text), "Initial"})
 			}
 		} else if len(leftOver) > 0 {
-			contradicted++
 			names := make([]string, len(leftOver))
 			for k, t := range leftOver {
 				names[k] = t.Text
@@ -350,13 +435,13 @@ func (s *nameScorer) scoreInitials(initialsSide, otherSide *nameForm, weakAlias 
 	case matched == 1:
 		percent = o.OneInitialPercent
 	}
-	var caps []cap
+	var caps []scoreCap
 	if weakAlias {
-		caps = append(caps, cap{o.WeakAliasCap, "The list marks this alias as low quality"})
+		caps = append(caps, scoreCap{o.WeakAliasCap, "The list marks this alias as low quality"})
 	}
 	for _, p := range pairs {
 		if p.Alignment.Capped() {
-			caps = append(caps, cap{o.CappedMethodCap, "A word aligned only approximately"})
+			caps = append(caps, scoreCap{o.CappedMethodCap, "A word aligned only approximately"})
 			break
 		}
 	}
@@ -386,38 +471,31 @@ func (s *nameScorer) initialMatches(initial, candidate *Token) bool {
 	return starts(candidate.Forms, initial.Forms) || starts(names, initial.Folds)
 }
 
-func finish(percent int, caps []cap, explain func() ([]string, []WordAlignment)) *nameScore {
+func finish(percent int, caps []scoreCap, explain func() ([]string, []WordAlignment)) *nameScore {
 	ceiling := math.MaxInt32
 	for _, c := range caps {
 		ceiling = min(ceiling, c.Cap)
 	}
 	return &nameScore{Percent: min(percent, ceiling), Ceiling: ceiling, explain: func() nameScoreDetails {
 		explanation, words := explain()
-		var applied []cap
-		for _, c := range caps {
-			if c.Cap < percent {
-				applied = append(applied, c)
-			}
-		}
-		sort.SliceStable(applied, func(i, j int) bool { return applied[i].Cap < applied[j].Cap })
-		notes := []string{}
-		for _, c := range applied {
-			notes = append(notes, fmt.Sprintf("Capped at %d%%: %s", c.Cap, c.Reason))
-		}
-		explanation = append(explanation, notes...)
-		return nameScoreDetails{explanation, words, notes}
+		notes := capNotes(percent, caps)
+		return nameScoreDetails{append(explanation, notes...), words, notes}
 	}}
 }
 
+func unitWeight(*Token) float64 { return 1.0 }
+
 const maxExactTokens = 12
 
-// align returns the best one-to-one pairs: the highest total weighted similarity, and among equal totals the fewest
-// capped alignments (exact up to 12 tokens a side, greedy beyond).
-func (s *nameScorer) align(query, listed []*Token, weight func(*Token) float64) []pair {
+// align appends the best one-to-one pairs to out: the highest total weighted similarity, and among equal totals the
+// fewest capped alignments (exact up to 12 tokens a side, greedy beyond). Its buffers are the scorer's.
+func (s *nameScorer) align(query, listed []*Token, weight func(*Token) float64, out []pair) []pair {
 	n := len(listed)
-	alignments := make([]alignment, len(query)*n)
-	values := make([]float64, len(query)*n)
-	usable := make([]bool, n)
+	s.cells = grow(s.cells, len(query)*n)
+	s.values = grow(s.values, len(query)*n)
+	s.usable = grow(s.usable, n)
+	alignments, values, usable := s.cells, s.values, s.usable
+	clear(usable)
 	for i := range query {
 		for j := range listed {
 			cell := i*n + j
@@ -434,28 +512,36 @@ func (s *nameScorer) align(query, listed []*Token, weight func(*Token) float64) 
 			usable[j] = usable[j] || alignments[cell].Aligned()
 		}
 	}
-	var columns []int
+	columns := s.columns[:0]
 	for j := range listed {
 		if usable[j] {
 			columns = append(columns, j)
 		}
 	}
-	var assignment [][2]int
+	s.columns = columns
 	if n <= maxExactTokens && len(query) <= maxExactTokens {
-		assignment = exactAssignment(values, len(query), n, columns)
-	} else {
-		assignment = greedyAssignment(values, len(query), n)
+		masks := 1 << len(columns)
+		s.best = grow(s.best, (len(query)+1)*masks)
+		return exactAssignment(values, len(query), n, columns, s.best, alignments, out)
 	}
-	out := make([]pair, len(assignment))
-	for k, a := range assignment {
-		out[k] = pair{a[0], a[1], alignments[a[0]*n+a[1]]}
+	for _, a := range greedyAssignment(values, len(query), n) {
+		out = append(out, pair{a[0], a[1], alignments[a[0]*n+a[1]]})
 	}
 	return out
 }
 
-func exactAssignment(values []float64, queryCount, listedCount int, columns []int) [][2]int {
+// grow returns buffer with length n, reallocated only when it's too small; the caller sets what it reads.
+func grow[T any](buffer []T, n int) []T {
+	if cap(buffer) < n {
+		return make([]T, n, max(n, 2*cap(buffer)))
+	}
+	return buffer[:n]
+}
+
+// exactAssignment appends the optimal pairs to out; best is a buffer of (queryCount+1) << len(columns) values.
+func exactAssignment(values []float64, queryCount, listedCount int, columns []int, best []float64, alignments []alignment, out []pair) []pair {
 	masks := 1 << len(columns)
-	best := make([]float64, (queryCount+1)*masks)
+	clear(best[queryCount*masks:])
 	for i := queryCount - 1; i >= 0; i-- {
 		for mask := 0; mask < masks; mask++ {
 			value := best[(i+1)*masks+mask]
@@ -468,19 +554,18 @@ func exactAssignment(values []float64, queryCount, listedCount int, columns []in
 			best[i*masks+mask] = value
 		}
 	}
-	var pairs [][2]int
 	used := 0
 	for i := 0; i < queryCount; i++ {
 		for c, column := range columns {
 			v := values[i*listedCount+column]
 			if used&(1<<c) == 0 && !math.IsInf(v, -1) && math.Abs(v+best[(i+1)*masks+(used|1<<c)]-best[i*masks+used]) < 1e-12 {
-				pairs = append(pairs, [2]int{i, column})
+				out = append(out, pair{i, column, alignments[i*listedCount+column]})
 				used |= 1 << c
 				break
 			}
 		}
 	}
-	return pairs
+	return out
 }
 
 func greedyAssignment(values []float64, queryCount, listedCount int) [][2]int {
