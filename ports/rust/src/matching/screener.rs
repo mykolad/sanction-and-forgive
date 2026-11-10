@@ -1,7 +1,7 @@
 //! Screening: each entry against each list separately (spec section 5.7), and the allow-list. Deterministic; stores
 //! and logs nothing.
 
-use std::collections::HashMap;
+use super::HashMap;
 use std::sync::Arc;
 
 use super::addresses::parse_address;
@@ -254,7 +254,7 @@ pub struct AllowList {
 
 impl AllowList {
     pub fn empty() -> Self {
-        AllowList { by_key: HashMap::new(), version: "none".to_string() }
+        AllowList { by_key: HashMap::default(), version: "none".to_string() }
     }
 
     /// Of two entries for the same name, the older (lower id) wins.
@@ -262,7 +262,7 @@ impl AllowList {
         let mut sorted = entries.to_vec();
         sorted.sort_by_key(|e| e.id);
         let mut tokenizer = Tokenizer::new(data());
-        let mut by_key = HashMap::new();
+        let mut by_key = HashMap::default();
         for entry in sorted {
             let k = allow_list_key(&tokenizer.tokenize(&entry.name, true));
             if !k.is_empty() {

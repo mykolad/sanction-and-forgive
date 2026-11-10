@@ -1,7 +1,7 @@
 //! Comparing two words (spec section 5.4), and finding the words of a vocabulary within two edits of one.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use super::HashMap;
 use std::sync::Mutex;
 
 use super::text::Token;
@@ -297,14 +297,14 @@ const SHORT_MAX: usize = 7;
 impl FuzzyVocabulary {
     pub fn new<'a>(vocabulary: impl IntoIterator<Item = &'a String>) -> Self {
         let mut folds: Vec<String> = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = super::HashSet::default();
         for fold in vocabulary {
             if fold.chars().count() >= 4 && seen.insert(fold.as_str()) {
                 folds.push(fold.clone());
             }
         }
         let mut delete_keys = Vec::new();
-        let mut by_trigram: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut by_trigram: HashMap<String, Vec<u32>> = HashMap::default();
         for (id, fold) in folds.iter().enumerate() {
             if fold.chars().count() <= SHORT_MAX + 1 {
                 for variant in delete_variants(fold) {

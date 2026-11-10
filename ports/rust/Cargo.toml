@@ -22,6 +22,8 @@ http-body-util = "0.1"
 # 0.37: a text event still holds its entity references (0.38 splits them out), as Go's and .NET's readers do.
 quick-xml = { version = "0.37", features = ["encoding"] }
 regex = "1"
+# A fast hash for the matcher's maps (lookups only, never iterated where order matters).
+rustc-hash = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "process", "fs"] }

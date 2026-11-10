@@ -2,7 +2,7 @@
 //! fuzzy vocabularies, address postings. Immutable once built.
 
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use super::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use super::addresses::{compare_address, compare_address_only, parse_address, AddressComparison, AddressForm, AddressOnly, AddressState};
@@ -163,7 +163,7 @@ impl ListIndex {
         let mut aliases = Vec::new();
         let mut addresses = Vec::with_capacity(subjects.len());
         for (s, subject) in subjects.iter().enumerate() {
-            let mut seen = HashSet::new();
+            let mut seen = HashSet::default();
             let primary = ListedName { full_name: subject.primary_name.clone(), is_weak: false };
             for name in subject.names.iter().chain(std::iter::once(&primary)) {
                 if !seen.insert(name.full_name.as_str()) {
@@ -187,7 +187,7 @@ impl ListIndex {
                 .push(subject.addresses.iter().map(|a| parse_address(data, &mut tokenizer, &a.raw, &a.country_code)).collect::<Vec<_>>());
         }
 
-        let mut document_frequency: HashMap<String, usize> = HashMap::new();
+        let mut document_frequency: HashMap<String, usize> = HashMap::default();
         let mut by_fold = OrderedPostings::default();
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
@@ -223,7 +223,7 @@ impl ListIndex {
             subjects_by_address_key,
             address_vocabulary: FuzzyVocabulary::new(&address_vocabulary),
             states: Mutex::new(Vec::new()),
-            memo: Mutex::new(HashMap::new()),
+            memo: Mutex::new(HashMap::default()),
         }
     }
 
@@ -332,7 +332,7 @@ impl ListIndex {
         TokenComparer::with(|comparer| {
             let mut state = self.borrow_state();
             let candidates = self.candidates(query, &mut state, o);
-            let mut weights: HashMap<*const Token, f64> = HashMap::new();
+            let mut weights: HashMap<*const Token, f64> = HashMap::default();
             let mut weight_of = |token: &Token| *weights.entry(token as *const Token).or_insert_with(|| self.weight(token, o));
             let mut scorer = NameScorer::new(comparer, o, self.data);
             // The best alias of each subject (the first of equals), subjects in the order they were first found.
@@ -431,7 +431,7 @@ impl ListIndex {
                 }
             }
             let mut order: Vec<u32> = Vec::new();
-            let mut count: HashMap<u32, i32> = HashMap::new();
+            let mut count: HashMap<u32, i32> = HashMap::default();
             for k in &distinct {
                 if let Some(subjects) = self.subjects_by_address_key.get(k) {
                     for &subject in subjects.iter() {

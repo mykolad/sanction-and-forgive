@@ -1,7 +1,7 @@
 //! The dictionaries (`src/SanctionAndForgive.Matching/Data`, embedded by build.rs): loaded once, immutable. Every key is
 //! normalised like the text it's compared with.
 
-use std::collections::{HashMap, HashSet};
+use super::{HashMap, HashSet};
 use std::sync::OnceLock;
 
 use serde_json::{Map, Value};
@@ -154,7 +154,7 @@ fn load() -> MatcherData {
         resources::DICTIONARIES.iter().map(|(path, bytes)| (format!("{RESOURCE_PREFIX}{}", path.replace('/', ".")), *bytes)).collect();
     resources.sort_by(|a, b| a.0.cmp(&b.0));
     let mut hash = Sha256::new();
-    let mut documents: HashMap<String, Value> = HashMap::new();
+    let mut documents: HashMap<String, Value> = HashMap::default();
     for (name, bytes) in &resources {
         hash.update(name.as_bytes());
         hash.update(bytes);
@@ -167,7 +167,7 @@ fn load() -> MatcherData {
         ["translit.ru.json", "translit.uk.json"].iter().map(|file| read_table(document(file))).collect();
 
     let legal = object(document("legal-forms.json"));
-    let mut legal_forms = HashMap::new();
+    let mut legal_forms = HashMap::default();
     for (class, form) in object(&legal["forms"]) {
         for (kind, ambiguous) in [("unambiguous", false), ("ambiguous", true)] {
             if let Some(spellings) = form.get(kind) {
@@ -183,13 +183,13 @@ fn load() -> MatcherData {
         .collect();
     // OrderByDescending(words) is stable, then grouped by first word in order of appearance.
     phrase_list.sort_by_key(|phrase| std::cmp::Reverse(phrase.words.len()));
-    let mut legal_phrases: HashMap<String, Vec<LegalPhrase>> = HashMap::new();
+    let mut legal_phrases: HashMap<String, Vec<LegalPhrase>> = HashMap::default();
     for phrase in phrase_list {
         legal_phrases.entry(phrase.words[0].clone()).or_default().push(phrase);
     }
 
     let mut generic_keys = Vec::new();
-    let mut generic = HashMap::new();
+    let mut generic = HashMap::default();
     for (word, spellings) in object(&object(document("generic.json"))["words"]) {
         for spelling in strings(spellings) {
             let k = key(&spelling);
@@ -215,7 +215,7 @@ fn load() -> MatcherData {
         }
         spelling_group_members.push(members);
     }
-    let mut spelling_groups = HashMap::new();
+    let mut spelling_groups = HashMap::default();
     for (group, members) in spelling_group_members.iter().enumerate() {
         for spelling in members {
             spelling_groups.insert(spelling.clone(), group);
@@ -234,7 +234,7 @@ fn load() -> MatcherData {
         }
         cognate_folds.push(folds);
     }
-    let mut cognate_groups: HashMap<String, Vec<usize>> = HashMap::new();
+    let mut cognate_groups: HashMap<String, Vec<usize>> = HashMap::default();
     for (group, folds) in cognate_folds.iter().enumerate() {
         for fold in folds {
             let groups = cognate_groups.entry(fold.clone()).or_default();
@@ -244,8 +244,8 @@ fn load() -> MatcherData {
         }
     }
 
-    let mut countries = HashMap::new();
-    let mut country_codes = HashSet::new();
+    let mut countries = HashMap::default();
+    let mut country_codes = HashSet::default();
     for country in document("countries.json").as_array().unwrap() {
         let code = country["code"].as_str().unwrap().to_string();
         country_codes.insert(code.clone());
@@ -256,7 +256,7 @@ fn load() -> MatcherData {
         }
     }
 
-    let mut places = HashMap::new();
+    let mut places = HashMap::default();
     let mut place_names = Vec::new();
     for (id, place) in document("places.json").as_array().unwrap().iter().enumerate() {
         let country = place["country"].as_str().unwrap().to_string();
