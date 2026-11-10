@@ -6,8 +6,8 @@ name: Deploy
 # ghcr.io with the job's own token, and SQL is Entra only.
 #
 # By hand, the input chooses the implementation (the owner's experiment, 2026-11-09: docs/conformance.md): .NET, the
-# reference, or the Go port (ports/go), whose image is the same package's tag go-<sha>. A deploy after a push to master
-# always runs .NET, the default.
+# reference, or a port (ports/go, ports/rust), whose image is the same package's tag <implementation>-<sha>. A deploy
+# after a push to master always runs .NET, the default.
 on:
   workflow_run:
     workflows: [Build and Test]
@@ -18,7 +18,7 @@ on:
       implementation:
         description: Which implementation to deploy
         type: choice
-        options: [dotnet, go]
+        options: [dotnet, go, rust]
         default: dotnet
 
 permissions:
@@ -60,9 +60,9 @@ jobs:
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
-          # The version the app reports (the footer, /healthz): the Go port's says so.
-          if [ "$IMPLEMENTATION" = go ]; then
-            echo "version=go-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          # The version the app reports (the footer, /healthz): a port's says which.
+          if [ "$IMPLEMENTATION" != dotnet ]; then
+            echo "version=$IMPLEMENTATION-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
           else
             echo "version=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
           fi
@@ -74,12 +74,12 @@ jobs:
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      # Version metadata is baked into the image (see Dockerfile): App__* settings and OCI labels. One package, the
-      # Go port's images tagged go-<sha> (app.bicep picks the tag and the CLI's command by implementation).
+      # Version metadata is baked into the image (see Dockerfile): App__* settings and OCI labels. One package, a
+      # port's images tagged <implementation>-<sha> (app.bicep picks the tag and the CLI's command by implementation).
       - name: Build and push the image
         run: |
-          if [ "$IMPLEMENTATION" = go ]; then
-            dockerfile=ports/go/Dockerfile; tag="go-${{ steps.meta.outputs.sha }}"
+          if [ "$IMPLEMENTATION" != dotnet ]; then
+            dockerfile="ports/$IMPLEMENTATION/Dockerfile"; tag="$IMPLEMENTATION-${{ steps.meta.outputs.sha }}"
           else
             dockerfile=Dockerfile; tag="${{ steps.meta.outputs.sha }}"
           fi

@@ -10,10 +10,11 @@ param imageTag string
 
 param image string = 'ghcr.io/mykolad/sanction-and-forgive'
 
-@description('Which implementation runs (the experiment of 2026-11-09, docs/conformance.md): dotnet, the reference and the default, or go, whose image is tag go-<sha> of the same package.')
+@description('Which implementation runs (the experiment of 2026-11-09, docs/conformance.md): dotnet, the reference and the default, or a port (go, rust), whose image is tag <implementation>-<sha> of the same package.')
 @allowed([
   'dotnet'
   'go'
+  'rust'
 ])
 param implementation string = 'dotnet'
 
@@ -39,13 +40,13 @@ param adminSignInReady bool = false
 
 var signInEnabled = !empty(adminClientId)
 
-// Both images serve the API on 8080 as their entry point and hold the CLI, called differently.
-var imageReference = implementation == 'go' ? '${image}:go-${imageTag}' : '${image}:${imageTag}'
-var cliCommand = implementation == 'go' ? [
-  '/app/cli'
-] : [
+// Every image serves the API on 8080 as its entry point and holds the CLI: .NET's as a DLL, a port's as /app/cli.
+var imageReference = implementation == 'dotnet' ? '${image}:${imageTag}' : '${image}:${implementation}-${imageTag}'
+var cliCommand = implementation == 'dotnet' ? [
   'dotnet'
   'SanctionAndForgive.Cli.dll'
+] : [
+  '/app/cli'
 ]
 
 var name = 'sanction-and-forgive'
