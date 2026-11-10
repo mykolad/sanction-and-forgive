@@ -1,0 +1,25 @@
+[package]
+name = "sanction-and-forgive"
+version = "0.1.0"
+edition = "2021"
+description = "Sanction & Forgive in Rust: a port of the .NET reference (docs/conformance.md)"
+license = "MIT"
+publish = false
+
+[lib]
+name = "sanction_and_forgive"
+path = "src/lib.rs"
+
+[dependencies]
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+# preserve_order: objects keep their keys in file order, as .NET's JsonElement enumerates them (the dictionaries).
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+unicode-general-category = "1"
+unicode-normalization = "0.1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
