@@ -4,12 +4,22 @@ name: Deploy
 # logged first), the migrations (the SQL firewall opened for this runner only while they run), the app with the new
 # image, and the smoke tests. No secrets: Azure login is OIDC through the production environment, the image goes to
 # ghcr.io with the job's own token, and SQL is Entra only.
+#
+# By hand, the input chooses the implementation (the owner's experiment, 2026-11-09: docs/conformance.md): .NET, the
+# reference, or the Go port (ports/go), whose image is the same package's tag go-<sha>. A deploy after a push to master
+# always runs .NET, the default.
 on:
   workflow_run:
     workflows: [Build and Test]
     types: [completed]
     branches: [master]
   workflow_dispatch:
+    inputs:
+      implementation:
+        description: Which implementation to deploy
+        type: choice
+        options: [dotnet, go]
+        default: dotnet
 
 permissions:
   contents: read
@@ -24,6 +34,8 @@ env:
   RESOURCE_GROUP: sanction-and-forgive-rg
   SQL_SERVER: sanction-and-forgive-sql
   IMAGE: ghcr.io/mykolad/sanction-and-forgive
+  # Empty after a push (no inputs): .NET.
+  IMPLEMENTATION: ${{ inputs.implementation || 'dotnet' }}
 
 jobs:
   build:
@@ -37,6 +49,7 @@ jobs:
     outputs:
       sha: ${{ steps.meta.outputs.sha }}
       short: ${{ steps.meta.outputs.short }}
+      version: ${{ steps.meta.outputs.version }}
 
     steps:
       - uses: actions/checkout@v7
@@ -47,6 +60,12 @@ jobs:
         run: |
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          # The version the app reports (the footer, /healthz): the Go port's says so.
+          if [ "$IMPLEMENTATION" = go ]; then
+            echo "version=go-$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -55,16 +74,22 @@ jobs:
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      # Version metadata is baked into the image (see Dockerfile): App__* settings and OCI labels.
+      # Version metadata is baked into the image (see Dockerfile): App__* settings and OCI labels. One package, the
+      # Go port's images tagged go-<sha> (app.bicep picks the tag and the CLI's command by implementation).
       - name: Build and push the image
         run: |
-          docker build \
-            --build-arg VERSION=${{ steps.meta.outputs.short }} \
+          if [ "$IMPLEMENTATION" = go ]; then
+            dockerfile=ports/go/Dockerfile; tag="go-${{ steps.meta.outputs.sha }}"
+          else
+            dockerfile=Dockerfile; tag="${{ steps.meta.outputs.sha }}"
+          fi
+          docker build -f "$dockerfile" \
+            --build-arg VERSION=${{ steps.meta.outputs.version }} \
             --build-arg REVISION=${{ steps.meta.outputs.sha }} \
             --build-arg COMMIT_DATE="$(git show -s --format=%cI HEAD)" \
             --build-arg SOURCE_URL="${{ github.server_url }}/${{ github.repository }}" \
-            -t "$IMAGE:${{ steps.meta.outputs.sha }}" .
-          docker push "$IMAGE:${{ steps.meta.outputs.sha }}"
+            -t "$IMAGE:$tag" .
+          docker push "$IMAGE:$tag"
 
       - name: Build the migration bundle
         run: |
@@ -139,6 +164,7 @@ jobs:
         id: app
         env:
           IMAGE_TAG: ${{ needs.build.outputs.sha }}
+          APP_IMPLEMENTATION: ${{ env.IMPLEMENTATION }}
           ADMIN_CLIENT_ID: ${{ vars.ADMIN_CLIENT_ID }}
         run: |
           # The app trusts the sign-in's principal header only once the auth config is verifiably in place: check
@@ -170,9 +196,9 @@ jobs:
       - name: Smoke tests
         env:
           SMOKE_BASE_URL: ${{ steps.app.outputs.url }}
-          SMOKE_EXPECTED_VERSION: ${{ needs.build.outputs.short }}
+          SMOKE_EXPECTED_VERSION: ${{ needs.build.outputs.version }}
           SMOKE_EXPECTED_REVISION: ${{ steps.app.outputs.revision }}
         run: dotnet test tests/SanctionAndForgive.SmokeTests -c Release --logger "console;verbosity=normal"
 
       - name: Summary
-        run: echo "Deployed ${{ needs.build.outputs.short }} to ${{ steps.app.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Deployed ${{ needs.build.outputs.version }} ($IMPLEMENTATION) to ${{ steps.app.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"

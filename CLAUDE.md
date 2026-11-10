@@ -337,7 +337,10 @@ be public).
 
 - **Deploy** (`.github/workflows/deploy.yml`, after Build and Test on master): image + migration bundle, then in
   environment `production`: platform what-if and deploy, firewall open, migrations, firewall closed, app, smoke tests.
-  `app.bicepparam` reads `IMAGE_TAG` and `RATE_LIMIT_PER_MINUTE` (120; 0 for a load test only).
+  `app.bicepparam` reads `IMAGE_TAG` and `RATE_LIMIT_PER_MINUTE` (120; 0 for a load test only), and
+  `APP_IMPLEMENTATION`, `APP_CPU`, `APP_MEMORY` (dotnet, 0.5, 1Gi by default). Run by hand, the workflow's input
+  `implementation` deploys `dotnet` (the default, and always after a push) or `go`: the Go port's image is the same
+  package's tag `go-<sha>`, and `app.bicep` gives the import job the CLI's command for each.
 - **Alerts** (all to the subscription's Owner role through the action group): database storage above 80%, an import
   that failed, was rejected or was held for review (a log query on the job's console and system logs), and a $20
   monthly budget.
