@@ -62,7 +62,9 @@ async fn main() {
             Err(_) => (tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await.expect("the port"), "0.0.0.0".to_string()),
         }
     } else {
-        (tokio::net::TcpListener::bind(format!("{host}:{port}")).await.expect("the host and port"), host.clone())
+        // An IPv6 literal goes in brackets: "::1" listens on [::1]:8080.
+        let address = if host.contains(':') && !host.starts_with('[') { format!("[{host}]") } else { host.clone() };
+        (tokio::net::TcpListener::bind(format!("{address}:{port}")).await.expect("the host and port"), address)
     };
     logger.info(&format!("Now listening on: http://{shown}:{port}"), &[]);
     let shutdown = async {
