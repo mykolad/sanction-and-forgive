@@ -222,6 +222,9 @@ func (l *Loader) refreshOnce(ctx context.Context) error {
 			pending = append(pending, pendingBuild{i, target})
 		}
 	}
+	// Only lists holds the old indexes now: each swap below can release the one it replaces (Copilot's point on #37,
+	// the same pattern there): never two whole generations at once.
+	current = nil
 	for _, p := range pending {
 		if index := l.build(ctx, p.target.Code, *p.target.ActiveImportID, p.target.RecordCount); index != nil {
 			built := *p.target

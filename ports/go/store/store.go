@@ -4,6 +4,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"strings"
 	"time"
@@ -21,8 +22,30 @@ func Open(connectionString string) (*sql.DB, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(10)
-	db.SetConnMaxIdleTime(5 * time.Minute)
+	// An import downloads and parses for minutes between two uses of the database; in Azure a connection idle that
+	// long can be gone (the 2026-11-10 import: "driver: bad connection"). Short-lived idle connections, and a live
+	// one checked out for each import (dedicatedConn).
+	db.SetConnMaxIdleTime(30 * time.Second)
 	return db, nil
+}
+
+// dedicatedConn takes a connection for one import or review and checks it's alive: database/sql retries a dead pooled
+// connection for a query on the pool, but not on a *sql.Conn, so a dead one is discarded and another taken.
+func dedicatedConn(ctx context.Context, db *sql.DB) (*sql.Conn, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		conn, err := db.Conn(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if lastErr = conn.PingContext(ctx); lastErr == nil {
+			return conn, nil
+		}
+		// A connection the driver reports as bad goes back to the pool marked bad, and is closed.
+		conn.Raw(func(any) error { return driver.ErrBadConn }) //nolint:errcheck // the marking is the point
+		conn.Close()
+	}
+	return nil, lastErr
 }
 
 // translate turns ADO.NET keywords into go-mssqldb's: "Server=tcp:host,1433" into server and port, and the Entra
