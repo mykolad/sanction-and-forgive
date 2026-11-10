@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -86,14 +87,21 @@ func main() {
 	go loader.RunRefresh(ctx, time.Duration(refresh*float64(time.Minute)))
 
 	port := setting("PORT", "8080")
-	httpServer := &http.Server{Addr: ":" + port, Handler: server.Handler(), ReadHeaderTimeout: 30 * time.Second}
+	// HOST: all interfaces by default (a container needs that); 127.0.0.1 for a run on a desktop, so its firewall
+	// doesn't ask about a server listening on the network.
+	host := os.Getenv("HOST")
+	httpServer := &http.Server{Addr: net.JoinHostPort(host, port), Handler: server.Handler(), ReadHeaderTimeout: 30 * time.Second}
 	go func() {
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		httpServer.Shutdown(shutdown) //nolint:errcheck // exiting
 	}()
-	logger.Info("Now listening on: http://[::]:" + port)
+	shown := host
+	if shown == "" {
+		shown = "::"
+	}
+	logger.Info("Now listening on: http://" + net.JoinHostPort(shown, port))
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("The server stopped", "error", err.Error())
 		os.Exit(1)
