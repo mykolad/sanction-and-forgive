@@ -19,8 +19,20 @@ fn number<T: std::str::FromStr>(name: &str, fallback: T) -> T {
     std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(fallback)
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Screenings run on the blocking pool: a few threads, as many as twice the CPUs the container may use (at least
+    // four, so a list being rebuilt never holds them all). Tokio's default (512) let a burst start hundreds of threads
+    // on half a vCPU: no faster, and the heap grew with them (the 2026-11-10 load test).
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .max_blocking_threads((2 * cpus).max(4))
+        .build()
+        .expect("the runtime")
+        .block_on(serve());
+}
+
+async fn serve() {
     let logger = Logger;
     let connection = setting("ConnectionStrings__Lists", "");
     if connection.is_empty() {

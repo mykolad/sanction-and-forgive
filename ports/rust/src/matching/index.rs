@@ -1,8 +1,8 @@
 //! One list's in-memory index (spec section 5.5): aliases read both ways, document frequencies, postings by fold key,
 //! fuzzy vocabularies, address postings. Immutable once built.
 
-use std::any::Any;
 use super::{HashMap, HashSet};
+use std::any::Any;
 use std::sync::{Arc, Mutex};
 
 use super::addresses::{compare_address, compare_address_only, parse_address, AddressComparison, AddressForm, AddressOnly, AddressState};

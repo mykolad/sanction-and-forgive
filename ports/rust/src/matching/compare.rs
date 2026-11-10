@@ -1,7 +1,7 @@
 //! Comparing two words (spec section 5.4), and finding the words of a vocabulary within two edits of one.
 
-use std::cell::RefCell;
 use super::HashMap;
+use std::cell::RefCell;
 use std::sync::Mutex;
 
 use super::text::Token;
