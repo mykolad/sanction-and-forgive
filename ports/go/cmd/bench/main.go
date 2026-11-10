@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"slices"
+	"strings"
 	"time"
 
 	"sanctionandforgive/api"
@@ -30,24 +31,43 @@ func main() {
 	cpuProfile := flag.String("cpuprofile", "", "write a CPU profile of the screenings here")
 	memProfile := flag.String("memprofile", "", "write an allocation profile of the screenings here")
 	heapProfile := flag.String("heapprofile", "", "write a profile of the memory the lists hold here, once loaded")
+	only := flag.String("lists", "", "only these lists (codes separated by commas), loaded straight from the database; all by default")
 	dump := flag.String("dump", "", "write every result here (JSON lines), to compare before and after a change")
 	flag.Parse()
 
 	db, err := store.Open(os.Getenv("ConnectionStrings__Lists"))
 	check(err)
-	catalog := api.NewCatalog()
-	loader := api.NewLoader(db, catalog, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	started := time.Now()
-	check(loader.Refresh(context.Background()))
-	loaded := time.Since(started)
-
 	var lists []matching.ScreenedList
-	aliases := 0
-	for _, list := range catalog.Lists() {
-		if list.IsSearched() {
-			lists = append(lists, matching.ScreenedList{Code: list.Code, Name: list.Name, Index: list.Index})
-			aliases += list.Index.AliasCount()
+	if *only == "" {
+		catalog := api.NewCatalog()
+		loader := api.NewLoader(db, catalog, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		check(loader.Refresh(context.Background()))
+		for _, list := range catalog.Lists() {
+			if list.IsSearched() {
+				lists = append(lists, matching.ScreenedList{Code: list.Code, Name: list.Name, Index: list.Index})
+			}
 		}
+	} else {
+		sources, err := store.Sources(context.Background(), db)
+		check(err)
+		for _, source := range sources {
+			if source.ActiveImportID == nil || !slices.Contains(strings.Split(*only, ","), source.Code) {
+				continue
+			}
+			subjects, err := store.ActiveSubjects(context.Background(), db, source.Code, *source.ActiveImportID)
+			check(err)
+			listed := make([]*matching.ListedSubject, len(subjects))
+			for i, subject := range subjects {
+				listed[i] = api.ToListed(subject)
+			}
+			lists = append(lists, matching.ScreenedList{Code: source.Code, Name: source.Name, Index: matching.Build(listed)})
+		}
+	}
+	loaded := time.Since(started)
+	aliases := 0
+	for _, list := range lists {
+		aliases += list.Index.AliasCount()
 	}
 	runtime.GC()
 	var memory runtime.MemStats
