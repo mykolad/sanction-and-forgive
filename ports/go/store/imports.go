@@ -143,7 +143,7 @@ type importRow struct {
 }
 
 func (s *Imports) locked(ctx context.Context, source *SourceRecord, subjects []Subject, change func([]Subject) []Subject, m mode) (*ImportOutcome, error) {
-	conn, err := s.DB.Conn(ctx)
+	conn, err := dedicatedConn(ctx, s.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +726,7 @@ func (s *Imports) Review(ctx context.Context, importID int, confirm bool, review
 	if err != nil {
 		return "", err
 	}
-	conn, err := s.DB.Conn(ctx)
+	conn, err := dedicatedConn(ctx, s.DB)
 	if err != nil {
 		return "", err
 	}
