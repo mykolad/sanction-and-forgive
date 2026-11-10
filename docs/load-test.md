@@ -39,6 +39,44 @@ what stopped the run.
 
 ## Results
 
+### .NET and Go, one after the other (2026-11-10)
+
+The owner's experiment (2026-11-09, docs/conformance.md): the same application in .NET and in Go (`ports/go`, after
+the tuning in #35), deployed one at a time with the deploy workflow's `implementation` input (#36), each at both sizes.
+The same 2,000 inputs (`tests/load/inputs.csv`, from the six production lists on 2026-11-07), the same steps
+(`STAGES=1,2,4,6,8,12,16,24,32,48,64,96`; 128 and 192 also offered to Go at 0.5 vCPU), the same six lists (eu,
+ofac-cons, ofac-sdn, ua-sfms, uk, us-export: 37,388 subjects), the rate limit off only during each run. CPU and memory
+are the highest 1-minute values Azure Monitor reports (`UsageNanoCores`, `WorkingSetBytes`); a screening's CPU comes
+in bursts that 1-minute values smooth out.
+
+| Implementation | Replica | Sustained screenings/s | p95 at that rate (p50) | Next step | CPU (highest minute) | Memory (working set) | Restarts |
+|---|---|---|---|---|---|---|---|
+| .NET 7ecf223 | 0.5 vCPU / 1 GiB | **24** | 62 ms (21 ms) | 32/s: p95 2.09 s | 0.32 vCPU | 501-580 MiB | 0 |
+| .NET 7ecf223 | 0.25 vCPU / 0.5 GiB | **12** | 196 ms (22 ms) | 16/s: p95 2.29 s | 0.14 vCPU | 470-545 MiB | 0 |
+| Go go-7ecf223 | 0.5 vCPU / 1 GiB | **64** | 207 ms (20 ms) | 96/s: p95 4.15 s | 0.47 vCPU | 393-509 MiB | 0 |
+| Go go-7ecf223 | 0.25 vCPU / 0.5 GiB | **32** | 526 ms (20 ms) | 48/s: p95 4.37 s | 0.22 vCPU | 339-423 MiB | 0 |
+
+No request failed in the runs above (13,067, 5,080, 31,980 and 15,560 screenings), and k6 never dropped an
+iteration.
+
+- **Go screens 2.7 times as fast as .NET on the same replica**, at both sizes (64 against 24, 32 against 12): about
+  what the local measurements said (7.3 ms against 14.5 ms a screening on the real lists, docs/conformance.md).
+- **Go at the small size (0.25 vCPU / 0.5 GiB) outdoes .NET at the large one**: 32 screenings/s against 24, in
+  339-423 MiB of the 512 MiB (the runtime's soft limit is 80% of it, `ports/go/memlimit`). The owner's question, back to
+  the smaller size: with Go, yes. Which implementation runs, and at what size, is the owner's decision.
+- **.NET sustained 24/s at 0.5 vCPU, against 32/s on 2026-11-07**: the same inputs and steps; the lists have grown a
+  little since (ofac-sdn 17,651 subjects). Its first failing step is still within 32-48/s, as then.
+- **The first Go run at 0.25 vCPU (14:17 UTC) stalled at 2/s** (p95 11 s, 2 of 435 failed) while the app itself was
+  idle: Azure Monitor showed 0.04 vCPU at most and the audit log one screening per request at the offered rate. The
+  platform's sign-in sidecar (`http-auth`) restarted during it ("Application is shutting down", a liveness probe timed
+  out). The same revision, run again ten minutes later, gave the row above. Treated as a platform event, not the app's
+  limit; a later run that stalls the same way would say otherwise.
+- **The import, run by the Go CLI** while Go was deployed (03:30 UTC), failed for ofac-sdn with `driver: bad
+  connection`: a pooled connection gone dead during the 2¼-minute download (fixed in #38). The five other lists were
+  fine. The .NET deploy after the runs put the job back on the .NET CLI, and a manual run updated ofac-sdn.
+
+Production went back to .NET at 0.5 vCPU / 1 GiB with the rate limit at 120 at 14:47 UTC on 2026-11-10.
+
 ### Azure, one 0.5 vCPU / 1 GiB replica (since 2026-11-07)
 
 Half hard, half regular inputs (#26): 2,000 from the 6 active lists (37,370 subjects), 979 of them regular.
