@@ -71,10 +71,17 @@ held updates are reviewed with `tools/lists.ps1 review|confirm|reject`. Others g
 
 ## Deploying
 
-`.github/workflows/deploy.yml` (**Deploy**) runs after Build and Test passes on a push to `master`, or by hand:
+`.github/workflows/deploy.yml` (**Deploy**) runs after Build and Test passes on a push to `master`, or by hand. By
+hand, its input **implementation** chooses what runs: `dotnet` (the reference, the default, and always after a push) or
+`go` (the Go port, `ports/go`; docs/conformance.md):
 
-1. **build**: the image `ghcr.io/mykolad/sanction-and-forgive:<sha>` (version metadata baked in) with the job's own
-   token, and the EF migration bundle.
+```powershell
+gh workflow run deploy.yml --ref master -f implementation=go   # and -f implementation=dotnet to go back
+```
+
+1. **build**: the image `ghcr.io/mykolad/sanction-and-forgive:<sha>` (the Go port's: the same package's tag
+   `go-<sha>`, version `go-<short sha>`; version metadata baked in) with the job's own token, and the EF migration
+   bundle (the schema is the same for both).
 2. **deploy** (environment `production`, OIDC): `platform.bicep` what-if (logged), then deployed; the SQL firewall
    opened for the runner, the migration bundle as the deploy identity, the firewall closed (always); `app.bicep`
    with the commit's image; the smoke tests (`tests/SanctionAndForgive.SmokeTests`) against the new revision.
@@ -90,12 +97,15 @@ az containerapp job start -g sanction-and-forgive-rg -n sanction-and-forgive-imp
 az containerapp job execution list -g sanction-and-forgive-rg -n sanction-and-forgive-import -o table
 ```
 
-**Load tests** (Phase 5): deploy with the rate limit off, then deploy again without it:
+**Load tests** (Phase 5): deploy with the rate limit off, then deploy again without it. `app.bicepparam` also reads
+`APP_IMPLEMENTATION` (`dotnet` or `go`; the image tag `go-<sha>` must exist), `APP_CPU` and `APP_MEMORY` (0.5 and
+1Gi by default) for a run at another size:
 
 ```powershell
 $env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'
+# $env:APP_IMPLEMENTATION = 'go'; $env:APP_CPU = '0.25'; $env:APP_MEMORY = '0.5Gi'
 az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/app.bicepparam
-Remove-Item Env:RATE_LIMIT_PER_MINUTE   # then the same create again
+Remove-Item Env:RATE_LIMIT_PER_MINUTE, Env:APP_IMPLEMENTATION, Env:APP_CPU, Env:APP_MEMORY -ErrorAction Ignore   # then the same create again
 ```
 
 **What-if on a deployed environment** lists a few changes that aren't changes, a what-if limitation: values read from

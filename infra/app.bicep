@@ -10,6 +10,13 @@ param imageTag string
 
 param image string = 'ghcr.io/mykolad/sanction-and-forgive'
 
+@description('Which implementation runs (the experiment of 2026-11-09, docs/conformance.md): dotnet, the reference and the default, or go, whose image is tag go-<sha> of the same package.')
+@allowed([
+  'dotnet'
+  'go'
+])
+param implementation string = 'dotnet'
+
 @description('One replica, always on (section 8). Raise only after measuring, and with the owner.')
 param minReplicas int = 1
 param maxReplicas int = 1
@@ -31,6 +38,15 @@ param adminClientId string = ''
 param adminSignInReady bool = false
 
 var signInEnabled = !empty(adminClientId)
+
+// Both images serve the API on 8080 as their entry point and hold the CLI, called differently.
+var imageReference = implementation == 'go' ? '${image}:go-${imageTag}' : '${image}:${imageTag}'
+var cliCommand = implementation == 'go' ? [
+  '/app/cli'
+] : [
+  'dotnet'
+  'SanctionAndForgive.Cli.dll'
+]
 
 var name = 'sanction-and-forgive'
 
@@ -99,7 +115,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'api'
-          image: '${image}:${imageTag}'
+          image: imageReference
           resources: {
             cpu: json(cpu)
             memory: memory
@@ -187,14 +203,12 @@ resource importJob 'Microsoft.App/jobs@2024-03-01' = {
       containers: [
         {
           name: 'import'
-          image: '${image}:${imageTag}'
-          command: [
-            'dotnet'
-            'SanctionAndForgive.Cli.dll'
+          image: imageReference
+          command: concat(cliCommand, [
             'import'
             '--source'
             'all'
-          ]
+          ])
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
