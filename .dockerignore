@@ -6,3 +6,6 @@
 **/*.user
 **/*.md
 tests/
+**/target
+# The Rust port keeps its binaries' sources in src/bin.
+!ports/rust/src/bin
