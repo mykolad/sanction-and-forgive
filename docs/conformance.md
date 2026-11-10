@@ -141,8 +141,10 @@ $env:CONFORMANCE_BASE_URL = 'http://localhost:5399'; $env:CONFORMANCE_REFERENCE_
 dotnet test tests/SanctionAndForgive.Conformance --filter FullyQualifiedName~ReferenceTests
 ```
 
-It also prints each one's time per screening, one stream at a time. On the real lists (2026-11-09, both as Linux
-containers on one desktop): .NET 14.3 ms, Go 16.5 ms; about 350 MiB of memory each with all ten lists loaded.
+It also prints each one's time per screening, one stream at a time. On the real lists (both as Linux containers on
+one desktop, all ten lists loaded): on 2026-11-09, .NET 14.3 ms and Go 16.5 ms, about 350 MiB each; on 2026-11-10,
+after the Go port's tuning (`ports/go/README.md`), Go 7.3 ms against .NET's 14.5 ms, 346 MiB in a 512 MiB container,
+every result still the reference's.
 
 ## Changing the golden files
 

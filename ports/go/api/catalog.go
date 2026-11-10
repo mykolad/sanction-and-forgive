@@ -255,14 +255,15 @@ func (l *Loader) build(ctx context.Context, code string, importID, expected int)
 	}
 	listed := make([]*matching.ListedSubject, len(subjects))
 	for i, s := range subjects {
-		listed[i] = toListed(s)
+		listed[i] = ToListed(s)
 	}
 	index := matching.Build(listed)
 	l.logger.Info("Built the index", "code", code, "importId", importID, "subjects", len(subjects), "aliases", index.AliasCount())
 	return index
 }
 
-func toListed(s store.Subject) *matching.ListedSubject {
+// ToListed is a subject from the database as the matcher reads it.
+func ToListed(s store.Subject) *matching.ListedSubject {
 	kind := matching.Unknown
 	switch s.Type {
 	case 0:
