@@ -2,6 +2,11 @@
 //! rule follows the .NET reference exactly (docs/conformance.md), and the speed work follows the Go port's
 //! (ports/go/README.md, "Speed and memory").
 
+/// The matcher's maps and sets: FxHash, not the default SipHash (which resists hash flooding, at a cost every lookup
+/// pays). Their keys come from the dictionaries and the lists, and the order of a map is never what a result depends on.
+pub type HashMap<K, V> = std::collections::HashMap<K, V, rustc_hash::FxBuildHasher>;
+pub type HashSet<T> = std::collections::HashSet<T, rustc_hash::FxBuildHasher>;
+
 pub mod addresses;
 pub mod compare;
 pub mod data;

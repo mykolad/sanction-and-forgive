@@ -2,7 +2,7 @@
 //! Strings are handled as chars; .NET counts UTF-16 units, the same for every character the lists and the dictionaries
 //! use (the Basic Multilingual Plane).
 
-use std::collections::HashMap;
+use super::HashMap;
 use std::sync::Arc;
 
 use unicode_general_category::{get_general_category, GeneralCategory};
@@ -337,7 +337,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     pub fn interning(data: &'a MatcherData) -> Self {
-        Tokenizer { data, cache: Some(HashMap::new()) }
+        Tokenizer { data, cache: Some(HashMap::default()) }
     }
 
     pub fn tokenize(&mut self, value: &str, join_initials: bool) -> Vec<RawToken> {

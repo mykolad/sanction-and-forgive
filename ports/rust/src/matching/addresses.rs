@@ -1,7 +1,7 @@
 //! Addresses read as spec section 5.8 says: a country, the places named, the other words and the numbers; compared
 //! with a listed party's, or alone.
 
-use std::collections::HashMap;
+use super::HashMap;
 
 use unicode_general_category::GeneralCategory;
 
