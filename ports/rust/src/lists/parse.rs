@@ -275,7 +275,12 @@ fn is_xml_space(c: char) -> bool {
 
 /// Streams the elements at depth (the root is depth 0), refusing a document whose root isn't expected_root or that
 /// declares a DTD.
-pub fn records(input: impl BufRead, expected_root: &str, depth: usize, mut each: impl FnMut(Element) -> Result<(), ParseError>) -> Result<(), ParseError> {
+pub fn records(
+    input: impl BufRead,
+    expected_root: &str,
+    depth: usize,
+    mut each: impl FnMut(Element) -> Result<(), ParseError>,
+) -> Result<(), ParseError> {
     let mut reader = Reader::from_reader(input);
     reader.config_mut().trim_text(false);
     reader.config_mut().expand_empty_elements = true;

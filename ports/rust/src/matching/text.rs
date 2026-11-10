@@ -63,9 +63,19 @@ pub struct RawToken {
 
 const APOSTROPHES: &str = "'’ʼʻ`′‘";
 
+/// A character's category as .NET's char checks see it: one beyond the Basic Multilingual Plane is two UTF-16 units,
+/// each a surrogate (Cs), so never a letter, a digit or a mark, and a word ends there.
+pub fn category(c: char) -> GeneralCategory {
+    if c as u32 > 0xFFFF {
+        GeneralCategory::Surrogate
+    } else {
+        get_general_category(c)
+    }
+}
+
 pub fn is_letter(c: char) -> bool {
     matches!(
-        get_general_category(c),
+        category(c),
         GeneralCategory::UppercaseLetter
             | GeneralCategory::LowercaseLetter
             | GeneralCategory::TitlecaseLetter
@@ -75,7 +85,7 @@ pub fn is_letter(c: char) -> bool {
 }
 
 fn is_category(c: char, category: GeneralCategory) -> bool {
-    get_general_category(c) == category
+    self::category(c) == category
 }
 
 /// .NET's char.IsLetterOrDigit: a letter (L) or a decimal digit (Nd).
@@ -84,7 +94,7 @@ pub fn is_letter_or_digit(c: char) -> bool {
 }
 
 fn is_mark(c: char) -> bool {
-    matches!(get_general_category(c), GeneralCategory::NonspacingMark | GeneralCategory::SpacingMark)
+    matches!(category(c), GeneralCategory::NonspacingMark | GeneralCategory::SpacingMark)
 }
 
 /// The normalised words of value (NFKC, lower case, apostrophes inside words deleted, punctuation as separators,
@@ -437,5 +447,20 @@ fn simple_lower(c: char) -> char {
     match (lower.next(), lower.next()) {
         (Some(l), None) => l,
         _ => c,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The reference reads UTF-16 units: a character beyond the Basic Multilingual Plane is two surrogates, neither a
+    /// letter, so it separates words (Copilot's point on #37), and a mark there isn't stripped.
+    #[test]
+    fn a_character_beyond_the_basic_plane_separates_words() {
+        assert_eq!(words("Acme\u{10400}"), ["acme"]);
+        assert_eq!(words("ab\u{10400}cd"), ["ab", "cd"]);
+        assert_eq!(words("o'\u{10400}neil"), ["o", "neil"]);
+        assert_eq!(strip_diacritics("e\u{1D167}"), "e\u{1D167}");
     }
 }

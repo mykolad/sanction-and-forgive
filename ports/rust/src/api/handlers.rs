@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use unicode_general_category::{get_general_category, GeneralCategory};
+use unicode_general_category::GeneralCategory;
 use unicode_normalization::UnicodeNormalization;
 
 use super::catalog::LoadedList;
 use super::screening::{kind_name, list_response, utf16_len, Errors, JsonTime, ListResponse};
 use crate::lists::catalogue::{find_source, optional, ListSource, SOURCES};
-use crate::matching::text::{is_letter_or_digit, lower_invariant};
+use crate::matching::text::{category, is_letter_or_digit, lower_invariant};
 use crate::matching::{ListIndex, ListedSubject, SubjectKind};
 use crate::store::queries::{HistoryEntry, Time};
 
@@ -197,13 +197,25 @@ pub fn examples(lists: &[Arc<LoadedList>]) -> Vec<ExampleResponse> {
         let n = word_count(&subject.primary_name);
         if is_latin(&subject.primary_name) && (2..=5).contains(&n) {
             latin = Some(subject);
-            examples.push(ExampleResponse { label: "A listed company", receiver_name: None, company_name: optional(&subject.primary_name), address: None, list: list.to_string() });
+            examples.push(ExampleResponse {
+                label: "A listed company",
+                receiver_name: None,
+                company_name: optional(&subject.primary_name),
+                address: None,
+                list: list.to_string(),
+            });
             break;
         }
     }
     for (list, subject) in &entities {
         if let Some(name) = subject.names.iter().find(|n| has_cyrillic(&n.full_name) && word_count(&n.full_name) <= 6) {
-            examples.push(ExampleResponse { label: "In Cyrillic", receiver_name: None, company_name: optional(&name.full_name), address: None, list: list.to_string() });
+            examples.push(ExampleResponse {
+                label: "In Cyrillic",
+                receiver_name: None,
+                company_name: optional(&name.full_name),
+                address: None,
+                list: list.to_string(),
+            });
             break;
         }
     }
@@ -230,7 +242,13 @@ pub fn examples(lists: &[Arc<LoadedList>]) -> Vec<ExampleResponse> {
         }
         let words: Vec<String> = subject.primary_name.split(' ').map(str::to_string).collect();
         if words.iter().any(|w| utf16_len(w) >= 8) {
-            examples.push(ExampleResponse { label: "With a typo", receiver_name: None, company_name: Some(with_typo(words)), address: None, list: list.to_string() });
+            examples.push(ExampleResponse {
+                label: "With a typo",
+                receiver_name: None,
+                company_name: Some(with_typo(words)),
+                address: None,
+                list: list.to_string(),
+            });
             break;
         }
     }
@@ -349,7 +367,9 @@ impl BrowseRequest {
         }
         let mut kind = None;
         if let Some(t) = self.kind.as_deref().filter(|t| !t.is_empty()) {
-            kind = [SubjectKind::Individual, SubjectKind::Entity, SubjectKind::Unknown].into_iter().find(|k| kind_name(*k).eq_ignore_ascii_case(t));
+            kind = [SubjectKind::Individual, SubjectKind::Entity, SubjectKind::Unknown]
+                .into_iter()
+                .find(|k| kind_name(*k).eq_ignore_ascii_case(t));
             if kind.is_none() {
                 errors.insert("Type".into(), vec!["Individual, Entity or Unknown.".into()]);
             }
@@ -370,7 +390,9 @@ pub fn browse(list: &LoadedList, index: &ListIndex, request: &BrowseRequest, kin
     let matched: Vec<&Arc<ListedSubject>> = entries
         .iter()
         .filter(|e| kind.is_none_or(|k| e.subject.kind == k))
-        .filter(|e| query.is_empty() || e.subject.external_id.to_lowercase() == id.to_lowercase() || e.folded.iter().any(|n| n.contains(&query)))
+        .filter(|e| {
+            query.is_empty() || e.subject.external_id.to_lowercase() == id.to_lowercase() || e.folded.iter().any(|n| n.contains(&query))
+        })
         .map(|e| &e.subject)
         .collect();
     let page = matched
@@ -382,7 +404,11 @@ pub fn browse(list: &LoadedList, index: &ListIndex, request: &BrowseRequest, kin
             kind: kind_name(subject.kind),
             primary_name: subject.primary_name.clone(),
             names: subject.names.iter().map(|n| BrowseName { name: n.full_name.clone(), is_weak: n.is_weak }).collect(),
-            addresses: subject.addresses.iter().map(|a| BrowseAddress { raw: a.raw.clone(), country_code: optional(&a.country_code) }).collect(),
+            addresses: subject
+                .addresses
+                .iter()
+                .map(|a| BrowseAddress { raw: a.raw.clone(), country_code: optional(&a.country_code) })
+                .collect(),
             programme: subject.programme.clone(),
             source_url: subject.source_url.clone(),
         })
@@ -394,7 +420,12 @@ fn build_name_order(index: &ListIndex) -> Vec<Browsable> {
     let mut entries: Vec<(String, Browsable)> = index
         .subjects()
         .iter()
-        .map(|subject| (sort_key(&subject.primary_name), Browsable { subject: subject.clone(), folded: subject.names.iter().map(|n| fold(&n.full_name)).collect() }))
+        .map(|subject| {
+            (
+                sort_key(&subject.primary_name),
+                Browsable { subject: subject.clone(), folded: subject.names.iter().map(|n| fold(&n.full_name)).collect() },
+            )
+        })
         .collect();
     entries.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.subject.external_id.cmp(&b.1.subject.external_id)));
     entries.into_iter().map(|(_, e)| e).collect()
@@ -410,7 +441,7 @@ pub fn fold(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut last_space = false;
     for c in text.nfd() {
-        if get_general_category(c) == GeneralCategory::NonspacingMark {
+        if category(c) == GeneralCategory::NonspacingMark {
             continue;
         }
         if is_go_space(c) {

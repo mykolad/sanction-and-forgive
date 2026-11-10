@@ -43,7 +43,9 @@ impl LoadedList {
     /// Searched, but a feed whose last successful check is older than its allowed age.
     pub fn is_overdue(&self, now: Time) -> bool {
         self.is_searched()
-            && self.max_age_hours.is_some_and(|hours| self.last_checked_at.is_none_or(|checked| now - checked > Duration::hours(hours.into())))
+            && self
+                .max_age_hours
+                .is_some_and(|hours| self.last_checked_at.is_none_or(|checked| now - checked > Duration::hours(hours.into())))
     }
 
     /// Current, Overdue, NotChecked or SwitchedOff.
@@ -152,7 +154,8 @@ impl Loader {
         match self.load_allow_list().await {
             Ok(()) => true,
             Err(e) => {
-                self.logger.warn("Reloading the allow-list after an edit failed; the next refresh retries", &[("error", e.to_string().into())]);
+                self.logger
+                    .warn("Reloading the allow-list after an edit failed; the next refresh retries", &[("error", e.to_string().into())]);
                 false
             }
         }
@@ -168,7 +171,8 @@ impl Loader {
         match self.load_allow_list().await {
             Ok(()) => true,
             Err(e) => {
-                self.logger.warn("Reloading the allow-list after an edit failed; the next refresh retries", &[("error", e.to_string().into())]);
+                self.logger
+                    .warn("Reloading the allow-list after an edit failed; the next refresh retries", &[("error", e.to_string().into())]);
                 false
             }
         }
@@ -205,7 +209,8 @@ impl Loader {
         let mut lists: Vec<Arc<LoadedList>> = Vec::with_capacity(sources.len());
         let mut pending: Vec<(usize, LoadedList)> = Vec::new();
         for (i, source) in sources.iter().enumerate() {
-            let switched_off = source.switched_off_at.map(|at| SwitchedOff { at, reason: source.switched_off_reason.clone().unwrap_or_default() });
+            let switched_off =
+                source.switched_off_at.map(|at| SwitchedOff { at, reason: source.switched_off_reason.clone().unwrap_or_default() });
             let mut target = LoadedList {
                 code: source.code.clone(),
                 name: source.name.clone(),
@@ -257,7 +262,10 @@ impl Loader {
         let subjects = match queries::active_subjects(conn, code, import_id).await {
             Ok(subjects) => subjects,
             Err(e) => {
-                self.logger.error("Building the index failed", &[("code", code.into()), ("importId", import_id.into()), ("error", e.to_string().into())]);
+                self.logger.error(
+                    "Building the index failed",
+                    &[("code", code.into()), ("importId", import_id.into()), ("error", e.to_string().into())],
+                );
                 return None;
             }
         };
@@ -270,7 +278,8 @@ impl Loader {
         };
         let listed: Vec<ListedSubject> = subjects.into_iter().map(to_listed).collect();
         let index = tokio::task::spawn_blocking(move || ListIndex::build(listed)).await.ok()?;
-        self.logger.info("Built the index", &[("code", code.into()), ("importId", import_id.into()), ("aliases", index.alias_count().into())]);
+        self.logger
+            .info("Built the index", &[("code", code.into()), ("importId", import_id.into()), ("aliases", index.alias_count().into())]);
         Some(index)
     }
 
@@ -297,7 +306,11 @@ pub fn to_listed(s: Subject) -> ListedSubject {
         kind,
         primary_name: s.primary_name,
         names: s.names.into_iter().map(|n| ListedName { full_name: n.full_name, is_weak: n.is_weak }).collect(),
-        addresses: s.addresses.into_iter().map(|a| ListedAddress { raw: a.raw, country_code: a.country_code.map(|c| c.trim().to_string()).unwrap_or_default() }).collect(),
+        addresses: s
+            .addresses
+            .into_iter()
+            .map(|a| ListedAddress { raw: a.raw, country_code: a.country_code.map(|c| c.trim().to_string()).unwrap_or_default() })
+            .collect(),
         programme: s.programmes,
         source_url: s.source_url,
     }

@@ -3,12 +3,12 @@
 
 use std::collections::HashMap;
 
-use unicode_general_category::{get_general_category, GeneralCategory};
+use unicode_general_category::GeneralCategory;
 
 use super::compare::TokenComparer;
 use super::data::MatcherData;
 use super::scorer::{how, WordAlignment};
-use super::text::{is_letter, to_upper_invariant, words, TokenRef, Tokenizer};
+use super::text::{category, is_letter, to_upper_invariant, words, TokenRef, Tokenizer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressState {
@@ -152,10 +152,7 @@ fn trailing_code(raw: &str) -> Option<String> {
 
 fn is_word_char(c: char) -> bool {
     is_letter(c)
-        || matches!(
-            get_general_category(c),
-            GeneralCategory::NonspacingMark | GeneralCategory::DecimalNumber | GeneralCategory::ConnectorPunctuation
-        )
+        || matches!(category(c), GeneralCategory::NonspacingMark | GeneralCategory::DecimalNumber | GeneralCategory::ConnectorPunctuation)
 }
 
 #[derive(Debug, Clone)]

@@ -11,11 +11,15 @@ use serde_json::Value;
 use super::catalog::{Catalog, LoadedList};
 use crate::lists::catalogue::find_source;
 use crate::log::Logger;
-use crate::matching::{AllowList, Cell, Entry, Options, Outcome, OverallOutcome, ScreenedList, Screener, ScreeningRequest, ScreeningResult, SubjectMatch, WordAlignment};
+use crate::matching::{
+    AllowList, Cell, Entry, Options, Outcome, OverallOutcome, ScreenedList, Screener, ScreeningRequest, ScreeningResult, SubjectMatch,
+    WordAlignment,
+};
 use crate::store::queries::Time;
 
 /// On every result.
-pub const DISCLAIMER: &str = "This is a demo list check, not a legal determination. It doesn't cover ownership or control by listed parties, \
+pub const DISCLAIMER: &str =
+    "This is a demo list check, not a legal determination. It doesn't cover ownership or control by listed parties, \
 or embargoes. A person must review possible matches. The percentage is an estimate that this entry is the \
 listed party, based on the data entered; it isn't the chance that a shipment is lawful.";
 
@@ -185,7 +189,13 @@ fn candidate_response(m: &SubjectMatch) -> CandidateResponse {
         .subject
         .addresses
         .iter()
-        .map(|a| if !a.country_code.is_empty() && !a.raw.contains(&a.country_code) { format!("{} ({})", a.raw, a.country_code) } else { a.raw.clone() })
+        .map(|a| {
+            if !a.country_code.is_empty() && !a.raw.contains(&a.country_code) {
+                format!("{} ({})", a.raw, a.country_code)
+            } else {
+                a.raw.clone()
+            }
+        })
         .collect();
     CandidateResponse {
         listed_name: m.subject.primary_name.clone(),
@@ -394,9 +404,18 @@ impl ScreeningService {
         chrono::Utc::now()
     }
 
-    fn run(&self, body: &ScreeningRequestBody, lists: &[Arc<LoadedList>], allow_list: &AllowList, now: Time) -> (ScreeningResult, Vec<ListResponse>) {
-        let screened: Vec<ScreenedList> =
-            lists.iter().filter(|l| l.switched_off.is_none()).map(|l| ScreenedList { code: l.code.clone(), name: l.name.clone(), index: l.index.clone() }).collect();
+    fn run(
+        &self,
+        body: &ScreeningRequestBody,
+        lists: &[Arc<LoadedList>],
+        allow_list: &AllowList,
+        now: Time,
+    ) -> (ScreeningResult, Vec<ListResponse>) {
+        let screened: Vec<ScreenedList> = lists
+            .iter()
+            .filter(|l| l.switched_off.is_none())
+            .map(|l| ScreenedList { code: l.code.clone(), name: l.name.clone(), index: l.index.clone() })
+            .collect();
         let request = ScreeningRequest {
             receiver_name: body.receiver_name.clone().unwrap_or_default(),
             company_name: body.company_name.clone().unwrap_or_default(),
@@ -473,7 +492,12 @@ impl ScreeningService {
                         Some(b) if b.percent >= self.options().best_candidate_min_percent => format!(" [{}]", b.subject.external_id),
                         _ => String::new(),
                     };
-                    format!("{} {}{allowed} {}%{best}", cell.list, cell.outcome.map(|o| o.as_str()).unwrap_or_default(), cell.percent.unwrap_or_default())
+                    format!(
+                        "{} {}{allowed} {}%{best}",
+                        cell.list,
+                        cell.outcome.map(|o| o.as_str()).unwrap_or_default(),
+                        cell.percent.unwrap_or_default()
+                    )
                 })
                 .collect();
             results.push_str(&cells.join("; "));
@@ -528,7 +552,8 @@ impl ScreeningService {
             gap += &format!(" Not searched: {}.", switched_off.join("; "));
         }
         for age in &ages {
-            gap += &format!(" Warning: couldn't be updated within {age} hours, so searched as last downloaded: {}.", overdue[age].join("; "));
+            gap +=
+                &format!(" Warning: couldn't be updated within {age} hours, so searched as last downloaded: {}.", overdue[age].join("; "));
         }
 
         let mut hits: Vec<String> = Vec::new();
@@ -549,13 +574,21 @@ impl ScreeningService {
             let reasons: Vec<String> = result
                 .entries
                 .iter()
-                .filter_map(|e| e.allowed_by.as_ref().filter(|_| e.cells.iter().any(|c| c.allowed)).map(|a| format!("{}: {}", a.name, a.reason)))
+                .filter_map(|e| {
+                    e.allowed_by.as_ref().filter(|_| e.cells.iter().any(|c| c.allowed)).map(|a| format!("{}: {}", a.name, a.reason))
+                })
                 .collect();
-            allowed = format!(" A possible match on {} is allowed by the allow-list ({}); a person can still review it.", allowed_on.join(", "), reasons.join("; "));
+            allowed = format!(
+                " A possible match on {} is allowed by the allow-list ({}); a person can still review it.",
+                allowed_on.join(", "),
+                reasons.join("; ")
+            );
         }
 
         match result.outcome {
-            OverallOutcome::Match => format!("Possible match on {}. A person must review it before anything else happens.{gap}{allowed}", hits.join(", ")),
+            OverallOutcome::Match => {
+                format!("Possible match on {}. A person must review it before anything else happens.{gap}{allowed}", hits.join(", "))
+            }
             OverallOutcome::Review => format!("Review needed: a similar listed party on {}.{gap}{allowed}", hits.join(", ")),
             OverallOutcome::Incomplete if checked.is_empty() => format!("Incomplete: no list could be checked.{gap}"),
             OverallOutcome::Incomplete => format!("Incomplete. No match found in: {}.{gap}{allowed}", checked.join("; ")),

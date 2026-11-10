@@ -42,7 +42,15 @@ impl ListSource {
 
 const DAILY: i32 = 72;
 
-const fn source(code: &'static str, name: &'static str, url: &'static str, status: FeedStatus, homepage: &'static str, terms_url: &'static str, note: &'static str) -> ListSource {
+const fn source(
+    code: &'static str,
+    name: &'static str,
+    url: &'static str,
+    status: FeedStatus,
+    homepage: &'static str,
+    terms_url: &'static str,
+    note: &'static str,
+) -> ListSource {
     ListSource { code, name, url, max_age_hours: DAILY, status, homepage, terms_url, note }
 }
 

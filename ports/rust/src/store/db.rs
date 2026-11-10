@@ -104,9 +104,13 @@ impl Database {
             Auth::ManagedIdentity { client_id } => AuthMethod::AADToken(managed_identity_token(client_id.as_deref()).await?),
             Auth::Default => AuthMethod::AADToken(default_token().await?),
         });
-        let tcp = tokio::time::timeout(self.timeout, TcpStream::connect(config.get_addr())).await.map_err(|_| "Connecting to SQL Server timed out.")??;
+        let tcp = tokio::time::timeout(self.timeout, TcpStream::connect(config.get_addr()))
+            .await
+            .map_err(|_| "Connecting to SQL Server timed out.")??;
         tcp.set_nodelay(true)?;
-        Ok(tokio::time::timeout(self.timeout, Client::connect(config, tcp.compat_write())).await.map_err(|_| "Signing in to SQL Server timed out.")??)
+        Ok(tokio::time::timeout(self.timeout, Client::connect(config, tcp.compat_write()))
+            .await
+            .map_err(|_| "Signing in to SQL Server timed out.")??)
     }
 }
 
@@ -119,7 +123,8 @@ async fn managed_identity_token(client_id: Option<&str>) -> DbResult<String> {
     if let Some(id) = client_id {
         query.push(("client_id", id));
     }
-    let response = reqwest::Client::new().get(endpoint).query(&query).header("X-IDENTITY-HEADER", header).send().await?.error_for_status()?;
+    let response =
+        reqwest::Client::new().get(endpoint).query(&query).header("X-IDENTITY-HEADER", header).send().await?.error_for_status()?;
     let body: serde_json::Value = response.json().await?;
     Ok(body["access_token"].as_str().ok_or("The identity endpoint gave no token.")?.to_string())
 }
@@ -147,7 +152,8 @@ mod tests {
 
     #[test]
     fn reads_the_references_connection_strings() {
-        let local = Database::parse("Server=localhost,14333;Database=sanctions_local;User ID=sa;Password=p;TrustServerCertificate=True").unwrap();
+        let local =
+            Database::parse("Server=localhost,14333;Database=sanctions_local;User ID=sa;Password=p;TrustServerCertificate=True").unwrap();
         assert_eq!((local.host.as_str(), local.port, local.database.as_deref()), ("localhost", 14333, Some("sanctions_local")));
         assert_eq!(local.auth, Auth::Sql { user: "sa".into(), password: "p".into() });
         assert!(local.trust_certificate);

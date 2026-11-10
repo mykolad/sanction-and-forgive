@@ -132,7 +132,9 @@ async fn review(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<Stri
             json_response(StatusCode::OK, &json!({ "importId": id, "result": result.as_str(), "reloaded": reloaded }))
         }
         ReviewResult::NotFound => not_found(),
-        ReviewResult::NotPending => json_response(StatusCode::CONFLICT, &json!({ "importId": id, "result": result.as_str(), "reloaded": false })),
+        ReviewResult::NotPending => {
+            json_response(StatusCode::CONFLICT, &json!({ "importId": id, "result": result.as_str(), "reloaded": false }))
+        }
     }
 }
 
@@ -195,7 +197,11 @@ fn refusal(code: &str, message: String, possible: Vec<PossibleMatch>) -> Value {
 }
 
 fn exists_refusal(id: i32) -> Value {
-    refusal("exists", format!("This name is already on the allow-list (entry {id}). To change its reason, remove it and add it again."), Vec::new())
+    refusal(
+        "exists",
+        format!("This name is already on the allow-list (entry {id}). To change its reason, remove it and add it again."),
+        Vec::new(),
+    )
 }
 
 async fn add_to_allow_list(State(s): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
@@ -235,7 +241,8 @@ async fn add_to_allow_list(State(s): State<Shared>, headers: HeaderMap, body: By
                 }
             }
             if !valid {
-                errors.insert("Confirmed".into(), vec!["At most 100 keys of 1 to 256 characters, as the possible matches gave them.".into()]);
+                errors
+                    .insert("Confirmed".into(), vec!["At most 100 keys of 1 to 256 characters, as the possible matches gave them.".into()]);
             }
         }
         Some(_) => return invalid(),
@@ -264,24 +271,38 @@ async fn add_to_allow_list(State(s): State<Shared>, headers: HeaderMap, body: By
 
 /// Runs under the refresh gate, so the lists the name is checked against are the ones in use when it's stored
 /// (AllowListAdmin.CheckAndStoreAsync).
-async fn check_and_store(s: &Shared, name: &str, reason: &str, by: &str, confirmed: &HashSet<String>) -> (StatusCode, Value, Option<(i32, Vec<String>)>) {
+async fn check_and_store(
+    s: &Shared,
+    name: &str,
+    reason: &str,
+    by: &str,
+    confirmed: &HashSet<String>,
+) -> (StatusCode, Value, Option<(i32, Vec<String>)>) {
     let catalog = &s.catalog;
     let lists = catalog.lists();
     let unavailable = !catalog.is_ready() || lists.is_empty() || lists.iter().any(|l| l.index.is_none());
     if unavailable {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            refusal("unavailable", "A list can't be checked right now (loading, or not current), so the name can't be checked against it. Try again later.".into(), Vec::new()),
+            refusal(
+                "unavailable",
+                "A list can't be checked right now (loading, or not current), so the name can't be checked against it. Try again later."
+                    .into(),
+                Vec::new(),
+            ),
             None,
         );
     }
     if let Some(existing) = catalog.allow_list().find(name) {
         return (StatusCode::CONFLICT, exists_refusal(existing.id), None);
     }
-    let screened: Vec<ScreenedList> = lists.iter().map(|l| ScreenedList { code: l.code.clone(), name: l.name.clone(), index: l.index.clone() }).collect();
+    let screened: Vec<ScreenedList> =
+        lists.iter().map(|l| ScreenedList { code: l.code.clone(), name: l.name.clone(), index: l.index.clone() }).collect();
     let list_name = |code: &str| lists.iter().find(|l| l.code == code).map(|l| l.name.clone()).unwrap_or_default();
     let (service, owned_name) = (s.screenings.clone(), name.to_string());
-    let hits = tokio::task::spawn_blocking(move || service.screener.name_hits(&owned_name, &screened).unwrap_or_default()).await.unwrap_or_default();
+    let hits = tokio::task::spawn_blocking(move || service.screener.name_hits(&owned_name, &screened).unwrap_or_default())
+        .await
+        .unwrap_or_default();
     let mut best_match: Option<&crate::matching::ListedHit> = None;
     for hit in &hits {
         if hit.matched.outcome == Outcome::Match && best_match.is_none_or(|m| hit.matched.percent > m.matched.percent) {
@@ -291,7 +312,15 @@ async fn check_and_store(s: &Shared, name: &str, reason: &str, by: &str, confirm
     if let Some(m) = best_match {
         return (
             StatusCode::CONFLICT,
-            refusal("listed", format!("This name is a match on {}: {}: a listed party can't be allow-listed.", list_name(&m.list), m.matched.subject.primary_name), Vec::new()),
+            refusal(
+                "listed",
+                format!(
+                    "This name is a match on {}: {}: a listed party can't be allow-listed.",
+                    list_name(&m.list),
+                    m.matched.subject.primary_name
+                ),
+                Vec::new(),
+            ),
             None,
         );
     }
@@ -335,7 +364,8 @@ async fn check_and_store(s: &Shared, name: &str, reason: &str, by: &str, confirm
     let stored = match s.db.connect().await {
         Ok(mut conn) => {
             queries::allow_list_add(&mut conn, name, reason, by, chrono::Utc::now(), |in_force| {
-                let entries: Vec<AllowListEntry> = in_force.iter().map(|e| AllowListEntry { id: e.id, name: e.name.clone(), reason: e.reason.clone() }).collect();
+                let entries: Vec<AllowListEntry> =
+                    in_force.iter().map(|e| AllowListEntry { id: e.id, name: e.name.clone(), reason: e.reason.clone() }).collect();
                 AllowList::build(&entries, "stored").find(name).map(|e| e.id)
             })
             .await

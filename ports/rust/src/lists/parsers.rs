@@ -6,7 +6,9 @@ use std::io::BufRead;
 use regex::Regex;
 use serde_json::Value;
 
-use super::parse::{eq, format_error, join, parse_date, records, Builder, Element, OptionalElement, ParseError, ParsedSubject, SubjectType};
+use super::parse::{
+    eq, format_error, join, parse_date, records, Builder, Element, OptionalElement, ParseError, ParsedSubject, SubjectType,
+};
 
 pub type Parser = fn(&mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError>;
 
@@ -59,13 +61,22 @@ fn parse_eu(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
         b.remarks = join(" ", &entity.els("remark").map(|r| s(r.value())).collect::<Vec<_>>());
         b.source_url = regulations.iter().find_map(|r| r.val("publicationUrl"));
         for alias in entity.els("nameAlias") {
-            let name = alias.attr("wholeName").or_else(|| join(" ", &[alias.attr("firstName"), alias.attr("middleName"), alias.attr("lastName")]));
+            let name =
+                alias.attr("wholeName").or_else(|| join(" ", &[alias.attr("firstName"), alias.attr("middleName"), alias.attr("lastName")]));
             b.add_name(name.as_deref(), eq(&alias.attr("strong"), "false"), false);
         }
         for a in entity.els("address") {
             let raw = join(
                 ", ",
-                &[a.attr("street"), a.attr("poBox"), a.attr("zipCode"), a.attr("city"), a.attr("place"), a.attr("region"), a.attr("countryDescription")],
+                &[
+                    a.attr("street"),
+                    a.attr("poBox"),
+                    a.attr("zipCode"),
+                    a.attr("city"),
+                    a.attr("place"),
+                    a.attr("region"),
+                    a.attr("countryDescription"),
+                ],
             );
             b.add_address(raw.as_deref(), a.attr("countryIso2Code").as_deref());
         }
@@ -110,7 +121,8 @@ fn parse_ofac(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError
             let is_primary = eq(&name.val("isPrimary"), "true");
             let is_weak = eq(&name.val("isLowQuality"), "true");
             for t in name.el("translations").els("translation") {
-                let full_name = join(" ", &[t.val("formattedFirstName"), t.val("formattedLastName")]).or_else(|| t.val("formattedFullName"));
+                let full_name =
+                    join(" ", &[t.val("formattedFirstName"), t.val("formattedLastName")]).or_else(|| t.val("formattedFullName"));
                 b.add_name(full_name.as_deref(), is_weak, is_primary && eq(&t.val("isPrimary"), "true"));
             }
         }
@@ -233,7 +245,10 @@ fn json_text(record: &Value, key: &str) -> Result<Option<String>, ParseError> {
 fn json_texts(record: &Value, key: &str) -> Result<Vec<String>, ParseError> {
     match record.get(key) {
         None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::Array(items)) => items.iter().map(|i| i.as_str().map(str::to_string).ok_or_else(|| format_error(format!("\"{key}\" isn't a list of strings.")))).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|i| i.as_str().map(str::to_string).ok_or_else(|| format_error(format!("\"{key}\" isn't a list of strings."))))
+            .collect(),
         Some(_) => Err(format_error(format!("\"{key}\" isn't a list."))),
     }
 }
@@ -241,10 +256,12 @@ fn json_texts(record: &Value, key: &str) -> Result<Vec<String>, ParseError> {
 fn parse_us_export(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
     let mut data = Vec::new();
     reader.read_to_end(&mut data)?;
-    let document: Value = serde_json::from_slice(&data).map_err(|_| format_error("The JSON document isn't valid, or doesn't end after its root object."))?;
+    let document: Value =
+        serde_json::from_slice(&data).map_err(|_| format_error("The JSON document isn't valid, or doesn't end after its root object."))?;
     let Value::Object(root) = document else { return Err(format_error("Expected a JSON object.")) };
     // The last "results" wins, as the reference's reader keeps reading.
-    let results = root.iter().filter(|(k, _)| *k == "results").map(|(_, v)| v).last().ok_or_else(|| format_error("No \"results\" array."))?;
+    let results =
+        root.iter().filter(|(k, _)| *k == "results").map(|(_, v)| v).last().ok_or_else(|| format_error("No \"results\" array."))?;
     let Value::Array(results) = results else { return Err(format_error("Expected \"results\" to be an array.")) };
 
     let mut out = Vec::new();
@@ -254,7 +271,9 @@ fn parse_us_export(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
         }
         let source = json_text(record, "source")?;
         let kind_text = json_text(record, "type")?;
-        let kept = ["Bureau of Industry and Security", "State Department"].iter().any(|agency| source.as_deref().is_some_and(|s| s.ends_with(agency)));
+        let kept = ["Bureau of Industry and Security", "State Department"]
+            .iter()
+            .any(|agency| source.as_deref().is_some_and(|s| s.ends_with(agency)));
         if !kept || eq(&kind_text, "Vessel") || eq(&kind_text, "Aircraft") {
             continue;
         }
@@ -279,7 +298,16 @@ fn parse_us_export(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
         if let Some(addresses) = record.get("addresses").and_then(Value::as_array) {
             for a in addresses {
                 let country = json_text(a, "country")?;
-                let raw = join(", ", &[json_text(a, "address")?, json_text(a, "city")?, json_text(a, "state")?, json_text(a, "postal_code")?, country.clone()]);
+                let raw = join(
+                    ", ",
+                    &[
+                        json_text(a, "address")?,
+                        json_text(a, "city")?,
+                        json_text(a, "state")?,
+                        json_text(a, "postal_code")?,
+                        country.clone(),
+                    ],
+                );
                 b.add_address(raw.as_deref(), country.as_deref());
             }
         }
@@ -404,7 +432,8 @@ fn read_seco_target(target: &Element, programmes: &HashMap<String, String>) -> R
             }
         }
         for a in identity.els("address") {
-            addresses.push((join(", ", &[a.val("c-o"), a.val("p-o-box"), a.val("address-details"), a.val("zip-code")]), a.attr("place-id")));
+            addresses
+                .push((join(", ", &[a.val("c-o"), a.val("p-o-box"), a.val("address-details"), a.val("zip-code")]), a.attr("place-id")));
         }
     }
     if !b.has_names() {

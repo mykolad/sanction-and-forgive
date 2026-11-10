@@ -64,9 +64,9 @@ func Words(value string) []string {
 	for i := 0; i < len(text); i++ {
 		c := text[i]
 		switch {
-		case isLetterOrDigit(c) || unicode.Is(unicode.Mn, c) || unicode.Is(unicode.Mc, c):
+		case isLetterOrDigit(c) || Is(unicode.Mn, c) || Is(unicode.Mc, c):
 			word = append(word, c)
-		case strings.ContainsRune(apostrophes, c) && len(word) > 0 && i+1 < len(text) && unicode.IsLetter(text[i+1]):
+		case strings.ContainsRune(apostrophes, c) && len(word) > 0 && i+1 < len(text) && IsLetter(text[i+1]):
 			// Inside a word: deleted, so the word stays whole.
 		default:
 			flush()
@@ -106,9 +106,18 @@ func toLowerInvariant(s string) string { return ToLowerInvariant(s) }
 
 func toUpperInvariant(s string) string { return ToUpperInvariant(s) }
 
+// The reference checks UTF-16 units: a character beyond the Basic Multilingual Plane is two surrogates (Cs), so never
+// a letter, a digit or a mark there, and a word ends at it. Every category check here goes through Is.
+
+// IsLetter is .NET's char.IsLetter.
+func IsLetter(c rune) bool { return c <= 0xFFFF && unicode.IsLetter(c) }
+
+// Is is unicode.Is as .NET's char category sees it.
+func Is(table *unicode.RangeTable, c rune) bool { return c <= 0xFFFF && unicode.Is(table, c) }
+
 // isLetterOrDigit is .NET's char.IsLetterOrDigit: a letter (L) or a decimal digit (Nd).
 func isLetterOrDigit(c rune) bool {
-	return unicode.IsLetter(c) || unicode.Is(unicode.Nd, c)
+	return IsLetter(c) || Is(unicode.Nd, c)
 }
 
 // StripDiacritics returns a Latin word without diacritics: Ştefan → stefan, straße → strasse.
@@ -131,7 +140,7 @@ func StripDiacritics(value string) string {
 		case 'ı':
 			b.WriteRune('i')
 		default:
-			if !unicode.Is(unicode.Mn, c) {
+			if !Is(unicode.Mn, c) {
 				b.WriteRune(c)
 			}
 		}
@@ -185,7 +194,7 @@ func (t *TransliterationTable) Transliterate(text string) string {
 	runes := []rune(text)
 	var b strings.Builder
 	for i, c := range runes {
-		wordStart := i == 0 || !unicode.IsLetter(runes[i-1])
+		wordStart := i == 0 || !IsLetter(runes[i-1])
 		if initial, ok := t.Initial[c]; wordStart && ok {
 			b.WriteString(initial)
 		} else if latin, ok := t.Letters[c]; ok {
@@ -346,7 +355,7 @@ func (d *MatcherData) token(text string) *Token {
 
 func isSingleLetter(word string) bool {
 	runes := []rune(word)
-	return len(runes) == 1 && unicode.IsLetter(runes[0])
+	return len(runes) == 1 && IsLetter(runes[0])
 }
 
 func (t *tokenizer) replaceLegalPhrases(words []string) []string {
@@ -392,14 +401,14 @@ func removeHyphenatedHonorifics(value string) string {
 	var b strings.Builder
 	is := func(i int, lower rune) bool { return i < len(runes) && unicode.ToLower(runes[i]) == lower }
 	for i := 0; i < len(runes); i++ {
-		if (i == 0 || !unicode.IsLetter(runes[i-1])) && is(i, 'г') && i+1 < len(runes) && runes[i+1] == '-' {
+		if (i == 0 || !IsLetter(runes[i-1])) && is(i, 'г') && i+1 < len(runes) && runes[i+1] == '-' {
 			end := -1
 			if is(i+2, 'н') {
 				end = i + 3
 			} else if is(i+2, 'ж') && is(i+3, 'а') {
 				end = i + 4
 			}
-			if end >= 0 && (end >= len(runes) || !unicode.IsLetter(runes[end])) {
+			if end >= 0 && (end >= len(runes) || !IsLetter(runes[end])) {
 				if end < len(runes) && runes[end] == '.' {
 					end++
 				}

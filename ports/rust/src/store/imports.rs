@@ -7,7 +7,9 @@ use sha2::{Digest, Sha256};
 use tiberius::ToSql;
 
 use super::db::{Connection, Database, DbResult};
-use super::queries::{self, execute, int, optional_int, optional_text, rows, simple, text, time, HistoryEntry, Subject, SubjectAddress, SubjectName, Time};
+use super::queries::{
+    self, execute, int, optional_int, optional_text, rows, simple, text, time, HistoryEntry, Subject, SubjectAddress, SubjectName, Time,
+};
 
 const MAX_EXTERNAL_ID: usize = 200;
 const MAX_DROP: f64 = 0.20;
@@ -88,7 +90,12 @@ fn now() -> Time {
 }
 
 async fn find_source(conn: &mut Connection, where_clause: &str, key: &dyn ToSql) -> DbResult<Option<SourceRecord>> {
-    let found = rows(conn, &format!("SELECT Id, Code, Name, Url, MaxAgeHours, ActiveImportId, LastCheckedAt FROM Sources WHERE {where_clause}"), &[key]).await?;
+    let found = rows(
+        conn,
+        &format!("SELECT Id, Code, Name, Url, MaxAgeHours, ActiveImportId, LastCheckedAt FROM Sources WHERE {where_clause}"),
+        &[key],
+    )
+    .await?;
     Ok(found.first().map(|r| SourceRecord {
         id: int(r, 0),
         code: text(r, 1),
@@ -116,8 +123,22 @@ impl Imports {
     pub async fn ensure_source(&self, code: &str, name: &str, url: Option<&str>, max_age_hours: Option<i32>) -> DbResult<SourceRecord> {
         let mut conn = self.db.connect().await?;
         match find_source(&mut conn, "Code = @P1", &code).await? {
-            None => execute(&mut conn, "INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4)", &[&code, &name, &url, &max_age_hours]).await?,
-            Some(existing) => execute(&mut conn, "UPDATE Sources SET Name = @P1, Url = @P2, MaxAgeHours = @P3 WHERE Id = @P4", &[&name, &url, &max_age_hours, &existing.id]).await?,
+            None => {
+                execute(
+                    &mut conn,
+                    "INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4)",
+                    &[&code, &name, &url, &max_age_hours],
+                )
+                .await?
+            }
+            Some(existing) => {
+                execute(
+                    &mut conn,
+                    "UPDATE Sources SET Name = @P1, Url = @P2, MaxAgeHours = @P3 WHERE Id = @P4",
+                    &[&name, &url, &max_age_hours, &existing.id],
+                )
+                .await?
+            }
         };
         Ok(find_source(&mut conn, "Code = @P1", &code).await?.expect("just written"))
     }
@@ -270,7 +291,12 @@ impl Imports {
             if let Some(drop) = &drop {
                 let completed = now().fixed_offset();
                 in_transaction(conn, async |conn| {
-                    execute(conn, "UPDATE Imports SET Status = 'PendingReview', CompletedAt = @P1, Message = @P2 WHERE Id = @P3", &[&completed, drop, &import_id]).await?;
+                    execute(
+                        conn,
+                        "UPDATE Imports SET Status = 'PendingReview', CompletedAt = @P1, Message = @P2 WHERE Id = @P3",
+                        &[&completed, drop, &import_id],
+                    )
+                    .await?;
                     supersede_held(conn, source.id, Some(import_id), &format!("superseded by import {import_id}")).await
                 })
                 .await
@@ -282,9 +308,17 @@ impl Imports {
         if let Err(e) = work {
             // The activation may have committed before the failure surfaced: if so, the import is active and whole.
             let _ = simple(conn, "IF @@TRANCOUNT > 0 ROLLBACK").await;
-            let persisted = rows(conn, "SELECT ActiveImportId FROM Sources WHERE Id = @P1", &[&source.id]).await.ok().and_then(|r| r.first().and_then(|r| optional_int(r, 0)));
+            let persisted = rows(conn, "SELECT ActiveImportId FROM Sources WHERE Id = @P1", &[&source.id])
+                .await
+                .ok()
+                .and_then(|r| r.first().and_then(|r| optional_int(r, 0)));
             if persisted != Some(import_id) {
-                let _ = execute(conn, "UPDATE Imports SET Status = 'Failed', CompletedAt = @P1, Message = @P2 WHERE Id = @P3", &[&now().fixed_offset(), &"error", &import_id]).await;
+                let _ = execute(
+                    conn,
+                    "UPDATE Imports SET Status = 'Failed', CompletedAt = @P1, Message = @P2 WHERE Id = @P3",
+                    &[&now().fixed_offset(), &"error", &import_id],
+                )
+                .await;
                 let _ = delete_import_data(conn, import_id).await;
                 let _ = execute(conn, "UPDATE Imports SET HasData = 0 WHERE Id = @P1", &[&import_id]).await;
                 return Err(e);
@@ -299,14 +333,22 @@ impl Imports {
                 message: format!("{drop} (import {import_id}); the active list is kept"),
                 import_id: Some(import_id),
             },
-            None => ImportOutcome { result: ImportResult::Imported, record_count: records.len(), previous_count, message: "Imported".into(), import_id: Some(import_id) },
+            None => ImportOutcome {
+                result: ImportResult::Imported,
+                record_count: records.len(),
+                previous_count,
+                message: "Imported".into(),
+                import_id: Some(import_id),
+            },
         })
     }
 
     /// Makes a held import active (confirm) or rejects it and deletes its records, under the source's lock.
     pub async fn review(&self, import_id: i32, confirm: bool, reviewer: &str) -> DbResult<ReviewResult> {
         let mut conn = self.db.connect().await?;
-        let found = rows(&mut conn, "SELECT s.Id, s.Code FROM Imports i JOIN Sources s ON s.Id = i.SourceId WHERE i.Id = @P1", &[&import_id]).await?;
+        let found =
+            rows(&mut conn, "SELECT s.Id, s.Code FROM Imports i JOIN Sources s ON s.Id = i.SourceId WHERE i.Id = @P1", &[&import_id])
+                .await?;
         let Some(row) = found.first() else { return Ok(ReviewResult::NotFound) };
         let (source_id, code) = (int(row, 0), text(row, 1));
         acquire_lock(&mut conn, &code).await?;
@@ -318,7 +360,11 @@ impl Imports {
     /// Who this connection is signed in as: the reviewer the CLI records.
     pub async fn current_login(&self) -> String {
         let Ok(mut conn) = self.db.connect().await else { return "unknown".into() };
-        rows(&mut conn, "SELECT SUSER_SNAME()", &[]).await.ok().and_then(|r| r.first().and_then(|r| optional_text(r, 0))).unwrap_or_else(|| "unknown".into())
+        rows(&mut conn, "SELECT SUSER_SNAME()", &[])
+            .await
+            .ok()
+            .and_then(|r| r.first().and_then(|r| optional_text(r, 0)))
+            .unwrap_or_else(|| "unknown".into())
     }
 
     pub async fn status(&self) -> DbResult<Vec<SourceStatus>> {
@@ -377,10 +423,16 @@ pub struct SourceStatus {
 
 async fn review_locked(conn: &mut Connection, source_id: i32, import_id: i32, confirm: bool, reviewer: &str) -> DbResult<ReviewResult> {
     let source = find_source(conn, "Id = @P1", &source_id).await?.ok_or("The source went away.")?;
-    let found = rows(conn, "SELECT Status, HasData, Message, BasedOnImportId, StartedAt FROM Imports WHERE Id = @P1", &[&import_id]).await?;
+    let found =
+        rows(conn, "SELECT Status, HasData, Message, BasedOnImportId, StartedAt FROM Imports WHERE Id = @P1", &[&import_id]).await?;
     let row = found.first().ok_or("The import went away.")?;
-    let (status, has_data, message, based_on, started_at) =
-        (text(row, 0), row.get::<bool, _>(1).unwrap_or_default(), optional_text(row, 2), optional_int(row, 3), time(row, 4).unwrap_or_default());
+    let (status, has_data, message, based_on, started_at) = (
+        text(row, 0),
+        row.get::<bool, _>(1).unwrap_or_default(),
+        optional_text(row, 2),
+        optional_int(row, 3),
+        time(row, 4).unwrap_or_default(),
+    );
     if status != "PendingReview" || !has_data {
         return Ok(ReviewResult::NotPending);
     }
@@ -405,7 +457,14 @@ async fn review_locked(conn: &mut Connection, source_id: i32, import_id: i32, co
 
 /// Marks the import Rejected first, then deletes its records: an interrupted deletion leaves a rejected import, never a
 /// held one that could still be confirmed with part of its records.
-async fn reject_held(conn: &mut Connection, import_id: i32, message: Option<&str>, reason: &str, at: Time, reviewer: Option<&str>) -> DbResult<()> {
+async fn reject_held(
+    conn: &mut Connection,
+    import_id: i32,
+    message: Option<&str>,
+    reason: &str,
+    at: Time,
+    reviewer: Option<&str>,
+) -> DbResult<()> {
     let text = truncate(&format!("{}; {reason}", message.unwrap_or_default()), 1000);
     match reviewer {
         Some(by) => {
@@ -424,11 +483,15 @@ async fn reject_held(conn: &mut Connection, import_id: i32, message: Option<&str
 }
 
 async fn held_imports(conn: &mut Connection, source_id: i32) -> DbResult<Vec<ImportRow>> {
-    Ok(rows(conn, "SELECT Id, ContentHash, RecordCount FROM Imports WHERE SourceId = @P1 AND Status = 'PendingReview' ORDER BY Id DESC", &[&source_id])
-        .await?
-        .iter()
-        .map(|r| ImportRow { id: int(r, 0), content_hash: optional_text(r, 1), record_count: int(r, 2) })
-        .collect())
+    Ok(rows(
+        conn,
+        "SELECT Id, ContentHash, RecordCount FROM Imports WHERE SourceId = @P1 AND Status = 'PendingReview' ORDER BY Id DESC",
+        &[&source_id],
+    )
+    .await?
+    .iter()
+    .map(|r| ImportRow { id: int(r, 0), content_hash: optional_text(r, 1), record_count: int(r, 2) })
+    .collect())
 }
 
 async fn in_transaction(conn: &mut Connection, work: impl AsyncFnOnce(&mut Connection) -> DbResult<()>) -> DbResult<()> {
@@ -444,7 +507,14 @@ async fn in_transaction(conn: &mut Connection, work: impl AsyncFnOnce(&mut Conne
 
 /// The flip, in one transaction: the source moves to the new import only if its active import is still the one this
 /// import started from, and the import completes.
-async fn activate(conn: &mut Connection, source: &SourceRecord, import_id: i32, expected: Option<i32>, checked_at: Time, review: Option<ReviewStamp>) -> DbResult<()> {
+async fn activate(
+    conn: &mut Connection,
+    source: &SourceRecord,
+    import_id: i32,
+    expected: Option<i32>,
+    checked_at: Time,
+    review: Option<ReviewStamp>,
+) -> DbResult<()> {
     let completed = now().fixed_offset();
     in_transaction(conn, async |conn| {
         let flipped = execute(
@@ -483,7 +553,8 @@ WHERE SourceId = @P2 AND Status = 'PendingReview' AND (@P3 IS NULL OR Id <> @P3)
 
 /// Keeps the records of the active import, the one before it, and any held for review.
 async fn delete_old_imports(conn: &mut Connection, source_id: i32) -> DbResult<()> {
-    let active = rows(conn, "SELECT ActiveImportId FROM Sources WHERE Id = @P1", &[&source_id]).await?.first().and_then(|r| optional_int(r, 0));
+    let active =
+        rows(conn, "SELECT ActiveImportId FROM Sources WHERE Id = @P1", &[&source_id]).await?.first().and_then(|r| optional_int(r, 0));
     let previous = rows(
         conn,
         "SELECT TOP 1 Id FROM Imports WHERE SourceId = @P1 AND Status = 'Completed' AND (@P2 IS NULL OR Id <> @P2) ORDER BY Id DESC",
@@ -537,7 +608,12 @@ async fn acquire_lock(conn: &mut Connection, code: &str) -> DbResult<()> {
 async fn release_lock(conn: &mut Connection, code: &str) {
     let resource = format!("import:{code}");
     // Closing the connection releases it anyway.
-    let _ = execute(conn, "IF APPLOCK_MODE('public', @P1, 'Session') <> 'NoLock' EXEC sp_releaseapplock @Resource = @P1, @LockOwner = 'Session'", &[&resource]).await;
+    let _ = execute(
+        conn,
+        "IF APPLOCK_MODE('public', @P1, 'Session') <> 'NoLock' EXEC sp_releaseapplock @Resource = @P1, @LockOwner = 'Session'",
+        &[&resource],
+    )
+    .await;
 }
 
 /// Rows in one INSERT: SQL Server takes at most 2,100 parameters and 1,000 rows a statement.
@@ -586,9 +662,18 @@ async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, r
             ]
         })
         .collect();
-    insert_rows(conn, "Subjects", &["ImportId", "SourceId", "ExternalId", "Type", "PrimaryName", "Programmes", "ListedOn", "Remarks", "SourceUrl"], &subject_rows).await?;
-    let ids: std::collections::HashMap<String, i32> =
-        rows(conn, "SELECT Id, ExternalId FROM Subjects WHERE ImportId = @P1", &[&import_id]).await?.iter().map(|r| (text(r, 1), int(r, 0))).collect();
+    insert_rows(
+        conn,
+        "Subjects",
+        &["ImportId", "SourceId", "ExternalId", "Type", "PrimaryName", "Programmes", "ListedOn", "Remarks", "SourceUrl"],
+        &subject_rows,
+    )
+    .await?;
+    let ids: std::collections::HashMap<String, i32> = rows(conn, "SELECT Id, ExternalId FROM Subjects WHERE ImportId = @P1", &[&import_id])
+        .await?
+        .iter()
+        .map(|r| (text(r, 1), int(r, 0)))
+        .collect();
     let mut names: Vec<Vec<Box<dyn ToSql>>> = Vec::new();
     let mut addresses: Vec<Vec<Box<dyn ToSql>>> = Vec::new();
     for r in records {
@@ -670,7 +755,12 @@ pub fn canonical_hash(subjects: &[Subject]) -> String {
         let mut names: Vec<&SubjectName> = subject.names.iter().collect();
         names.sort_by(|a, b| a.full_name.cmp(&b.full_name).then(a.is_weak.cmp(&b.is_weak)));
         for n in names {
-            line += &format!("\u{1e}{}\u{1f}{}\u{1f}{}", n.full_name, if n.is_weak { "True" } else { "False" }, name_of(&SCRIPT_NAMES, n.script));
+            line += &format!(
+                "\u{1e}{}\u{1f}{}\u{1f}{}",
+                n.full_name,
+                if n.is_weak { "True" } else { "False" },
+                name_of(&SCRIPT_NAMES, n.script)
+            );
         }
         let mut addresses: Vec<&SubjectAddress> = subject.addresses.iter().collect();
         addresses.sort_by(|a, b| a.raw.cmp(&b.raw).then_with(|| a.country_code.cmp(&b.country_code)));

@@ -172,7 +172,8 @@ impl Fault {
     fn describe(&self) -> String {
         match self {
             Fault::Status(code) => {
-                let reason = reqwest::StatusCode::from_u16(*code).ok().and_then(|s| s.canonical_reason()).unwrap_or_default().replace(' ', "");
+                let reason =
+                    reqwest::StatusCode::from_u16(*code).ok().and_then(|s| s.canonical_reason()).unwrap_or_default().replace(' ', "");
                 format!("{code} {reason}")
             }
             Fault::Timeout => "no complete answer in time".into(),
@@ -206,7 +207,12 @@ impl Downloader {
                 return Err(fault.message().into());
             }
             // Worded without "failed" or "rejected": the import alert looks for those.
-            println!("{source}: download attempt {attempt} of {} got {}; trying again in {} s.", self.retry.delays.len() + 1, fault.describe(), delay.as_secs());
+            println!(
+                "{source}: download attempt {attempt} of {} got {}; trying again in {} s.",
+                self.retry.delays.len() + 1,
+                fault.describe(),
+                delay.as_secs()
+            );
             let _ = std::io::stdout().flush();
             tokio::time::sleep(delay).await;
             if started.elapsed() > self.retry.budget {

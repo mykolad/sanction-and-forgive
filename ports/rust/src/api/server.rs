@@ -21,8 +21,8 @@ use super::admin;
 use super::catalog::{Catalog, Loader, HISTORY_SHOWN};
 use super::handlers::{self, BrowseRequest, HeldUpdateResponse};
 use super::screening::{
-    list_response, stream_entry, utf16_len, validate, Errors, JsonTime, ListResponse, ScreeningRequestBody, ScreeningService, StreamEndLine, StreamErrorLine,
-    StreamHeaderLine, StreamResultLine, DISCLAIMER,
+    list_response, stream_entry, utf16_len, validate, Errors, JsonTime, ListResponse, ScreeningRequestBody, ScreeningService,
+    StreamEndLine, StreamErrorLine, StreamHeaderLine, StreamResultLine, DISCLAIMER,
 };
 use crate::lists::catalogue::{find_source, optional};
 use crate::matching::data::PAGES;
@@ -136,7 +136,10 @@ async fn status(State(s): State<Shared>) -> Response {
     let now = s.screenings.now();
     let lists = s.catalog.lists().iter().map(|l| list_response(l, now)).collect();
     let state = if s.catalog.is_ready() { "ready" } else { "warmingUp" };
-    json_response(StatusCode::OK, &StatusResponse { state, version: &s.config.version, matcher_version: &s.screenings.screener.matcher_version, lists })
+    json_response(
+        StatusCode::OK,
+        &StatusResponse { state, version: &s.config.version, matcher_version: &s.screenings.screener.matcher_version, lists },
+    )
 }
 
 async fn sources(State(s): State<Shared>) -> Response {
@@ -181,7 +184,13 @@ async fn examples(State(s): State<Shared>) -> Response {
     json_response(StatusCode::OK, &handlers::examples(&s.catalog.lists()))
 }
 
-async fn browse(State(s): State<Shared>, ConnectInfo(peer): ConnectInfo<SocketAddr>, Path(code): Path<String>, headers: HeaderMap, body: Bytes) -> Response {
+async fn browse(
+    State(s): State<Shared>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(code): Path<String>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
     if let Some(r) = s.limited(&headers, peer) {
         return r;
     }
@@ -245,7 +254,9 @@ fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> String {
 impl AppState {
     /// 429 with Retry-After when the client is over its per-minute quota.
     fn limited(&self, headers: &HeaderMap, peer: SocketAddr) -> Option<Response> {
-        self.limiter.allow(&client_ip(headers, peer)).map(|wait| (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, wait.to_string())]).into_response())
+        self.limiter
+            .allow(&client_ip(headers, peer))
+            .map(|wait| (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, wait.to_string())]).into_response())
     }
 }
 
@@ -433,11 +444,18 @@ async fn stream(State(s): State<Shared>, request: Request) -> Response {
                 }
                 (Some(body), None) => {
                     let (service, lists, allow_list) = (state.screenings.clone(), lists.clone(), allow_list.clone());
-                    let (result, body) = tokio::task::spawn_blocking(move || (service.screen_for_stream(&body, &lists, &allow_list), body)).await.unwrap();
+                    let (result, body) =
+                        tokio::task::spawn_blocking(move || (service.screen_for_stream(&body, &lists, &allow_list), body)).await.unwrap();
                     screened += 1;
                     let options = state.screenings.options();
                     let entries = result.entries.iter().map(|e| stream_entry(e, options)).collect();
-                    line_of(&StreamResultLine { kind: "result", line, reference: body.reference().to_string(), outcome: result.outcome.as_str(), entries })
+                    line_of(&StreamResultLine {
+                        kind: "result",
+                        line,
+                        reference: body.reference().to_string(),
+                        outcome: result.outcome.as_str(),
+                        entries,
+                    })
                 }
                 (None, None) => continue,
             };

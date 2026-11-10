@@ -153,7 +153,8 @@ pub struct AllowListRecord {
 
 /// Every entry ever added, newest first.
 pub async fn allow_list_history(conn: &mut Connection) -> DbResult<Vec<AllowListRecord>> {
-    let rows = rows(conn, "SELECT Id, Name, Reason, AddedBy, AddedAt, RemovedBy, RemovedAt FROM AllowListEntries ORDER BY Id DESC", &[]).await?;
+    let rows =
+        rows(conn, "SELECT Id, Name, Reason, AddedBy, AddedAt, RemovedBy, RemovedAt FROM AllowListEntries ORDER BY Id DESC", &[]).await?;
     Ok(rows
         .iter()
         .map(|r| AllowListRecord {
@@ -222,9 +223,12 @@ pub async fn active_subjects(conn: &mut Connection, code: &str, import_id: i32) 
 }
 
 pub(crate) async fn read_subjects(conn: &mut Connection, import_id: i32) -> DbResult<Vec<Subject>> {
-    let subject_rows =
-        rows(conn, "SELECT Id, ExternalId, Type, PrimaryName, Programmes, ListedOn, Remarks, SourceUrl FROM Subjects WHERE ImportId = @P1 ORDER BY Id", &[&import_id])
-            .await?;
+    let subject_rows = rows(
+        conn,
+        "SELECT Id, ExternalId, Type, PrimaryName, Programmes, ListedOn, Remarks, SourceUrl FROM Subjects WHERE ImportId = @P1 ORDER BY Id",
+        &[&import_id],
+    )
+    .await?;
     let mut subjects: Vec<Subject> = Vec::with_capacity(subject_rows.len());
     let mut by_id = std::collections::HashMap::with_capacity(subject_rows.len());
     for r in &subject_rows {
@@ -335,5 +339,11 @@ pub async fn allow_list_add(
 
 /// Marks an entry removed (entries are never deleted); false if there's no such entry in force.
 pub async fn allow_list_remove(conn: &mut Connection, id: i32, removed_by: &str, now: Time) -> DbResult<bool> {
-    Ok(execute(conn, "UPDATE AllowListEntries SET RemovedBy = @P1, RemovedAt = @P2 WHERE Id = @P3 AND RemovedAt IS NULL", &[&removed_by, &now.fixed_offset(), &id]).await? == 1)
+    Ok(execute(
+        conn,
+        "UPDATE AllowListEntries SET RemovedBy = @P1, RemovedAt = @P2 WHERE Id = @P3 AND RemovedAt IS NULL",
+        &[&removed_by, &now.fixed_offset(), &id],
+    )
+    .await?
+        == 1)
 }

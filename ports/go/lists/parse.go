@@ -69,7 +69,7 @@ func formatError(format string, args ...any) error { return &FormatError{fmt.Spr
 func DetectScript(value string) NameScript {
 	latin, other := false, false
 	for _, c := range value {
-		if !unicode.IsLetter(c) {
+		if !(c <= 0xFFFF && unicode.IsLetter(c)) { // as .NET's char.IsLetter: no surrogate is a letter
 			continue
 		}
 		if c >= 'Ѐ' && c <= 'ԯ' {
