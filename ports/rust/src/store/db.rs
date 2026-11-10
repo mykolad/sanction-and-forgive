@@ -176,8 +176,10 @@ impl Database {
         match self.connect_to(&self.host, self.port, auth.clone()).await {
             // Azure SQL's redirect connection policy: the gateway names the worker to connect to; connect there once
             // (the reference's SqlClient follows it the same way).
-            Err(ConnectError::Sql(tiberius::error::Error::Routing { host, port })) => Ok(self.connect_to(&host, port, auth).await?),
-            other => Ok(other?),
+            Err(ConnectError::Sql(tiberius::error::Error::Routing { host, port })) => {
+                self.connect_to(&host, port, auth).await.map_err(ConnectError::into_inner)
+            }
+            other => other.map_err(ConnectError::into_inner),
         }
     }
 
@@ -223,6 +225,16 @@ impl std::fmt::Display for ConnectError {
 }
 
 impl std::error::Error for ConnectError {}
+
+impl ConnectError {
+    /// The error itself, a SQL or an I/O error as it was raised (the CLI names failures by their type).
+    fn into_inner(self) -> DbError {
+        match self {
+            ConnectError::Sql(e) => Box::new(e),
+            ConnectError::Other(e) => e,
+        }
+    }
+}
 
 /// A token for the database from the Container Apps identity endpoint (the user-assigned identity by client id).
 async fn managed_identity_token(client_id: Option<&str>) -> DbResult<String> {
