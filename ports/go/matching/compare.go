@@ -2,7 +2,11 @@ package matching
 
 import (
 	"math"
+	"slices"
 	"sort"
+	"sync"
+	"unicode/utf8"
+	"unsafe"
 )
 
 // AlignMethod says how two tokens aligned (section 5.4), most certain first.
@@ -33,28 +37,65 @@ func (a alignment) Capped() bool {
 	return a.Method == MethodFoldKeyLatin || a.Method == MethodCognate || a.Method == MethodOneEditShort || a.Method == MethodTwoEdits
 }
 
-type tokenPair struct{ query, listed *Token }
-
-// tokenComparer compares two tokens; the first rule that applies wins. One serves one search, on one goroutine: each
-// pair is compared once and each token's groups looked up once (by pointer: tokens are interned).
+// tokenComparer compares two tokens; the first rule that applies wins. One serves one search, on one goroutine, and
+// remembers the pairs it compared (by pointer: tokens are interned) in a direct-mapped cache: a pair that lands on
+// another's slot is compared again, which gives the same answer.
 type tokenComparer struct {
-	data           *MatcherData
-	compared       map[tokenPair]alignment
-	spellingGroups map[*Token][]int
-	cognateGroups  map[*Token][]int
+	data       *MatcherData
+	pairs      []comparedPair
+	generation uint32             // a slot holds this search's pair only when it carries this generation
+	weights    map[*Token]float64 // the search's word weights, kept with it (the same index throughout)
 }
 
+type comparedPair struct {
+	query, listed *Token
+	generation    uint32
+	alignment     alignment
+}
+
+const pairBits = 12 // 4,096 slots: 2^12 to 2^15 measured the same on the real lists
+
+const pairSlots = 1 << pairBits
+
 func newTokenComparer(data *MatcherData) *tokenComparer {
-	return &tokenComparer{data: data, compared: map[tokenPair]alignment{}, spellingGroups: map[*Token][]int{}, cognateGroups: map[*Token][]int{}}
+	return &tokenComparer{data: data, pairs: make([]comparedPair, pairSlots), generation: 1, weights: map[*Token]float64{}}
+}
+
+// comparers keeps comparers between searches, so a search starts with its caches' room already made.
+var comparers = sync.Pool{New: func() any { return newTokenComparer(nil) }}
+
+func borrowComparer(data *MatcherData) *tokenComparer {
+	c := comparers.Get().(*tokenComparer)
+	c.data = data
+	return c
+}
+
+// release forgets the search (a new generation; the weights emptied) and returns the comparer to the pool.
+func (c *tokenComparer) release() {
+	c.generation++
+	if c.generation == 0 {
+		clear(c.pairs)
+		c.generation = 1
+	}
+	if len(c.weights) > 1<<12 {
+		c.weights = map[*Token]float64{}
+	} else {
+		clear(c.weights)
+	}
+	c.data = nil
+	comparers.Put(c)
 }
 
 func (c *tokenComparer) Compare(query, listed *Token) alignment {
-	pair := tokenPair{query, listed}
-	if a, ok := c.compared[pair]; ok {
-		return a
+	h := uint64(uintptr(unsafe.Pointer(query)))*0x9E3779B97F4A7C15 ^ uint64(uintptr(unsafe.Pointer(listed)))
+	h ^= h >> 31
+	h *= 0xBF58476D1CE4E5B9
+	slot := &c.pairs[h>>(64-pairBits)]
+	if slot.generation == c.generation && slot.query == query && slot.listed == listed {
+		return slot.alignment
 	}
 	a := c.compareOnce(query, listed)
-	c.compared[pair] = a
+	*slot = comparedPair{query, listed, c.generation, a}
 	return a
 }
 
@@ -70,7 +111,7 @@ func (c *tokenComparer) compareOnce(query, listed *Token) alignment {
 			return alignment{0.98, MethodTransliteration}
 		}
 	}
-	if overlaps(c.spelling(query), c.spelling(listed)) {
+	if overlaps(spellingGroups(query), spellingGroups(listed)) {
 		return alignment{0.98, MethodSpellingPair}
 	}
 	for _, fold := range query.Folds {
@@ -90,35 +131,19 @@ func (c *tokenComparer) compareOnce(query, listed *Token) alignment {
 // CognateGroups returns the cognate groups a token belongs to, through any of its fold keys, in the order the
 // reference's set enumerates them (insertion order).
 func (c *tokenComparer) CognateGroups(token *Token) []int {
-	if groups, ok := c.cognateGroups[token]; ok {
-		return groups
+	if token.groups == nil {
+		return nil
 	}
-	groups := []int{}
-	for _, fold := range token.Folds {
-		for _, group := range c.data.CognateGroups[fold] {
-			if !containsInt(groups, group) {
-				groups = append(groups, group)
-			}
-		}
-	}
-	c.cognateGroups[token] = groups
-	return groups
+	return token.groups.cognates
 }
 
 func (c *tokenComparer) CognateFoldsOf(group int) []string { return c.data.CognateFolds[group] }
 
-func (c *tokenComparer) spelling(token *Token) []int {
-	if groups, ok := c.spellingGroups[token]; ok {
-		return groups
+func spellingGroups(token *Token) []int {
+	if token.groups == nil {
+		return nil
 	}
-	groups := []int{}
-	for _, form := range token.Forms {
-		if group, ok := c.data.SpellingGroups[form]; ok && !containsInt(groups, group) {
-			groups = append(groups, group)
-		}
-	}
-	c.spellingGroups[token] = groups
-	return groups
+	return token.groups.spelling
 }
 
 func overlaps(a, b []int) bool {
@@ -132,33 +157,17 @@ func overlaps(a, b []int) bool {
 
 func compareEdits(query, listed *Token) alignment {
 	best := alignment{}
-	rank := func(a alignment) int { return int(a.Method) }
+	var qBuffer, lBuffer [runeBuffer]rune
 	for _, qf := range query.Forms {
-		q := []rune(qf)
 		for _, lf := range listed.Forms {
-			l := []rune(lf)
-			shorter := min(len(q), len(l))
-			if shorter < 4 {
-				continue
-			}
-			edits := damerauLevenshtein(q, l, 3)
-			if q[0] != l[0] {
-				edits++
-			}
-			if edits != 1 && edits != 2 {
-				continue
-			}
-			jw := jaroWinkler(q, l)
 			var a alignment
-			switch {
-			case edits == 1 && shorter >= 8:
-				a = alignment{jw, MethodOneEdit}
-			case edits == 1:
-				a = alignment{jw, MethodOneEditShort}
-			case edits == 2 && shorter >= 8 && jw >= 0.90:
-				a = alignment{jw, MethodTwoEdits}
+			if isASCII(qf) && isASCII(lf) {
+				// Letters are bytes: the same distances, without decoding.
+				a = editAlignment(asBytes(qf), asBytes(lf))
+			} else {
+				a = editAlignment(appendRunes(qBuffer[:0], qf), appendRunes(lBuffer[:0], lf))
 			}
-			if a.Aligned() && (!best.Aligned() || rank(a) < rank(best) || (rank(a) == rank(best) && a.Similarity > best.Similarity)) {
+			if a.Aligned() && (!best.Aligned() || a.Method < best.Method || (a.Method == best.Method && a.Similarity > best.Similarity)) {
 				best = a
 			}
 		}
@@ -166,22 +175,87 @@ func compareEdits(query, listed *Token) alignment {
 	return best
 }
 
-// damerauLevenshtein is the optimal string alignment distance, or limit as soon as it can't be lower.
-func damerauLevenshtein(a, b []rune, limit int) int {
+// editAlignment aligns two forms by edits (one or two letters differ), or not at all.
+func editAlignment[T byte | rune](q, l []T) alignment {
+	shorter := min(len(q), len(l))
+	if shorter < 4 {
+		return alignment{}
+	}
+	// A different first letter counts as one more edit, so then a distance of 2 or more already rules it out.
+	var edits int
+	if q[0] != l[0] {
+		edits = damerauLevenshtein(q, l, 2) + 1
+	} else {
+		edits = damerauLevenshtein(q, l, 3)
+	}
+	if edits != 1 && edits != 2 {
+		return alignment{}
+	}
+	jw := jaroWinkler(q, l)
+	switch {
+	case edits == 1 && shorter >= 8:
+		return alignment{jw, MethodOneEdit}
+	case edits == 1:
+		return alignment{jw, MethodOneEditShort}
+	case edits == 2 && shorter >= 8 && jw >= 0.90:
+		return alignment{jw, MethodTwoEdits}
+	}
+	return alignment{}
+}
+
+func isASCII(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
+}
+
+// asBytes is the string's bytes, shared, never written.
+func asBytes(value string) []byte { return unsafe.Slice(unsafe.StringData(value), len(value)) }
+
+// runeBuffer is the size of the buffers on the stack that hold a word's letters while it's compared; a longer word
+// takes the heap.
+const runeBuffer = 48
+
+// appendRunes is append(buffer, []rune(value)...) without the conversion's allocation.
+func appendRunes(buffer []rune, value string) []rune {
+	for _, c := range value {
+		buffer = append(buffer, c)
+	}
+	return buffer
+}
+
+// damerauLevenshtein is the optimal string alignment distance, or limit as soon as it can't be lower. Only the band of
+// cells within limit - 1 of the diagonal is computed: a cell further out is at least limit away, so the cells just
+// outside the band hold limit, which gives every value under limit exactly and the rest as limit or more.
+func damerauLevenshtein[T byte | rune](a, b []T, limit int) int {
 	if abs(len(a)-len(b)) >= limit {
 		return limit
 	}
 	width := len(b) + 1
-	previous2 := make([]int, width)
-	previous := make([]int, width)
-	current := make([]int, width)
+	var rows [3 * (runeBuffer + 1)]int
+	var previous2, previous, current []int
+	if width <= runeBuffer+1 {
+		previous2, previous, current = rows[:width], rows[width:2*width], rows[2*width:3*width]
+	} else {
+		previous2, previous, current = make([]int, width), make([]int, width), make([]int, width)
+	}
 	for j := 0; j <= len(b); j++ {
 		previous[j] = j
 	}
 	for i := 1; i <= len(a); i++ {
+		low, high := max(1, i-limit+1), min(len(b), i+limit-1)
 		current[0] = i
+		if low > 1 {
+			current[low-1] = limit
+		}
+		if high < len(b) {
+			current[high+1] = limit
+		}
 		rowMinimum := current[0]
-		for j := 1; j <= len(b); j++ {
+		for j := low; j <= high; j++ {
 			cost := 1
 			if a[i-1] == b[j-1] {
 				cost = 0
@@ -201,13 +275,18 @@ func damerauLevenshtein(a, b []rune, limit int) int {
 	return min(previous[len(b)], limit)
 }
 
-func jaroWinkler(a, b []rune) float64 {
+func jaroWinkler[T byte | rune](a, b []T) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
 	}
 	window := max(0, max(len(a), len(b))/2-1)
-	aMatched := make([]bool, len(a))
-	bMatched := make([]bool, len(b))
+	var aBuffer, bBuffer [runeBuffer]bool
+	var aMatched, bMatched []bool
+	if len(a) <= runeBuffer && len(b) <= runeBuffer {
+		aMatched, bMatched = aBuffer[:len(a)], bBuffer[:len(b)]
+	} else {
+		aMatched, bMatched = make([]bool, len(a)), make([]bool, len(b))
+	}
 	matches := 0
 	for i := range a {
 		start := max(0, i-window)
@@ -250,13 +329,15 @@ func jaroWinkler(a, b []rune) float64 {
 type fuzzyVocabulary struct {
 	folds      []string
 	deleteKeys []int64
-	byTrigram  map[string][]int
+	byTrigram  map[string][]int32
+	seen       sync.Pool // *[]uint64: a bit per fold, all clear between lookups
 }
 
 const shortMax = 7
 
 func newFuzzyVocabulary(vocabulary []string) *fuzzyVocabulary {
-	v := &fuzzyVocabulary{byTrigram: map[string][]int{}}
+	v := &fuzzyVocabulary{}
+	byTrigram := map[string][]int32{}
 	seen := map[string]bool{}
 	for _, fold := range vocabulary {
 		if len([]rune(fold)) >= 4 && !seen[fold] {
@@ -271,24 +352,37 @@ func newFuzzyVocabulary(vocabulary []string) *fuzzyVocabulary {
 			}
 		}
 		for _, trigram := range distinctStrings(trigrams(fold)) {
-			v.byTrigram[trigram] = append(v.byTrigram[trigram], id)
+			byTrigram[trigram] = append(byTrigram[trigram], int32(id))
 		}
 	}
-	sort.Slice(v.deleteKeys, func(i, j int) bool { return v.deleteKeys[i] < v.deleteKeys[j] })
+	v.byTrigram = pack(byTrigram)
+	v.deleteKeys = slices.Clone(v.deleteKeys)
+	slices.Sort(v.deleteKeys)
 	return v
 }
 
 // Near returns the vocabulary keys other than fold within two edits of it, in the reference's order.
 func (v *fuzzyVocabulary) Near(fold string) []string {
-	runes := []rune(fold)
+	var buffer, otherBuffer [runeBuffer]rune
+	runes := appendRunes(buffer[:0], fold)
 	if len(runes) < 4 {
 		return nil
 	}
 	var ids []int
-	seen := map[int]bool{}
+	seen, _ := v.seen.Get().(*[]uint64)
+	if seen == nil {
+		bits := make([]uint64, (len(v.folds)+63)/64)
+		seen = &bits
+	}
+	defer func() {
+		for _, id := range ids {
+			(*seen)[id/64] = 0
+		}
+		v.seen.Put(seen)
+	}()
 	add := func(id int) {
-		if !seen[id] {
-			seen[id] = true
+		if word, bit := &(*seen)[id/64], uint64(1)<<(id%64); *word&bit == 0 {
+			*word |= bit
 			ids = append(ids, id)
 		}
 	}
@@ -303,13 +397,23 @@ func (v *fuzzyVocabulary) Near(fold string) []string {
 	}
 	for _, trigram := range distinctStrings(trigrams(fold)) {
 		for _, id := range v.byTrigram[trigram] {
-			add(id)
+			add(int(id))
 		}
 	}
 	var out []string
+	ascii := isASCII(fold)
 	for _, id := range ids {
 		other := v.folds[id]
-		if other != fold && damerauLevenshtein(runes, []rune(other), 3) <= 2 {
+		if other == fold {
+			continue
+		}
+		var distance int
+		if ascii && isASCII(other) {
+			distance = damerauLevenshtein(asBytes(fold), asBytes(other), 3)
+		} else {
+			distance = damerauLevenshtein(runes, appendRunes(otherBuffer[:0], other), 3)
+		}
+		if distance <= 2 {
 			out = append(out, other)
 		}
 	}
