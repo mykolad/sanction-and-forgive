@@ -260,7 +260,11 @@ func kind(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "TimeoutException"
 	}
-	return strings.TrimPrefix(fmt.Sprintf("%T", errors.Unwrap(err)), "*")
+	// The innermost error's type (a wrapped error is named by what it wraps).
+	for inner := errors.Unwrap(err); inner != nil; inner = errors.Unwrap(err) {
+		err = inner
+	}
+	return strings.TrimPrefix(fmt.Sprintf("%T", err), "*")
 }
 
 func n0(v int) string {

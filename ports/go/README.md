@@ -15,7 +15,8 @@ result (`ReferenceTests`, docs/conformance.md).
   way, so a list imported by one implementation is `Unchanged` for the other: production can switch without
   re-importing.
 - **The same configuration names** (`ConnectionStrings__Lists`, `Lists__RefreshMinutes`, `RateLimiting__PerMinute`,
-  `Admin__SignInEnabled`, `Screening__*`, `App__Version`), and the API listens on 8080 (`PORT` overrides).
+  `Admin__SignInEnabled`, `Screening__*`, `App__Version`), and the API listens on 8080 (`PORT` overrides) on every
+  interface; `HOST=127.0.0.1` keeps a run on a desktop to loopback, so its firewall doesn't ask about it.
 - **One source of truth for data.** The dictionaries (`src/SanctionAndForgive.Matching/Data`) and the pages
   (`src/SanctionAndForgive.Api/wwwroot`) are copied in at build time, never edited here. `api/openapi.json` is the
   reference's document.
