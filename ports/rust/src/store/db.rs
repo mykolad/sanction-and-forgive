@@ -168,9 +168,25 @@ impl Database {
     }
 
     pub async fn connect(&self) -> DbResult<Connection> {
+        let auth = match &self.auth {
+            Auth::Sql { user, password } => AuthMethod::sql_server(user, password),
+            Auth::ManagedIdentity { client_id } => AuthMethod::AADToken(managed_identity_token(client_id.as_deref()).await?),
+            Auth::Default => AuthMethod::AADToken(default_token().await?),
+        };
+        match self.connect_to(&self.host, self.port, auth.clone()).await {
+            // Azure SQL's redirect connection policy: the gateway names the worker to connect to; connect there once
+            // (the reference's SqlClient follows it the same way).
+            Err(ConnectError::Sql(tiberius::error::Error::Routing { host, port })) => {
+                self.connect_to(&host, port, auth).await.map_err(ConnectError::into_inner)
+            }
+            other => other.map_err(ConnectError::into_inner),
+        }
+    }
+
+    async fn connect_to(&self, host: &str, port: u16, auth: AuthMethod) -> Result<Connection, ConnectError> {
         let mut config = Config::new();
-        config.host(&self.host);
-        config.port(self.port);
+        config.host(host);
+        config.port(port);
         if let Some(database) = &self.database {
             config.database(database);
         }
@@ -179,18 +195,44 @@ impl Database {
             config.trust_cert();
         }
         config.encryption(if self.encrypt { EncryptionLevel::Required } else { EncryptionLevel::Off });
-        config.authentication(match &self.auth {
-            Auth::Sql { user, password } => AuthMethod::sql_server(user, password),
-            Auth::ManagedIdentity { client_id } => AuthMethod::AADToken(managed_identity_token(client_id.as_deref()).await?),
-            Auth::Default => AuthMethod::AADToken(default_token().await?),
-        });
+        config.authentication(auth);
         let tcp = tokio::time::timeout(self.timeout, TcpStream::connect(config.get_addr()))
             .await
-            .map_err(|_| "Connecting to SQL Server timed out.")??;
-        tcp.set_nodelay(true)?;
-        Ok(tokio::time::timeout(self.timeout, Client::connect(config, tcp.compat_write()))
+            .map_err(|_| ConnectError::Other("Connecting to SQL Server timed out.".into()))?
+            .map_err(|e| ConnectError::Other(e.into()))?;
+        tcp.set_nodelay(true).map_err(|e| ConnectError::Other(e.into()))?;
+        tokio::time::timeout(self.timeout, Client::connect(config, tcp.compat_write()))
             .await
-            .map_err(|_| "Signing in to SQL Server timed out.")??)
+            .map_err(|_| ConnectError::Other("Signing in to SQL Server timed out.".into()))?
+            .map_err(ConnectError::Sql)
+    }
+}
+
+/// Why a connection attempt failed: SQL Server's answer (a redirect among them), or anything else.
+#[derive(Debug)]
+enum ConnectError {
+    Sql(tiberius::error::Error),
+    Other(DbError),
+}
+
+impl std::fmt::Display for ConnectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectError::Sql(e) => e.fmt(f),
+            ConnectError::Other(e) => e.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for ConnectError {}
+
+impl ConnectError {
+    /// The error itself, a SQL or an I/O error as it was raised (the CLI names failures by their type).
+    fn into_inner(self) -> DbError {
+        match self {
+            ConnectError::Sql(e) => Box::new(e),
+            ConnectError::Other(e) => e,
+        }
     }
 }
 
