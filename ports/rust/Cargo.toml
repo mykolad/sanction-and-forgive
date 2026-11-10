@@ -11,7 +11,18 @@ name = "sanction_and_forgive"
 path = "src/lib.rs"
 
 [dependencies]
+axum = "0.8"
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+futures-util = "0.3"
 hex = "0.4"
+http-body-util = "0.1"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "process", "fs"] }
+tokio-util = { version = "0.7", features = ["compat"] }
 serde = { version = "1", features = ["derive"] }
 # preserve_order: objects keep their keys in file order, as .NET's JsonElement enumerates them (the dictionaries).
 serde_json = { version = "1", features = ["preserve_order"] }
