@@ -33,6 +33,87 @@ pub struct Database {
 
 const SQL_RESOURCE: &str = "https://database.windows.net/";
 
+/// An ADO.NET connection string's keywords (lower case) and values: pairs separated by semicolons, a value quoted with
+/// ' or " when it holds one (the quote doubled inside), == in a key for =, whitespace around keys and values trimmed.
+fn pairs(ado: &str) -> Result<Vec<(String, String)>, String> {
+    let chars: Vec<char> = ado.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        // The key, up to a single =.
+        let mut key = String::new();
+        loop {
+            match chars.get(i) {
+                None => break,
+                Some('=') if chars.get(i + 1) == Some(&'=') => {
+                    key.push('=');
+                    i += 2;
+                }
+                Some('=') => {
+                    i += 1;
+                    break;
+                }
+                Some(';') if key.trim().is_empty() => {
+                    i += 1;
+                    key.clear();
+                }
+                Some(&c) => {
+                    key.push(c);
+                    i += 1;
+                }
+            }
+        }
+        let key = key.trim().to_lowercase();
+        while chars.get(i).is_some_and(|c| c.is_whitespace()) {
+            i += 1;
+        }
+        let mut value = String::new();
+        match chars.get(i) {
+            Some(&quote) if quote == '"' || quote == '\'' => {
+                i += 1;
+                loop {
+                    match chars.get(i) {
+                        None => return Err("A quoted value in the connection string isn't closed.".to_string()),
+                        Some(&c) if c == quote && chars.get(i + 1) == Some(&quote) => {
+                            value.push(quote);
+                            i += 2;
+                        }
+                        Some(&c) if c == quote => {
+                            i += 1;
+                            break;
+                        }
+                        Some(&c) => {
+                            value.push(c);
+                            i += 1;
+                        }
+                    }
+                }
+                while chars.get(i).is_some_and(|c| c.is_whitespace()) {
+                    i += 1;
+                }
+                if !matches!(chars.get(i), None | Some(';')) {
+                    return Err("Something follows a quoted value in the connection string.".to_string());
+                }
+                i += 1;
+            }
+            _ => {
+                while let Some(&c) = chars.get(i) {
+                    i += 1;
+                    if c == ';' {
+                        break;
+                    }
+                    value.push(c);
+                }
+                value = value.trim().to_string();
+            }
+        }
+        if !key.is_empty() {
+            out.push((key, value));
+        }
+    }
+    Ok(out)
+}
+
 impl Database {
     /// Reads the reference's keywords: Server (tcp:host,port), Database / Initial Catalog, User ID, Password,
     /// Authentication (Active Directory Managed Identity or Default), TrustServerCertificate, Encrypt, Connect Timeout.
@@ -47,9 +128,8 @@ impl Database {
             timeout: Duration::from_secs(15),
         };
         let (mut user, mut password, mut mode) = (String::new(), String::new(), None::<String>);
-        for pair in ado.split(';') {
-            let Some((key, value)) = pair.split_once('=') else { continue };
-            let (key, value) = (key.trim().to_lowercase(), value.trim());
+        for (key, value) in pairs(ado)? {
+            let value = value.as_str();
             match key.as_str() {
                 "server" | "data source" | "address" => {
                     let value = value.strip_prefix("tcp:").unwrap_or(value);
@@ -165,5 +245,10 @@ mod tests {
 
         let tools = Database::parse("Server=tcp:x,1433;Database=db;Authentication=Active Directory Default").unwrap();
         assert_eq!(tools.auth, Auth::Default);
+
+        // Quoted values, a quote doubled inside one, and a key with == (Copilot's point on #37).
+        let quoted = Database::parse("Server=h; User ID = 'sa' ;Password=\"a;b\"\"c\";Weird==Key=x;").unwrap();
+        assert_eq!(quoted.auth, Auth::Sql { user: "sa".into(), password: "a;b\"c".into() });
+        assert!(Database::parse("Server=h;Password=\"unclosed").is_err());
     }
 }

@@ -295,6 +295,10 @@ pub fn records(
                 if !root_seen {
                     return Err(format_error(format!("Expected root element <{expected_root}>, found <>.")));
                 }
+                // A file cut off before its root element closes is broken, never a shorter list.
+                if level != -1 {
+                    return Err(format_error("The list ends before its root element closes: the file is incomplete."));
+                }
                 return Ok(());
             }
             Event::DocType(_) => return Err(format_error("A DTD isn't allowed in the list.")),
@@ -355,5 +359,23 @@ pub fn records(
             _ => {}
         }
         buffer.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A feed cut off mid-file is broken, never a shorter list (Copilot's point on #37).
+    #[test]
+    fn a_truncated_document_is_an_error() {
+        let mut seen = 0;
+        let whole = records("<export><a>1</a><a>2</a></export>".as_bytes(), "export", 1, |_| {
+            seen += 1;
+            Ok(())
+        });
+        assert!(whole.is_ok() && seen == 2);
+        assert!(records("<export><a>1</a><a>2</a>".as_bytes(), "export", 1, |_| Ok(())).is_err());
+        assert!(records("<export><a>1</a><a>2".as_bytes(), "export", 1, |_| Ok(())).is_err());
     }
 }

@@ -235,8 +235,8 @@ impl Downloader {
             if !(200..=299).contains(&status) {
                 return Err(Fault::Status(status));
             }
-            let path = tempfile_path::TempPath::new();
-            let mut file = tokio::fs::File::create(path.path()).await.map_err(|e| Fault::Other(e.to_string(), false))?;
+            let (path, file) = tempfile_path::TempPath::create().map_err(|e| Fault::Other(e.to_string(), false))?;
+            let mut file = tokio::fs::File::from_std(file);
             let mut stream = response.bytes_stream();
             use futures_util::StreamExt;
             use tokio::io::AsyncWriteExt;
@@ -251,29 +251,33 @@ impl Downloader {
     }
 }
 
-/// A temporary file, deleted when dropped.
+/// A temporary file this process created, deleted when dropped.
 pub mod tempfile_path {
+    use std::fs::{File, OpenOptions};
+    use std::io::ErrorKind;
     use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     pub struct TempPath(PathBuf);
 
-    static NEXT: AtomicU64 = AtomicU64::new(0);
-
     impl TempPath {
-        pub fn new() -> Self {
-            let n = NEXT.fetch_add(1, Ordering::Relaxed);
-            TempPath(std::env::temp_dir().join(format!("feed-{}-{n}", std::process::id())))
+        /// Creates a new file under an unpredictable name, exclusively (never an existing file or a link someone
+        /// planted), and returns it open.
+        pub fn create() -> std::io::Result<(TempPath, File)> {
+            for _ in 0..16 {
+                let mut random = [0u8; 16];
+                getrandom::fill(&mut random).map_err(|e| std::io::Error::other(e.to_string()))?;
+                let path = std::env::temp_dir().join(format!("feed-{}", hex::encode(random)));
+                match OpenOptions::new().write(true).create_new(true).open(&path) {
+                    Ok(file) => return Ok((TempPath(path), file)),
+                    Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(std::io::Error::other("no free name for a temporary file"))
         }
 
         pub fn path(&self) -> &Path {
             &self.0
-        }
-    }
-
-    impl Default for TempPath {
-        fn default() -> Self {
-            Self::new()
         }
     }
 

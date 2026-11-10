@@ -243,6 +243,8 @@ impl Loader {
                 pending.push((i, target));
             }
         }
+        // Only lists holds the old indexes now: each swap below can release the one it replaces.
+        drop(current);
         for (position, target) in pending {
             let import_id = target.active_import_id.unwrap();
             if let Some(index) = self.build(&mut conn, &target.code, import_id, target.record_count).await {
