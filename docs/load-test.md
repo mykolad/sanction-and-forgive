@@ -39,6 +39,53 @@ what stopped the run.
 
 ## Results
 
+### Rust, before and after its tuning (2026-11-10)
+
+The owner asked (2026-11-10) to load-test Rust (`ports/rust`, deployable since #40) at 0.5 vCPU / 1 GiB, tune it if
+needed, then test it at both sizes. The same inputs, steps (80 added between 64 and 96) and lists as the runs above,
+the rate limit off only during each run.
+
+| Implementation | Replica | Sustained screenings/s | p95 at that rate (p50) | Next step | CPU (highest minute) | Memory (working set) | Restarts |
+|---|---|---|---|---|---|---|---|
+| Rust rust-effe0c3 (as ported) | 0.5 vCPU / 1 GiB | **64** | 52 ms (18 ms) | 96/s: p95 4.11 s | 0.39 vCPU | 396-536 MiB, rising | 0 |
+| Rust rust-906fa0d (#42) | 0.5 vCPU / 1 GiB | **96** | 164 ms (18 ms) | 128/s: p95 2.18 s | 0.46 vCPU | 373-507 MiB | 0 |
+| Rust rust-906fa0d (#42) | 0.25 vCPU / 0.5 GiB | **48** | 504 ms (78 ms) | 64/s: p95 2.74 s | 0.25 vCPU | 301-448 MiB | 0 |
+
+No request failed in these runs (31,515, 57,508 and 22,268 screenings).
+
+All five implementations and sizes side by side (sustained screenings/s):
+
+| | 0.5 vCPU / 1 GiB | 0.25 vCPU / 0.5 GiB |
+|---|---|---|
+| .NET | 24 | 12 |
+| Go (#35) | 64 | 32 |
+| Rust (#42) | **96** | **48** |
+
+- **Rust as ported matched Go** (64/s), with a lower p95 at that rate (52 ms against 207 ms) and less CPU. Its working
+  set grew under load, so #42 tuned it: FxHash for the matcher's maps, mimalloc, and screenings on a bounded pool
+  (Tokio's default let a burst start hundreds of threads on half a vCPU). Locally 2.80 to 2.11 ms a screening, every
+  result the same.
+- **Tuned, Rust is 4 times .NET on the same replica** (96 against 24, 48 against 12) and 1.5 times Go. At 0.25 vCPU /
+  0.5 GiB it handles twice what .NET handles at 0.5 vCPU / 1 GiB, in 301-448 MiB.
+- Which implementation runs, and at what size, is the owner's decision. Production stays on .NET at 0.5 vCPU / 1 GiB.
+
+**An open finding: a stall that isn't the app.** Three of the eleven runs on 2026-11-10 stalled at a few screenings a
+second, at a different place each time: Go at 0.25 vCPU (14:17 UTC, at 2/s), Rust #42 at 0.5 vCPU (18:03, at 6/s) and
+Rust #42 at 0.25 vCPU (18:45, at 4/s). Each time:
+
+- the app was nearly idle (at most 0.04-0.08 vCPU in Azure Monitor) and screened at the rate it received requests;
+- the platform's probes of `/healthz` timed out (1 s) a few minutes into the revision's life;
+- the built-in sign-in's sidecar (`http-auth`, which every request passes through since the admin sign-in, #19) shut
+  down and started again, and the requests then failed or waited for seconds;
+- the same revision, run again a few minutes later, was clean (the rows above).
+
+Memory doesn't explain it alone (one stall was at 470 MiB of 1 GiB). The runs that stalled were on revisions a few
+minutes old; the clean re-runs on the same revisions about ten minutes old, but some first runs on fresh revisions
+were clean too. Worth a look before a production size change: a run with the sign-in off (the sidecar gone), or the
+sidecar's own logs. Not investigated further here.
+
+Production went back to .NET at 0.5 vCPU / 1 GiB with the rate limit at 120 at 19:19 UTC on 2026-11-10.
+
 ### .NET and Go, one after the other (2026-11-10)
 
 The owner's experiment (2026-11-09, docs/conformance.md): the same application in .NET and in Go (`ports/go`, after
