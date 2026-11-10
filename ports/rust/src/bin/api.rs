@@ -52,12 +52,19 @@ async fn main() {
     tokio::spawn(loader.run_refresh(Duration::from_secs_f64(refresh * 60.0)));
 
     let port = setting("PORT", "8080");
-    let listener = match tokio::net::TcpListener::bind(format!("[::]:{port}")).await {
-        Ok(listener) => listener,
-        // No IPv6 here: IPv4 only.
-        Err(_) => tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await.expect("the port"),
+    // HOST: every interface by default (a container needs that); 127.0.0.1 for a run on a desktop, so its firewall
+    // doesn't ask about a server listening on the network.
+    let host = setting("HOST", "");
+    let (listener, shown) = if host.is_empty() {
+        match tokio::net::TcpListener::bind(format!("[::]:{port}")).await {
+            Ok(listener) => (listener, "[::]".to_string()),
+            // No IPv6 here: IPv4 only.
+            Err(_) => (tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await.expect("the port"), "0.0.0.0".to_string()),
+        }
+    } else {
+        (tokio::net::TcpListener::bind(format!("{host}:{port}")).await.expect("the host and port"), host.clone())
     };
-    logger.info(&format!("Now listening on: http://[::]:{port}"), &[]);
+    logger.info(&format!("Now listening on: http://{shown}:{port}"), &[]);
     let shutdown = async {
         let ctrl_c = tokio::signal::ctrl_c();
         #[cfg(unix)]
