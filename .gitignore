@@ -19,6 +19,8 @@ x86/
 [Aa][Rr][Mm]64/
 bld/
 [Bb]in/
+# The Rust port keeps its binaries' sources in src/bin.
+!ports/rust/src/bin/
 [Oo]bj/
 [Ll]og/
 [Ll]ogs/

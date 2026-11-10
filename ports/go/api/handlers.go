@@ -444,7 +444,7 @@ func buildNameOrder(index *matching.ListIndex) []browsable {
 func sortKey(name string) string {
 	folded := []rune(fold(name))
 	start := 0
-	for start < len(folded) && !(unicode.IsLetter(folded[start]) || unicode.Is(unicode.Nd, folded[start])) {
+	for start < len(folded) && !(matching.IsLetter(folded[start]) || matching.Is(unicode.Nd, folded[start])) {
 		start++
 	}
 	return string(folded[start:])
@@ -455,7 +455,7 @@ func fold(text string) string {
 	var b strings.Builder
 	lastSpace := false
 	for _, c := range norm.NFD.String(text) {
-		if unicode.Is(unicode.Mn, c) {
+		if matching.Is(unicode.Mn, c) {
 			continue
 		}
 		if unicode.IsSpace(c) {

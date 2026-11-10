@@ -2,6 +2,7 @@ package matching
 
 import (
 	"math/rand/v2"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +57,18 @@ func TestDamerauLevenshtein_IsTheFullDistanceCapped(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// The reference reads UTF-16 units: a character beyond the Basic Multilingual Plane is two surrogates, neither a letter,
+// so it separates words (Copilot's point on #37), and a mark there isn't stripped.
+func TestWords_ACharacterBeyondTheBasicPlane_SeparatesWords(t *testing.T) {
+	for input, want := range map[string]string{"Acme\U00010400": "acme", "ab\U00010400cd": "ab cd", "o'\U00010400neil": "o neil"} {
+		if got := strings.Join(Words(input), " "); got != want {
+			t.Errorf("Words(%q) = %q, want %q", input, got, want)
+		}
+	}
+	if got := StripDiacritics("e\U0001D167"); got != "e\U0001D167" {
+		t.Errorf("StripDiacritics kept %q", got)
 	}
 }
