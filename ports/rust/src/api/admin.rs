@@ -51,6 +51,7 @@ async fn me(State(s): State<Shared>, headers: HeaderMap) -> Response {
 
 /// Why a request may not go on: sign-in off (404), not signed in (401), without the role (403), or a change without
 /// the site's own header (400). Otherwise the user.
+#[allow(clippy::result_large_err)] // a response, made at most once a request
 fn refuse(s: &Shared, headers: &HeaderMap, change: bool) -> Result<AdminUser, Response> {
     let user = read_principal(s.config.sign_in_enabled, headers);
     if !s.config.sign_in_enabled {
@@ -140,7 +141,7 @@ async fn review(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<Stri
 
 /// A field of a JSON object, matched ignoring case (the last of duplicates wins).
 fn field<'v>(object: &'v serde_json::Map<String, Value>, name: &str) -> Option<&'v Value> {
-    object.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v).last()
+    object.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v).next_back()
 }
 
 async fn switch_list(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<String>, body: Bytes, off: bool) -> Response {

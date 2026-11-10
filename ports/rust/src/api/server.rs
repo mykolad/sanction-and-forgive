@@ -242,7 +242,7 @@ impl FixedWindow {
 
 /// The X-Forwarded-For entry the ingress appended (forward limit 1: the last one), else the peer.
 fn client_ip(headers: &HeaderMap, peer: SocketAddr) -> String {
-    if let Some(last) = headers.get_all("x-forwarded-for").iter().last().and_then(|v| v.to_str().ok()) {
+    if let Some(last) = headers.get_all("x-forwarded-for").iter().next_back().and_then(|v| v.to_str().ok()) {
         let ip = last.rsplit(',').next().unwrap_or_default().trim();
         if !ip.is_empty() {
             return ip.to_string();

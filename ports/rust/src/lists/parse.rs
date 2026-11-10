@@ -336,23 +336,19 @@ pub fn records(
                 }
                 level -= 1;
             }
-            Event::Text(text) => {
-                if !stack.is_empty() {
-                    let value = text.unescape()?;
-                    if !value.trim_matches(is_xml_space).is_empty() {
-                        for e in stack.iter_mut() {
-                            e.text.push_str(&value);
-                        }
+            Event::Text(text) if !stack.is_empty() => {
+                let value = text.unescape()?;
+                if !value.trim_matches(is_xml_space).is_empty() {
+                    for e in stack.iter_mut() {
+                        e.text.push_str(&value);
                     }
                 }
             }
-            Event::CData(data) => {
-                if !stack.is_empty() {
-                    let value = reader.decoder().decode(&data)?.into_owned();
-                    if !value.trim_matches(is_xml_space).is_empty() {
-                        for e in stack.iter_mut() {
-                            e.text.push_str(&value);
-                        }
+            Event::CData(data) if !stack.is_empty() => {
+                let value = reader.decoder().decode(&data)?.into_owned();
+                if !value.trim_matches(is_xml_space).is_empty() {
+                    for e in stack.iter_mut() {
+                        e.text.push_str(&value);
                     }
                 }
             }

@@ -4,8 +4,23 @@ The third implementation in the owner's experiment (2026-11-09): the same applic
 deployed at a time, compared (`docs/conformance.md`). Like the Go port (`ports/go`), it's a port of the .NET reference,
 not a redesign, and the conformance suite is the yardstick.
 
-**Where it stands:** the matcher (`src/matching`), every rule of `SanctionAndForgive.Matching`, with the Go port's speed
-work. The API, the CLI, the feeds and the database come next; until then the CI's conformance job doesn't run it.
+The whole application: the API and pages (`src/api`, `src/bin/api.rs`), the CLI (`src/bin/cli.rs`: imports, manual
+records, review, status, history, probe), the matcher (`src/matching`), the feeds (`src/lists`) and the database
+(`src/store`). It passes the conformance suite in full (23 of 23, the CI's `conformance (rust)`), and against the real
+lists its 2,000 screenings are the reference's, result for result (`ReferenceTests`).
+
+- **The same database**, never migrated here (the EF migrations are its schema); imports hash content the reference's
+  way, so a list imported by one implementation is `Unchanged` for another. Rows are written in multi-row INSERTs
+  (the reference bulk-copies); the stored rows are the same.
+- **The same configuration names** (`ConnectionStrings__Lists` with SQL, managed-identity or az-CLI sign-in,
+  `Lists__RefreshMinutes`, `RateLimiting__PerMinute`, `Admin__SignInEnabled`, `Screening__*`, `App__Version`); the
+  API listens on 8080. Logs are one JSON object per line.
+- **Not ported:** the CLI's `evaluate` and `load-inputs` (development tools; run them with the .NET CLI).
+
+```powershell
+docker build -f ports/rust/Dockerfile -t sanction-and-forgive-rust .        # 60 MB, distroless with glibc
+./tests/conformance/run.ps1 -Build -Image sanction-and-forgive-rust:conformance -Dockerfile ports/rust/Dockerfile -CliCommand '--entrypoint /app/cli {image}'
+```
 
 - **The same dictionaries**, embedded at build time from `src/SanctionAndForgive.Matching/Data` (`build.rs`), never
   copied by hand; the website's pages likewise from `src/SanctionAndForgive.Api/wwwroot`. The matcher version is the

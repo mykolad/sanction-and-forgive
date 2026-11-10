@@ -261,7 +261,7 @@ fn parse_us_export(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
     let Value::Object(root) = document else { return Err(format_error("Expected a JSON object.")) };
     // The last "results" wins, as the reference's reader keeps reading.
     let results =
-        root.iter().filter(|(k, _)| *k == "results").map(|(_, v)| v).last().ok_or_else(|| format_error("No \"results\" array."))?;
+        root.iter().filter(|(k, _)| *k == "results").map(|(_, v)| v).next_back().ok_or_else(|| format_error("No \"results\" array."))?;
     let Value::Array(results) = results else { return Err(format_error("Expected \"results\" to be an array.")) };
 
     let mut out = Vec::new();
