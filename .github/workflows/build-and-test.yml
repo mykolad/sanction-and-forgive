@@ -147,6 +147,32 @@ jobs:
   # The conformance suite (docs/conformance.md): each implementation's image built from this commit, run as a black
   # box with a fresh database, compared with the golden files. Not a required check yet: it's the yardstick for the
   # implementations in other languages (ports/).
+  # The Rust port's format, lints and unit tests (ports/rust); the conformance matrix below runs its image. Not required.
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ports/rust
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ports/rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('ports/rust/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Format, lints and tests
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+
   conformance:
     name: conformance (${{ matrix.implementation }})
     runs-on: ubuntu-latest
@@ -160,6 +186,9 @@ jobs:
             cli: '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll'
           - implementation: go
             dockerfile: ports/go/Dockerfile
+            cli: '--entrypoint /app/cli {image}'
+          - implementation: rust
+            dockerfile: ports/rust/Dockerfile
             cli: '--entrypoint /app/cli {image}'
 
     services:

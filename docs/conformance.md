@@ -41,6 +41,7 @@ A plain `dotnet test` of the solution skips every conformance test: they need `C
 |---|---|---|---|---|
 | .NET (reference) | `src/` | `Dockerfile`, 356 MB | `dotnet SanctionAndForgive.Cli.dll` | 23 of 23 |
 | Go | `ports/go/` | `ports/go/Dockerfile`, 68 MB | `/app/cli` | 23 of 23 |
+| Rust | `ports/rust/` | `ports/rust/Dockerfile`, 60 MB | `/app/cli` | 23 of 23 |
 
 The CI job `conformance` runs the suite against each of them on every pull request.
 

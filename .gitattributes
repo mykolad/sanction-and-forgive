@@ -14,3 +14,6 @@ src/SanctionAndForgive.Matching/Data/** text eol=lf
 
 # The Go port: LF, as gofmt writes it.
 ports/go/** text eol=lf
+
+# The Rust port: LF, as rustfmt writes it.
+ports/rust/** text eol=lf

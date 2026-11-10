@@ -161,7 +161,7 @@ func trailingCode(raw string) (string, bool) {
 }
 
 func isWordChar(c rune) bool {
-	return unicode.IsLetter(c) || unicode.Is(unicode.Mn, c) || unicode.Is(unicode.Nd, c) || unicode.Is(unicode.Pc, c)
+	return IsLetter(c) || Is(unicode.Mn, c) || Is(unicode.Nd, c) || Is(unicode.Pc, c)
 }
 
 type addressComparison struct {
