@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -40,6 +41,8 @@ pub struct Config {
     pub stream_max_records: usize,
     pub stream_max_seconds: u64,
     pub concurrent_streams: usize,
+    pub max_concurrent: usize,
+    pub max_waiting: usize,
     pub sign_in_enabled: bool,
 }
 
@@ -51,6 +54,7 @@ pub struct AppState {
     pub db: Database,
     streams: Arc<Semaphore>,
     limiter: FixedWindow,
+    gate: Arc<ScreeningGate>,
 }
 
 pub type Shared = Arc<AppState>;
@@ -59,7 +63,38 @@ impl AppState {
     pub fn new(config: Config, catalog: Arc<Catalog>, screenings: Arc<ScreeningService>, loader: Arc<Loader>, db: Database) -> Self {
         let streams = Arc::new(Semaphore::new(config.concurrent_streams.max(1)));
         let limiter = FixedWindow { limit: config.rate_limit_per_minute, window: Mutex::new((Instant::now(), HashMap::new())) };
-        AppState { config, catalog, screenings, loader, db, streams, limiter }
+        let gate = Arc::new(ScreeningGate::new(config.max_concurrent, config.max_waiting));
+        AppState { config, catalog, screenings, loader, db, streams, limiter, gate }
+    }
+}
+
+/// Single screenings at once (`Screening:MaxConcurrent`) and waiting for one of those places (`Screening:MaxWaiting`):
+/// one more is refused at once, 503 busy, rather than queued, so an overload doesn't hold memory for requests that
+/// would wait for seconds anyway.
+struct ScreeningGate {
+    running: Arc<Semaphore>,
+    admitted: AtomicUsize,
+    limit: usize,
+}
+
+/// A screening's place in the gate, given back when dropped.
+struct Admitted(Arc<ScreeningGate>);
+
+impl Drop for Admitted {
+    fn drop(&mut self) {
+        self.0.admitted.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+impl ScreeningGate {
+    fn new(concurrent: usize, waiting: usize) -> Self {
+        let concurrent = concurrent.max(1);
+        ScreeningGate { running: Arc::new(Semaphore::new(concurrent)), admitted: AtomicUsize::new(0), limit: concurrent + waiting }
+    }
+
+    fn enter(self: &Arc<Self>) -> Option<Admitted> {
+        self.admitted.try_update(Ordering::AcqRel, Ordering::Acquire, |n| (n < self.limit).then_some(n + 1)).ok()?;
+        Some(Admitted(self.clone()))
     }
 }
 
@@ -278,9 +313,26 @@ async fn screen(State(s): State<Shared>, ConnectInfo(peer): ConnectInfo<SocketAd
     if !s.catalog.is_ready() {
         return warming_up("warmingUp");
     }
+    let Some(admitted) = s.gate.enter() else {
+        return busy();
+    };
+    // The place and the permit go with the screening, so a caller that gives up doesn't free them while it runs.
+    let permit = s.gate.running.clone().acquire_owned().await.expect("the gate is never closed");
     let service = s.screenings.clone();
-    let response = tokio::task::spawn_blocking(move || service.screen(&request)).await.unwrap();
+    let response = tokio::task::spawn_blocking(move || {
+        let _held = (admitted, permit);
+        service.screen(&request)
+    })
+    .await
+    .unwrap();
     json_response(StatusCode::OK, &response)
+}
+
+/// 503 when as many screenings as allowed are running and waiting: try again in a second.
+fn busy() -> Response {
+    let mut response = warming_up("busy");
+    response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
+    response
 }
 
 const MAX_LINE_BYTES: usize = 4096;
@@ -563,4 +615,31 @@ pub fn read_principal(enabled: bool, headers: &HeaderMap) -> Option<AdminUser> {
 
 pub fn from_this_site(headers: &HeaderMap) -> bool {
     headers.get(REQUEST_HEADER).and_then(|v| v.to_str().ok()) == Some(REQUEST_HEADER_VALUE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn gate_lets_screenings_wait_while_there_is_room_and_refuses_beyond_it() {
+        let gate = Arc::new(ScreeningGate::new(1, 1));
+        let running = gate.enter().expect("a free gate admits");
+        let permit = gate.running.clone().acquire_owned().await.unwrap();
+        let waiting = gate.enter().expect("room to wait");
+        assert!(gate.enter().is_none(), "a third with one place and one waiting");
+
+        drop((running, permit));
+        let _permit = gate.running.clone().acquire_owned().await.unwrap();
+        assert!(gate.enter().is_some(), "the place freed");
+        drop(waiting);
+        assert_eq!(gate.admitted.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn busy_is_503_with_retry_after() {
+        let response = busy();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "1");
+    }
 }

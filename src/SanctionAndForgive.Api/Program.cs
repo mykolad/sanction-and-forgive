@@ -26,6 +26,7 @@ builder.Services.AddSingleton(AppInfo.From(builder.Configuration));
 builder.Services.AddSingleton<ListCatalog>();
 builder.Services.AddSingleton<ListLoader>();
 builder.Services.AddSingleton<ScreeningService>();
+builder.Services.AddSingleton(_ => new ScreeningGate(builder.Configuration.GetValue("Screening:MaxConcurrent", 4), builder.Configuration.GetValue("Screening:MaxWaiting", 32)));
 // Admin: Container Apps' Entra sign-in (off unless the deployment turns it on), and reviewing held updates.
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.AdminAccess>();
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.IImportReview, SanctionAndForgive.Api.Admin.ImportReview>();

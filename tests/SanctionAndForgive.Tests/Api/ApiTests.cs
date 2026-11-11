@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using SanctionAndForgive.Api.Lists;
+using SanctionAndForgive.Api.Screening;
 using SanctionAndForgive.Matching;
 using static SanctionAndForgive.Tests.Api.ApiFactory;
 
@@ -291,5 +294,62 @@ public sealed class RateLimitTests
         }
 
         Assert.Equal([HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.TooManyRequests], statuses);
+    }
+}
+
+public sealed class ScreeningGateTests
+{
+    /// <summary>Takes one of <paramref name="gate"/>'s places until <paramref name="release"/> is set.</summary>
+    private static async Task<Task<string?>> HoldAsync(ScreeningGate gate, ManualResetEventSlim release)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = Task.Run(() => gate.TryRunAsync<string>(() =>
+        {
+            entered.SetResult();
+            release.Wait();
+            return "held";
+        }, CancellationToken.None));
+        await entered.Task;
+        return held;
+    }
+
+    [Fact]
+    public async Task WhenEveryPlaceIsTaken_AScreeningIs503Busy_WithRetryAfter_AndOnceFreeItRuns()
+    {
+        using var factory = new ApiFactory();
+        using var small = factory.WithWebHostBuilder(builder => builder.UseSetting("Screening:MaxConcurrent", "1").UseSetting("Screening:MaxWaiting", "0"));
+        small.Services.GetRequiredService<ListCatalog>().Replace([Feed("eu", "EU", Now, Subject("Romashka LLC", SubjectKind.Entity))]);
+        using var client = small.CreateClient();
+        using var release = new ManualResetEventSlim();
+        var held = await HoldAsync(small.Services.GetRequiredService<ScreeningGate>(), release);
+
+        using (var busy = await client.PostAsJsonAsync("/api/v1/screenings", new { reference = "test-1", companyName = "Romashka" }))
+        {
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, busy.StatusCode);
+            Assert.Equal("busy", (await busy.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("state").GetString());
+            Assert.Equal(TimeSpan.FromSeconds(1), busy.Headers.RetryAfter?.Delta);
+        }
+
+        release.Set();
+        Assert.Equal("held", await held);
+        using var after = await client.PostAsJsonAsync("/api/v1/screenings", new { reference = "test-2", companyName = "Romashka" });
+        Assert.Equal(HttpStatusCode.OK, after.StatusCode);
+    }
+
+    [Fact]
+    public async Task AScreeningWaitsForAFreePlace_WhileThereIsRoomToWait()
+    {
+        using var gate = new ScreeningGate(1, 1);
+        using var release = new ManualResetEventSlim();
+        var held = await HoldAsync(gate, release);
+
+        var waiting = gate.TryRunAsync(() => "waited", CancellationToken.None);
+        var refused = await gate.TryRunAsync(() => "refused", CancellationToken.None);
+        Assert.False(waiting.IsCompleted);
+        Assert.Null(refused);
+
+        release.Set();
+        Assert.Equal(("held", "waited"), (await held, await waiting));
+        Assert.Equal("again", await gate.TryRunAsync(() => "again", CancellationToken.None));
     }
 }
