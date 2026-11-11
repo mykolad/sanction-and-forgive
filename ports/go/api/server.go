@@ -36,6 +36,8 @@ type Config struct {
 	StreamMaxRecords  int
 	StreamMaxSeconds  int
 	ConcurrentStreams int
+	MaxConcurrent     int
+	MaxWaiting        int
 	SignInEnabled     bool
 }
 
@@ -48,11 +50,13 @@ type Server struct {
 	Logger     *slog.Logger
 	streams    chan struct{}
 	limiter    *fixedWindow
+	gate       *screeningGate
 }
 
 func (s *Server) Handler() http.Handler {
 	s.streams = make(chan struct{}, max(1, s.Config.ConcurrentStreams))
 	s.limiter = &fixedWindow{limit: s.Config.RateLimitPerMin, counts: map[string]int{}}
+	s.gate = newScreeningGate(s.Config.MaxConcurrent, s.Config.MaxWaiting)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.ready)
@@ -209,7 +213,12 @@ func (s *Server) screen(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, warmingUp{"warmingUp"})
 		return
 	}
-	writeJSON(w, http.StatusOK, s.Screenings.Screen(&body))
+	var response any
+	if !s.gate.run(r.Context(), func() { response = s.Screenings.Screen(&body) }) {
+		busy(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 const maxLineBytes = 4096

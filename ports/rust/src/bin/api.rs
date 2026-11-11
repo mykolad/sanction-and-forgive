@@ -54,6 +54,8 @@ async fn serve() {
         stream_max_records: number("Screening__StreamMaxRecords", 50_000),
         stream_max_seconds: number("Screening__StreamMaxSeconds", 200),
         concurrent_streams: number("Screening__ConcurrentStreams", 1),
+        max_concurrent: number("Screening__MaxConcurrent", 4),
+        max_waiting: number("Screening__MaxWaiting", 32),
         sign_in_enabled: setting("Admin__SignInEnabled", "").eq_ignore_ascii_case("true"),
     };
 

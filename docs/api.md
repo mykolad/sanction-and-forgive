@@ -9,6 +9,13 @@ Every screening carries the caller's own **`reference`**: a transaction id, say.
 of letters, digits and `. _ : / -`, starting with a letter or digit. It's echoed back in the response, and it is how a
 screening is found in the logs later. **Never put personal data in it**: it's logged as it is.
 
+## Busy: 503 `{"state":"busy"}`
+
+A replica screens a few single screenings at once (`Screening:MaxConcurrent`, 4) and lets a few more wait for a place
+(`Screening:MaxWaiting`, 32). One more gets **503 `{"state":"busy"}` with `Retry-After: 1`** at once, instead of
+waiting behind the others for seconds: try again after that second. (503 `{"state":"warmingUp"}` means the lists are
+still loading.) A batch belongs on the stream endpoint below, which isn't counted here.
+
 ## Lists that couldn't be updated
 
 Each daily list is checked once a day (03:30 UTC, each download retried for up to 10 minutes after a passing fault)

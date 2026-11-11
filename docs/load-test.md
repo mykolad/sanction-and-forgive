@@ -160,6 +160,26 @@ requests evenly (run 1: 16,205 and 16,204).
 
 Production went back to .NET at 0.5 vCPU / 1 GiB, one replica, the rate limit at 120, at 14:52 UTC.
 
+### Where the small replica's memory goes (2026-11-11)
+
+The owner asked how to use less memory. Measured locally: Rust #42 in Docker with `--cpus 0.25 --memory 512m`,
+production's six lists from a copy of the database, the rate limit and sign-in off, two minutes at 64 a second, then
+two at 160 (past this desktop's capacity for a quarter core, about 100), k6's thresholds off so every run lasts as
+long. Memory is `docker stats`' figure, the container's working set.
+
+| Rust | Idle | Peak | Requests at 160/s |
+|---|---|---|---|
+| as deployed | 234 MiB | 283 MiB | all answered, slowly; k6 couldn't start 4,906 more for the ones waiting |
+| with a cap of 4 running and 32 waiting | 231 MiB | 274 MiB | 20% refused at once, 503 busy |
+| `MIMALLOC_PURGE_DELAY=0` (freed memory returned at once) | 252 MiB | 278 MiB | as deployed; back to 249 MiB after |
+
+- **The indexes are most of it**: about 230 MiB with nothing running. Load adds 40-50 MiB however it's tuned; the
+  requests waiting under overload only about 6-9 MiB of that. The cap went in anyway (owner's decision), for quick
+  answers past capacity: `Screening:MaxConcurrent` and `Screening:MaxWaiting`, docs/api.md.
+- **The sign-in sidecar is the next largest**: the same Rust image on Azure at 0.25 vCPU / 0.5 GiB peaked at 337-399 MiB
+  with the sign-in off (2026-11-10) and 412-516 MiB with it on (2026-11-11), so about 80-120 MiB of the replica's 512
+  under load. The owner decided (2026-11-11) to sign in within the app instead, with no sidecar.
+
 ### .NET and Go, one after the other (2026-11-10)
 
 The owner's experiment (2026-11-09, docs/conformance.md): the same application in .NET and in Go (`ports/go`, after

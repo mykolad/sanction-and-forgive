@@ -73,6 +73,8 @@ func main() {
 		StreamMaxRecords:  intSetting("Screening__StreamMaxRecords", 50000),
 		StreamMaxSeconds:  intSetting("Screening__StreamMaxSeconds", 200),
 		ConcurrentStreams: intSetting("Screening__ConcurrentStreams", 1),
+		MaxConcurrent:     intSetting("Screening__MaxConcurrent", 4),
+		MaxWaiting:        intSetting("Screening__MaxWaiting", 32),
 		SignInEnabled:     strings.EqualFold(os.Getenv("Admin__SignInEnabled"), "true"),
 	}
 

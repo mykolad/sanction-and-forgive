@@ -129,7 +129,11 @@ async function screen(event) {
     });
     if (request !== current) return;
     if (response.status === 503) {
-      showState("The lists are still loading. Try again in a few seconds.", true);
+      const state = await response.json().catch(() => null);
+      if (request !== current) return;
+      showState(state && state.state === "busy"
+        ? "Too many screenings at once right now. Try again in a moment."
+        : "The lists are still loading. Try again in a few seconds.", true);
       return;
     }
     if (response.status === 429) {

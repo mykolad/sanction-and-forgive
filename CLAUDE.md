@@ -174,6 +174,10 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   an edit reloads it under the refresh gate (a removal drops the entry from memory first: never looser). Admin only.
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
   `X-Forwarded-For` entry the ingress appended (forward limit 1), so clients can't choose their partition.
+- **Busy** (`Screening/ScreeningGate.cs`, owner's decision 2026-11-11): single screenings at once
+  (`Screening:MaxConcurrent`, 4) and waiting for a place (`Screening:MaxWaiting`, 32); one more gets 503
+  `{"state":"busy"}` with `Retry-After: 1` at once, and the website says so. Streams aren't counted (one at a time
+  already). Measured locally, it saves little memory (docs/load-test.md): it's there for quick answers past capacity.
 - **Input is never stored or logged.** No request logging; validation errors don't echo values. Every screening
   needs the caller's `reference` (1-64 characters, `[A-Za-z0-9._:/-]`, echoed back), and `ScreeningService` writes one
   **audit line** per screening: reference, outcome, matcher and list versions, and per entry kind and list the outcome,

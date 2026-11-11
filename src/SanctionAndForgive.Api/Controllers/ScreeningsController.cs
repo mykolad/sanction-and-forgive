@@ -9,14 +9,14 @@ namespace SanctionAndForgive.Api.Controllers;
 /// caller's reference with what each list answered.</summary>
 [ApiController]
 [Route("api/v1/screenings")]
-public sealed class ScreeningsController(ScreeningService screenings) : ControllerBase
+public sealed class ScreeningsController(ScreeningService screenings, ScreeningGate gate) : ControllerBase
 {
     [HttpPost]
     [EnableRateLimiting(RateLimits.Screenings)]
     [ProducesResponseType<ScreeningResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType<ValidationProblemDetails>(StatusCodes.Status400BadRequest)]
     [ProducesResponseType<WarmingUpResponse>(StatusCodes.Status503ServiceUnavailable)]
-    public IActionResult Screen(ScreeningRequestBody body)
+    public async Task<IActionResult> Screen(ScreeningRequestBody body)
     {
         var errors = ScreeningService.Validate(body);
         if (errors.Count > 0)
@@ -29,6 +29,14 @@ public sealed class ScreeningsController(ScreeningService screenings) : Controll
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new WarmingUpResponse("warmingUp"));
         }
 
-        return Ok(screenings.Screen(body));
+        var response = await gate.TryRunAsync(() => screenings.Screen(body), HttpContext.RequestAborted);
+        if (response is null)
+        {
+            // As many screenings running and waiting as allowed (ScreeningGate): try again in a second.
+            Response.Headers.RetryAfter = "1";
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new WarmingUpResponse("busy"));
+        }
+
+        return Ok(response);
     }
 }
