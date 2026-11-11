@@ -103,9 +103,9 @@ az containerapp job execution list -g sanction-and-forgive-rg -n sanction-and-fo
 
 ```powershell
 $env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'
-# $env:APP_IMPLEMENTATION = 'go'; $env:APP_CPU = '0.25'; $env:APP_MEMORY = '0.5Gi'
+# $env:APP_IMPLEMENTATION = 'go'; $env:APP_CPU = '0.25'; $env:APP_MEMORY = '0.5Gi'; $env:APP_REPLICAS = '2'
 az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/app.bicepparam
-Remove-Item Env:RATE_LIMIT_PER_MINUTE, Env:APP_IMPLEMENTATION, Env:APP_CPU, Env:APP_MEMORY -ErrorAction Ignore   # then the same create again
+Remove-Item Env:RATE_LIMIT_PER_MINUTE, Env:APP_IMPLEMENTATION, Env:APP_CPU, Env:APP_MEMORY, Env:APP_REPLICAS -ErrorAction Ignore   # then the same create again
 ```
 
 **What-if on a deployed environment** lists a few changes that aren't changes, a what-if limitation: values read from

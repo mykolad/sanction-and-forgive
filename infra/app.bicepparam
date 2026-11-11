@@ -11,6 +11,11 @@ param implementation = readEnvironmentVariable('APP_IMPLEMENTATION', 'dotnet')
 param cpu = readEnvironmentVariable('APP_CPU', '0.5')
 param memory = readEnvironmentVariable('APP_MEMORY', '1Gi')
 
+// How many replicas run: one (the owner's decision); a load test may set APP_REPLICAS for its run, then deploys again
+// without it. Each replica holds every index and its own rate limit.
+param minReplicas = int(readEnvironmentVariable('APP_REPLICAS', '1'))
+param maxReplicas = int(readEnvironmentVariable('APP_REPLICAS', '1'))
+
 // A load test deploys with RATE_LIMIT_PER_MINUTE=0, then deploys again without it (spec section 7).
 param rateLimitPerMinute = int(readEnvironmentVariable('RATE_LIMIT_PER_MINUTE', '120'))
 
