@@ -27,7 +27,11 @@ builder.Services.AddSingleton<ListCatalog>();
 builder.Services.AddSingleton<ListLoader>();
 builder.Services.AddSingleton<ScreeningService>();
 builder.Services.AddSingleton(_ => new ScreeningGate(builder.Configuration.GetValue("Screening:MaxConcurrent", 4), builder.Configuration.GetValue("Screening:MaxWaiting", 32)));
-// Admin: Container Apps' Entra sign-in (off unless the deployment turns it on), and reviewing held updates.
+// Admin: the Entra sign-in (off unless the deployment names the app registration), and reviewing held updates.
+var signInSettings = SanctionAndForgive.Api.Admin.SignInSettings.From(builder.Configuration);
+builder.Services.AddSingleton(signInSettings);
+builder.Services.AddSingleton(_ => signInSettings.Metadata());
+builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.AdminSignIn>();
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.AdminAccess>();
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.IImportReview, SanctionAndForgive.Api.Admin.ImportReview>();
 builder.Services.AddSingleton<SanctionAndForgive.Api.Admin.IAllowListAdmin, SanctionAndForgive.Api.Admin.AllowListAdmin>();
@@ -49,6 +53,7 @@ app.UseExceptionHandler();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 app.UseRateLimiter();
+SanctionAndForgive.Api.Admin.AdminAccess.UseAdminSession(app);
 app.MapOpenApi();
 app.MapControllers();
 

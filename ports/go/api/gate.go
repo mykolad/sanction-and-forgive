@@ -20,22 +20,30 @@ func newScreeningGate(maxConcurrent, maxWaiting int) *screeningGate {
 	return &screeningGate{running: make(chan struct{}, concurrent), limit: int64(concurrent + max(0, maxWaiting))}
 }
 
-// run runs work once a place is free and says whether it did: false at once when every place is taken and as many
-// are waiting as allowed, or when ctx ends while it waits.
-func (g *screeningGate) run(ctx context.Context, work func()) bool {
+// gateResult says what became of a screening at the gate.
+type gateResult int
+
+const (
+	ran  gateResult = iota // it ran
+	full                   // refused at once: every place taken and as many waiting as allowed
+	gone                   // the caller gave up while it waited
+)
+
+// run runs work once a place is free.
+func (g *screeningGate) run(ctx context.Context, work func()) gateResult {
 	if g.admitted.Add(1) > g.limit {
 		g.admitted.Add(-1)
-		return false
+		return full
 	}
 	defer g.admitted.Add(-1)
 	select {
 	case g.running <- struct{}{}:
 	case <-ctx.Done():
-		return false
+		return gone
 	}
 	defer func() { <-g.running }()
 	work()
-	return true
+	return ran
 }
 
 // busy answers 503 when the gate is full: try again in a second.

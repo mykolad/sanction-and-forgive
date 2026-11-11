@@ -13,7 +13,7 @@ lists its 2,000 screenings are the reference's, result for result (`ReferenceTes
   way, so a list imported by one implementation is `Unchanged` for another. Rows are written in multi-row INSERTs
   (the reference bulk-copies); the stored rows are the same.
 - **The same configuration names** (`ConnectionStrings__Lists` with SQL, managed-identity or az-CLI sign-in,
-  `Lists__RefreshMinutes`, `RateLimiting__PerMinute`, `Admin__SignInEnabled`, `Screening__*`, `App__Version`); the
+  `Lists__RefreshMinutes`, `RateLimiting__PerMinute`, `Admin__ClientId`, `Admin__TenantId`, `Admin__Authority`, `Screening__*`, `App__Version`); the
   API listens on 8080 (`PORT`) on every interface, or with `HOST=127.0.0.1` on loopback only (a run on a desktop, so
   its firewall doesn't ask). Logs are one JSON object per line.
 - **Not ported:** the CLI's `evaluate` and `load-inputs` (development tools; run them with the .NET CLI).

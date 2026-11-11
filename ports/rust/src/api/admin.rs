@@ -13,7 +13,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::screening::{utf16_len, JsonTime};
-use super::server::{bad_request, from_this_site, json_response, not_found, one_error, read_principal, AdminUser, Shared, REQUEST_HEADER};
+use super::server::{bad_request, from_this_site, json_response, not_found, one_error, AdminUser, Shared, REQUEST_HEADER};
 use crate::matching::{AllowList, AllowListEntry, Outcome, ScreenedList};
 use crate::store::imports::{Imports, ReviewResult};
 use crate::store::queries::{self, SwitchResult};
@@ -34,8 +34,8 @@ pub fn routes() -> Router<Shared> {
 }
 
 async fn me(State(s): State<Shared>, headers: HeaderMap) -> Response {
-    let enabled = s.config.sign_in_enabled;
-    let user = read_principal(enabled, &headers);
+    let enabled = s.sign_in.enabled();
+    let user = s.sign_in.current(&headers).await;
     json_response(
         StatusCode::OK,
         &json!({
@@ -52,9 +52,9 @@ async fn me(State(s): State<Shared>, headers: HeaderMap) -> Response {
 /// Why a request may not go on: sign-in off (404), not signed in (401), without the role (403), or a change without
 /// the site's own header (400). Otherwise the user.
 #[allow(clippy::result_large_err)] // a response, made at most once a request
-fn refuse(s: &Shared, headers: &HeaderMap, change: bool) -> Result<AdminUser, Response> {
-    let user = read_principal(s.config.sign_in_enabled, headers);
-    if !s.config.sign_in_enabled {
+async fn refuse(s: &Shared, headers: &HeaderMap, change: bool) -> Result<AdminUser, Response> {
+    let user = s.sign_in.current(headers).await;
+    if !s.sign_in.enabled() {
         return Err(not_found());
     }
     let Some(user) = user else { return Err(StatusCode::UNAUTHORIZED.into_response()) };
@@ -84,7 +84,7 @@ struct AllowListEntryResponse {
 }
 
 async fn allow_list(State(s): State<Shared>, headers: HeaderMap) -> Response {
-    if let Err(r) = refuse(&s, &headers, false) {
+    if let Err(r) = refuse(&s, &headers, false).await {
         return r;
     }
     let records = match s.db.connect().await {
@@ -113,7 +113,7 @@ fn path_id(id: &str) -> Option<i32> {
 }
 
 async fn review(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<String>, confirm: bool) -> Response {
-    let user = match refuse(&s, &headers, true) {
+    let user = match refuse(&s, &headers, true).await {
         Ok(user) => user,
         Err(r) => return r,
     };
@@ -145,7 +145,7 @@ fn field<'v>(object: &'v serde_json::Map<String, Value>, name: &str) -> Option<&
 }
 
 async fn switch_list(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<String>, body: Bytes, off: bool) -> Response {
-    let user = match refuse(&s, &headers, true) {
+    let user = match refuse(&s, &headers, true).await {
         Ok(user) => user,
         Err(r) => return r,
     };
@@ -206,7 +206,7 @@ fn exists_refusal(id: i32) -> Value {
 }
 
 async fn add_to_allow_list(State(s): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
-    let user = match refuse(&s, &headers, true) {
+    let user = match refuse(&s, &headers, true).await {
         Ok(user) => user,
         Err(r) => return r,
     };
@@ -385,7 +385,7 @@ async fn check_and_store(
 }
 
 async fn remove_from_allow_list(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
-    let user = match refuse(&s, &headers, true) {
+    let user = match refuse(&s, &headers, true).await {
         Ok(user) => user,
         Err(r) => return r,
     };

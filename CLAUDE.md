@@ -149,14 +149,16 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `GET /api/v1/examples` (entities from the live lists: a
   Latin one, a Cyrillic alias, one with an address, one with a typo; cached per snapshot), `GET /healthz` (liveness, no
   database), `GET /readyz` (200 after the first load), `GET /openapi/v1.json`.
-- **Admin** (`Admin/`, `Controllers/AdminController.cs`, `wwwroot/admin/`; owner's decision 2026-11-06: Entra sign-in):
-  Container Apps' built-in Entra ID sign-in in "allow unauthenticated" mode, so screening stays open. `AdminAccess`
-  reads `X-MS-CLIENT-PRINCIPAL` (base64 JSON claims; the platform doesn't let clients set it) **only when
-  `Admin:SignInEnabled`**, which `app.bicep` sets only when the deploy has verified the auth config is in place
-  (`ADMIN_CLIENT_ID` and `ADMIN_SIGN_IN_READY`: the deploy that creates it leaves the flag off and deploys again;
-  `infra/admin-sign-in.ps1`, run by the owner). Reviewing held updates needs the `Lists.Admin` app role and the
-  `X-Requested-By: sanction-and-forgive-admin` header (CSRF). `IImportReview` reviews then reloads the lists;
-  `ListLoader.RefreshAsync` runs one at a time. Tests: `AdminTests` (fakes of `IImportReview` and `IListSwitch`).
+- **Admin** (`Admin/`, `Controllers/AdminController.cs`, `wwwroot/admin/`; owner's decisions 2026-11-06: Entra
+  sign-in; 2026-11-11: in the app, no platform sidecar): `Admin/AdminSignIn.cs` and `Controllers/SignInController.cs`,
+  OpenID Connect with Entra (`/.auth/login/aad`, its `/callback`, `/.auth/logout`: the platform's old paths, so the app
+  registration from `infra/admin-sign-in.ps1` is unchanged). No secret: the ID token is signed by Entra, carries the
+  roles, and is itself the session cookie `saf-admin`, checked on every `/api/v1/admin` request (`UseAdminSession`).
+  On only with `Admin:ClientId` and `Admin:TenantId` (or `Admin:Authority`); `X-MS-CLIENT-PRINCIPAL` means nothing.
+  The spec all implementations follow is docs/api.md, "Admin". Reviewing held updates needs the `Lists.Admin` app role
+  and the `X-Requested-By: sanction-and-forgive-admin` header (CSRF). `IImportReview` reviews then reloads the lists;
+  `ListLoader.RefreshAsync` runs one at a time. Tests: `AdminTests` (fakes of `IImportReview` and `IListSwitch`),
+  `SignInTests` (`TestSignIn`: a stand-in issuer with a key made per run).
 - **Switching a list off** (owner's decision 2026-11-09: a person's decision, from the admin page): `Sources`'
   `SwitchedOffAt`, `SwitchedOffBy`, `SwitchedOffReason` (`Data/SourceSwitch.cs`, one conditional update),
   `Admin/ListSwitch.cs` (then a reload), `POST /api/v1/admin/lists/{code}/switch-off` (a reason is required) and

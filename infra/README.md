@@ -9,7 +9,7 @@ reproducible from an empty group. Nothing here belongs to or touches lazydad.
 | `platform.bicep` | Resource group | The deploy workflow (first time: by hand) | Log Analytics (30 days, daily cap), Container Apps environment `sanction-and-forgive-cae`, app identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` (Entra-only), database `sanction-and-forgive-db` (Basic, 5 DTU, 2 GB), the Azure services firewall rule; alerts to the subscription's Owner role: database storage above 80%, a failed or rejected import, and a $20 monthly budget (80% spent, 100% forecast) |
 | `app.bicep` | Resource group | The deploy workflow | Container App `sanction-and-forgive` (0.5 vCPU / 1 GiB since 2026-11-07, min = max = 1, port 8080, liveness `/healthz`, readiness `/readyz`, public ingress unless `allowedCidrs`) and the job `sanction-and-forgive-import` (daily 03:30 UTC, `import --source all`, 0.5 vCPU / 1 GiB, 30 minutes), both from `ghcr.io/mykolad/sanction-and-forgive:<sha>` as identity `sanction-and-forgive-app` |
 | `sql/grant-identities.sql` | Database | The owner, once (or after re-creating the database) | Database users for the app and deploy identities: what Bicep can't do |
-| `admin-sign-in.ps1` | Tenant | The owner, once | The admin sign-in's Entra app registration (role `Lists.Admin`, assignment required, assigned to the owner); `app.bicep` then turns the Container App's built-in sign-in on |
+| `admin-sign-in.ps1` | Tenant | The owner, once | The admin sign-in's Entra app registration (role `Lists.Admin`, assignment required, assigned to the owner); the app then signs administrators in itself |
 
 Nothing personal lives in this public repository: the SQL admin's object ID and login come from environment variables
 (`platform.bicepparam`), set as repository variables for the workflows. Alerts go to whoever holds Owner directly on the
@@ -49,9 +49,9 @@ re-created repository can't inherit the trust. It isn't a secret.
 
 ## Admin sign-in (the owner, once)
 
-The admin page (`/admin`: confirm or reject updates held for review) uses Container Apps' built-in Microsoft Entra ID
-sign-in. Screening never needs it. The app registration lives in the tenant, outside the resource group, so the owner
-creates it:
+The admin page (`/admin`: confirm or reject updates held for review) uses Microsoft Entra ID sign-in, done by the app
+itself (docs/api.md, "Admin"). Screening never needs it. The app registration lives in the tenant, outside the
+resource group, so the owner creates it:
 
 ```powershell
 ./infra/admin-sign-in.ps1                        # creates (or updates) it and gives you the Lists.Admin role
@@ -59,15 +59,14 @@ gh variable set ADMIN_CLIENT_ID --body <app id>  # as printed; the next deploy t
 gh workflow run deploy.yml                       # or wait for the next push to master
 ```
 
-The deploy turns the app's trust in the principal header on only after it has checked that the Container App's
-auth config is in place for that client id (`ADMIN_SIGN_IN_READY`, checked on every deploy): the first deploy creates
-the auth config with the app still ignoring the header, then deploys again with it on. A failed provisioning never
-leaves the app trusting a header anyone could send. If the auth config is ever removed by hand, deploy again (or set
-`ADMIN_CLIENT_ID` empty) so the app stops trusting it too.
+`app.bicep` gives the app `Admin__ClientId` and `Admin__TenantId`, and keeps the Container App's built-in sign-in
+(`authConfigs`) **off**: it ran as a sidecar in every replica until 2026-11-11 (owner's decision: about 100 MiB of a
+small replica, docs/load-test.md). The registration's redirect URI is still `https://<app>/.auth/login/aad/callback`,
+now answered by the app, with ID tokens on and no client secret: the ID token carries the role and is the session.
 
-Until `ADMIN_CLIENT_ID` is set, sign-in is off and the app ignores any principal header: the admin page says so and
-held updates are reviewed with `tools/lists.ps1 review|confirm|reject`. Others get the role in the Entra admin center
-(Enterprise applications, the registration, Users and groups). No client secret: the ID token carries the role.
+Until `ADMIN_CLIENT_ID` is set, sign-in is off: the admin page says so and held updates are reviewed with
+`tools/lists.ps1 review|confirm|reject`. Others get the role in the Entra admin center (Enterprise applications, the
+registration, Users and groups).
 
 ## Deploying
 

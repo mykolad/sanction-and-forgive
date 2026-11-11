@@ -30,6 +30,11 @@ param(
     [string] $SqlPassword = 'Throwaway-container-2026!',
     [string] $Database = 'conformance',
     [int] $Port = 8089,
+    # The suite's stand-in for Entra ID (the admin sign-in) listens here; the API reaches it at host.docker.internal.
+    # On Linux the containers reach the host through the bridge, so CI listens on 0.0.0.0; on Docker Desktop the
+    # loopback is enough (and asks no firewall).
+    [int] $IssuerPort = 18090,
+    [string] $IssuerBind = '127.0.0.1',
     [switch] $UpdateGolden,
     # Extra arguments for dotnet test (a filter, say).
     [string[]] $TestArguments = @()
@@ -41,6 +46,7 @@ $work = Join-Path ([IO.Path]::GetTempPath()) 'sanction-and-forgive-conformance'
 $feeds = Join-Path $work 'feeds'
 $log = Join-Path $work 'api.log'
 $name = 'sanction-and-forgive-conformance-api'
+$issuer = "http://host.docker.internal:$IssuerPort/conformance/v2.0"
 New-Item -ItemType Directory -Force $feeds | Out-Null
 
 $hostConnection = "Server=$SqlServer;Database=$Database;User ID=sa;Password=$SqlPassword;TrustServerCertificate=True"
@@ -72,7 +78,8 @@ $settings = @(
     '-e', "ConnectionStrings__Lists=$containerConnection",
     '-e', 'Lists__RefreshMinutes=0.05',
     '-e', 'RateLimiting__PerMinute=0',
-    '-e', 'Admin__SignInEnabled=true',
+    '-e', 'Admin__ClientId=conformance-admin',
+    '-e', "Admin__Authority=$issuer",
     '-e', 'Screening__StreamMaxRecords=1000'
 )
 docker run -d --name $name --add-host=host.docker.internal:host-gateway -p "${Port}:8080" @settings $Image | Out-Null
@@ -95,6 +102,8 @@ try {
     $env:CONFORMANCE_FEEDS = $feeds
     $env:CONFORMANCE_CLI_FEEDS = '/feeds'
     $env:CONFORMANCE_API_LOG = "$log;$log.err"
+    $env:CONFORMANCE_ISSUER = $issuer
+    $env:CONFORMANCE_ISSUER_BIND = $IssuerBind
     $env:CONFORMANCE_UPDATE_GOLDEN = if ($UpdateGolden) { '1' } else { '' }
     dotnet test (Join-Path $root 'tests/SanctionAndForgive.Conformance') --logger 'console;verbosity=normal' @TestArguments
     $result = $LASTEXITCODE

@@ -35,11 +35,6 @@ param allowedCidrs array = []
 @description('Client id of the admin sign-in app registration (infra/admin-sign-in.ps1). Empty: sign-in stays off.')
 param adminClientId string = ''
 
-@description('True only once the deploy workflow has checked that the built-in sign-in is in place for this client id.')
-param adminSignInReady bool = false
-
-var signInEnabled = !empty(adminClientId)
-
 // Every image serves the API on 8080 as its entry point and holds the CLI: .NET's as a DLL, a port's as /app/cli.
 var imageReference = implementation == 'dotnet' ? '${image}:${imageTag}' : '${image}:${implementation}-${imageTag}'
 var cliCommand = implementation == 'dotnet' ? [
@@ -127,11 +122,14 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
               value: string(rateLimitPerMinute)
             }
             {
-              // The app trusts the platform's principal header only once the sign-in is known to be in place: the
-              // deploy that first creates the auth config leaves this off, and a second deploy, after checking it,
-              // turns it on. A failed provisioning never leaves the app trusting a header anyone could send.
-              name: 'Admin__SignInEnabled'
-              value: string(signInEnabled && adminSignInReady)
+              // The admin sign-in, in the app (owner's decision 2026-11-11, docs/api.md): the app registration and
+              // its tenant. Empty: sign-in off, and the admin features fail closed.
+              name: 'Admin__ClientId'
+              value: adminClientId
+            }
+            {
+              name: 'Admin__TenantId'
+              value: tenant().tenantId
             }
           ])
           // Every probe waits 5 s for an answer, not the platform's default 1 s: on a small replica a probe sometimes
@@ -228,31 +226,15 @@ resource importJob 'Microsoft.App/jobs@2024-03-01' = {
   }
 }
 
-// Built-in Microsoft Entra ID sign-in, for the admin pages only: unauthenticated requests pass (screening never needs
-// sign-in) and the app decides from the principal header. No client secret: the ID token carries the app roles.
-resource auth 'Microsoft.App/containerApps/authConfigs@2024-03-01' = if (signInEnabled) {
+// The platform's built-in sign-in is off: it ran as a sidecar in every replica (about 100 MiB of a small one's 512 under
+// load, docs/load-test.md), and the app now signs administrators in itself. Deployed after the app (its parent), so
+// the new revision, which never reads the platform's principal header, is in place before the sidecar goes.
+resource auth 'Microsoft.App/containerApps/authConfigs@2024-03-01' = {
   parent: app
   name: 'current'
   properties: {
     platform: {
-      enabled: true
-    }
-    globalValidation: {
-      unauthenticatedClientAction: 'AllowAnonymous'
-    }
-    identityProviders: {
-      azureActiveDirectory: {
-        enabled: true
-        registration: {
-          clientId: adminClientId
-          openIdIssuer: '${az.environment().authentication.loginEndpoint}${tenant().tenantId}/v2.0'
-        }
-        validation: {
-          allowedAudiences: [
-            adminClientId
-          ]
-        }
-      }
+      enabled: false
     }
   }
 }

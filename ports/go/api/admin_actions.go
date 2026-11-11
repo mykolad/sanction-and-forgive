@@ -34,14 +34,14 @@ type reviewResponse struct {
 }
 
 func (a *AdminService) review(w http.ResponseWriter, r *http.Request, confirm bool) {
-	if a.refuse(w, r, true) {
+	user := a.authorize(w, r, true)
+	if user == nil {
 		return
 	}
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	user := a.Server.currentUser(r)
 	imports := &store.Imports{DB: a.DB, Now: a.now}
 	result, err := imports.Review(r.Context(), id, confirm, user.Name)
 	if err != nil {
@@ -68,7 +68,8 @@ type listSwitchResponse struct {
 }
 
 func (a *AdminService) switchList(w http.ResponseWriter, r *http.Request, off bool) {
-	if a.refuse(w, r, true) {
+	user := a.authorize(w, r, true)
+	if user == nil {
 		return
 	}
 	code := r.PathValue("code")
@@ -89,7 +90,6 @@ func (a *AdminService) switchList(w http.ResponseWriter, r *http.Request, off bo
 		http.NotFound(w, r)
 		return
 	}
-	user := a.Server.currentUser(r)
 	result, err := store.Switch(r.Context(), a.DB, code, off, reason, user.Name, a.now())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -134,7 +134,8 @@ func existsRefusal(id int) allowListRefusal {
 }
 
 func (a *AdminService) addToAllowList(w http.ResponseWriter, r *http.Request) {
-	if a.refuse(w, r, true) {
+	user := a.authorize(w, r, true)
+	if user == nil {
 		return
 	}
 	var body struct {
@@ -172,7 +173,6 @@ func (a *AdminService) addToAllowList(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errs)
 		return
 	}
-	user := a.Server.currentUser(r)
 
 	var status int
 	var response any
@@ -281,14 +281,14 @@ func (a *AdminService) checkAndStore(r *http.Request, name, reason, by string, c
 }
 
 func (a *AdminService) removeFromAllowList(w http.ResponseWriter, r *http.Request) {
-	if a.refuse(w, r, true) {
+	user := a.authorize(w, r, true)
+	if user == nil {
 		return
 	}
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	user := a.Server.currentUser(r)
 	removed, err := store.AllowListRemove(r.Context(), a.DB, id, user.Name, a.now())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

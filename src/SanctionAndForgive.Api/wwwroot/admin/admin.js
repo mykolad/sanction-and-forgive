@@ -1,4 +1,4 @@
-// The admin page: plain JS, no build step. Sign-in is Container Apps' (Microsoft Entra ID): /.auth/login/aad and
+// The admin page: plain JS, no build step. Sign-in is the app's own (Microsoft Entra ID): /.auth/login/aad and
 // /.auth/logout, and GET /api/v1/admin/me says who is signed in. Reviewing posts to /api/v1/admin/imports/{id}/...,
 // switching a list to /api/v1/admin/lists/{code}/switch-off|switch-on, with the site's own header (X-Requested-By),
 // which another site can't send. Every value goes in as text.

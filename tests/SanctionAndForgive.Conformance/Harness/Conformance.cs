@@ -108,7 +108,11 @@ public static class Suite
 
     private static readonly Lazy<Task> BaseState = new(EstablishBaseStateAsync);
 
-    public static HttpClient Http { get; } = new() { BaseAddress = new Uri((Settings.BaseUrl ?? "http://localhost") + "/"), Timeout = TimeSpan.FromMinutes(3) };
+    // Cookies only as each request sets them: a session is sent on purpose, never left over from another test.
+    public static HttpClient Http { get; } = new(new SocketsHttpHandler { UseCookies = false }) { BaseAddress = new Uri((Settings.BaseUrl ?? "http://localhost") + "/"), Timeout = TimeSpan.FromMinutes(3) };
+
+    /// <summary>The same, but a redirect is the answer, not followed: the sign-in's pages.</summary>
+    public static HttpClient NoRedirects { get; } = new(new SocketsHttpHandler { UseCookies = false, AllowAutoRedirect = false }) { BaseAddress = new Uri((Settings.BaseUrl ?? "http://localhost") + "/"), Timeout = TimeSpan.FromMinutes(1) };
 
     /// <summary>Every feed imported from the base variant and the manual list added; the API serves all of them.</summary>
     public static Task ReadyAsync() => BaseState.Value;
@@ -331,16 +335,9 @@ public static class Suite
         return [.. text.Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonDocument.Parse(line).RootElement.Clone())];
     }
 
-    /// <summary>The principal header Container Apps sends for a signed-in user (base64 JSON of the token's claims);
-    /// the implementation trusts it only with sign-in on, as it is in a conformance run.</summary>
-    public static string Principal(string name, bool admin) => Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
-    {
-        auth_typ = "aad",
-        name_typ = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
-        role_typ = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
-        claims = new[] { new { typ = "preferred_username", val = name }, new { typ = "name", val = "Conformance" } }
-            .Concat(admin ? [new { typ = "roles", val = "Lists.Admin" }] : []),
-    })));
+    /// <summary>A signed-in user's session: an ID token from the stand-in issuer (<see cref="Issuer"/>), as the sign-in
+    /// leaves it in the session cookie.</summary>
+    public static string Principal(string name, bool admin) => Issuer.Token(name, admin);
 
     /// <summary>An administrator's request, from the admin page (its header), as <see cref="AdminName"/>.</summary>
     public static Task<HttpResponseMessage> AdminAsync(HttpMethod method, string path, object? body) =>
@@ -356,7 +353,7 @@ public static class Suite
 
         if (principal is not null)
         {
-            request.Headers.Add("X-MS-CLIENT-PRINCIPAL", principal);
+            request.Headers.Add("Cookie", $"saf-admin={principal}");
         }
 
         if (fromThisSite)

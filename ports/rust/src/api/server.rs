@@ -12,10 +12,9 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use base64::Engine;
 use futures_util::StreamExt;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::json;
 use tokio::sync::{mpsc, Semaphore};
 
 use super::admin;
@@ -25,6 +24,7 @@ use super::screening::{
     list_response, stream_entry, utf16_len, validate, Errors, JsonTime, ListResponse, ScreeningRequestBody, ScreeningService,
     StreamEndLine, StreamErrorLine, StreamHeaderLine, StreamResultLine, DISCLAIMER,
 };
+use super::signin::{self, SignIn};
 use crate::lists::catalogue::{find_source, optional};
 use crate::matching::data::PAGES;
 use crate::store::db::Database;
@@ -43,7 +43,6 @@ pub struct Config {
     pub concurrent_streams: usize,
     pub max_concurrent: usize,
     pub max_waiting: usize,
-    pub sign_in_enabled: bool,
 }
 
 pub struct AppState {
@@ -52,6 +51,7 @@ pub struct AppState {
     pub screenings: Arc<ScreeningService>,
     pub loader: Arc<Loader>,
     pub db: Database,
+    pub sign_in: Arc<SignIn>,
     streams: Arc<Semaphore>,
     limiter: FixedWindow,
     gate: Arc<ScreeningGate>,
@@ -60,11 +60,18 @@ pub struct AppState {
 pub type Shared = Arc<AppState>;
 
 impl AppState {
-    pub fn new(config: Config, catalog: Arc<Catalog>, screenings: Arc<ScreeningService>, loader: Arc<Loader>, db: Database) -> Self {
+    pub fn new(
+        config: Config,
+        catalog: Arc<Catalog>,
+        screenings: Arc<ScreeningService>,
+        loader: Arc<Loader>,
+        db: Database,
+        sign_in: Arc<SignIn>,
+    ) -> Self {
         let streams = Arc::new(Semaphore::new(config.concurrent_streams.max(1)));
         let limiter = FixedWindow { limit: config.rate_limit_per_minute, window: Mutex::new((Instant::now(), HashMap::new())) };
         let gate = Arc::new(ScreeningGate::new(config.max_concurrent, config.max_waiting));
-        AppState { config, catalog, screenings, loader, db, streams, limiter, gate }
+        AppState { config, catalog, screenings, loader, db, sign_in, streams, limiter, gate }
     }
 }
 
@@ -111,6 +118,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/v1/screenings", post(screen))
         .route("/api/v1/screenings/stream", post(stream))
         .merge(admin::routes())
+        .merge(signin::routes())
         .fallback(page)
         .with_state(state)
 }
@@ -576,41 +584,6 @@ pub const REQUEST_HEADER_VALUE: &str = "sanction-and-forgive-admin";
 pub struct AdminUser {
     pub name: String,
     pub is_admin: bool,
-}
-
-/// Reads X-MS-CLIENT-PRINCIPAL (base64 JSON claims; the platform doesn't let clients set it), only when sign-in is on.
-pub fn read_principal(enabled: bool, headers: &HeaderMap) -> Option<AdminUser> {
-    let values: Vec<&HeaderValue> = headers.get_all("x-ms-client-principal").iter().collect();
-    if !enabled || values.len() != 1 || values[0].is_empty() || values[0].len() >= 16384 {
-        return None;
-    }
-    let decoded = base64::engine::general_purpose::STANDARD.decode(values[0].as_bytes()).ok()?;
-    let principal: Value = serde_json::from_slice(&decoded).ok()?;
-    let claims = principal.get("claims")?.as_array()?;
-    let role_type = principal.get("role_typ").and_then(Value::as_str);
-    let mut name_types: Vec<&str> = vec!["preferred_username", "name", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"];
-    if let Some(t) = principal.get("name_typ").and_then(Value::as_str) {
-        name_types.insert(0, t);
-    }
-    let role_types = ["roles", "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"];
-    let claim = |c: &Value, key: &str| c.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
-    let mut user = AdminUser { name: "signed-in user".to_string(), is_admin: false };
-    for c in claims {
-        let (t, v) = (claim(c, "typ"), claim(c, "val"));
-        if (role_type == Some(t.as_str()) || role_types.contains(&t.as_str())) && v == ADMIN_ROLE {
-            user.is_admin = true;
-        }
-    }
-    for name_type in name_types {
-        if let Some(c) = claims.iter().find(|c| claim(c, "typ") == name_type) {
-            let v = claim(c, "val");
-            if !v.is_empty() {
-                user.name = v;
-                return Some(user);
-            }
-        }
-    }
-    Some(user)
 }
 
 pub fn from_this_site(headers: &HeaderMap) -> bool {

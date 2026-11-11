@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
@@ -11,8 +10,8 @@ using SanctionAndForgive.Matching;
 
 namespace SanctionAndForgive.Tests.Api;
 
-// /api/v1/admin and /admin: who is signed in (Container Apps' Entra sign-in, through its principal header), and
-// reviewing held updates, which needs the Lists.Admin role, the site's own request header, and sign-in turned on.
+// /api/v1/admin and /admin: who is signed in (the session cookie AdminSignIn accepted), and reviewing held updates,
+// which needs the Lists.Admin role, the site's own request header, and sign-in turned on.
 public sealed class AdminTests : IDisposable
 {
     private readonly ApiFactory parent = new();
@@ -24,19 +23,19 @@ public sealed class AdminTests : IDisposable
 
     private HttpClient Client(bool signInEnabled) => parent.WithWebHostBuilder(builder =>
     {
-        builder.UseSetting("Admin:SignInEnabled", signInEnabled ? "true" : "false");
-        builder.ConfigureTestServices(services => services.AddSingleton<IImportReview>(review).AddSingleton<IAllowListAdmin>(allowList).AddSingleton<IListSwitch>(switches));
+        if (signInEnabled)
+        {
+            builder.UseSetting("Admin:ClientId", TestSignIn.ClientId).UseSetting("Admin:Authority", TestSignIn.Authority);
+        }
+
+        builder.ConfigureTestServices(services => services.AddSingleton<IImportReview>(review).AddSingleton<IAllowListAdmin>(allowList).AddSingleton<IListSwitch>(switches)
+            .AddSingleton(TestSignIn.Metadata()));
     }).CreateClient();
 
-    /// <summary>The header Container Apps sends for a signed-in Entra user: base64 JSON of the token's claims.</summary>
-    private static string Principal(string name, params string[] roles) => Convert.ToBase64String(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
-    {
-        auth_typ = "aad",
-        name_typ = "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
-        role_typ = "http://schemas.microsoft.com/ws/2008/06/identity/claims/role",
-        claims = new[] { new { typ = "preferred_username", val = name }, new { typ = "name", val = "Owner" } }
-            .Concat(roles.Select(role => new { typ = "roles", val = role })),
-    })));
+    private static void SignedInAs(HttpRequestMessage request, string session) => request.Headers.Add("Cookie", $"{AdminSignIn.SessionCookie}={session}");
+
+    /// <summary>A signed-in user's session: their ID token, as the sign-in leaves it in the session cookie.</summary>
+    private static string Principal(string name, params string[] roles) => TestSignIn.Token(name, roles);
 
     private static async Task<HttpResponseMessage> PostAsync(HttpClient client, string path, string? principal, bool fromThisSite) =>
         await SendAsync(client, HttpMethod.Post, path, principal, fromThisSite, body: null);
@@ -51,7 +50,7 @@ public sealed class AdminTests : IDisposable
 
         if (principal is not null)
         {
-            request.Headers.Add(AdminAccess.PrincipalHeader, principal);
+            SignedInAs(request, principal);
         }
 
         if (fromThisSite)
@@ -69,7 +68,7 @@ public sealed class AdminTests : IDisposable
 
         var anonymous = await client.GetFromJsonAsync<JsonElement>("/api/v1/admin/me");
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/me");
-        request.Headers.Add(AdminAccess.PrincipalHeader, Principal("owner@example.invalid", AdminAccess.Role));
+        SignedInAs(request, Principal("owner@example.invalid", AdminAccess.Role));
         using var response = await client.SendAsync(request);
         var admin = await response.Content.ReadFromJsonAsync<JsonElement>();
 
@@ -79,11 +78,11 @@ public sealed class AdminTests : IDisposable
     }
 
     [Fact]
-    public async Task WithSignInOff_APrincipalHeaderIsIgnored_AndReviewingIs404()
+    public async Task WithSignInOff_ASessionIsIgnored_AndReviewingIs404()
     {
         using var client = Client(signInEnabled: false);
         using var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/admin/me");
-        request.Headers.Add(AdminAccess.PrincipalHeader, Principal("forged@example.invalid", AdminAccess.Role));
+        SignedInAs(request, Principal("forged@example.invalid", AdminAccess.Role));
 
         using var me = await client.SendAsync(request);
         using var confirm = await PostAsync(client, "/api/v1/admin/imports/7/confirm", Principal("forged@example.invalid", AdminAccess.Role), fromThisSite: true);

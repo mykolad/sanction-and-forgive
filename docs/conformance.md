@@ -57,7 +57,8 @@ command).
 | `ConnectionStrings__Lists` | SQL auth to the test database | Production uses the app's user-assigned managed identity (`Authentication=Active Directory Managed Identity;User Id=<client id>`): an implementation must support that too |
 | `Lists__RefreshMinutes` | `0.05` | How often the API reloads the lists from the database; a fraction is allowed |
 | `RateLimiting__PerMinute` | `0` | Screenings per client IP a minute; 0 is off |
-| `Admin__SignInEnabled` | `true` | Trust Container Apps' `X-MS-CLIENT-PRINCIPAL` header (only then) |
+| `Admin__ClientId`, `Admin__Authority` | `conformance-admin`, the suite's stand-in issuer (`Harness/Issuer.cs`, served by the suite on `-IssuerPort` 18090, reached at `host.docker.internal`) | The admin sign-in (docs/api.md, "Admin"); production sets `Admin__TenantId` instead of an authority |
+| `Screening__MaxConcurrent`, `Screening__MaxWaiting` | defaults (4, 32) | Single screenings at once and waiting; beyond them 503 `busy` |
 | `Screening__StreamMaxRecords` | `1000` | A stream's record limit (50,000 by default) |
 | `Screening__StreamMaxSeconds`, `Screening__ConcurrentStreams`, `App__Version`, `App__Revision`, `LISTS_EU_TOKEN` | defaults | As in CLAUDE.md |
 

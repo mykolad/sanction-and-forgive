@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -75,12 +74,12 @@ func main() {
 		ConcurrentStreams: intSetting("Screening__ConcurrentStreams", 1),
 		MaxConcurrent:     intSetting("Screening__MaxConcurrent", 4),
 		MaxWaiting:        intSetting("Screening__MaxWaiting", 32),
-		SignInEnabled:     strings.EqualFold(os.Getenv("Admin__SignInEnabled"), "true"),
 	}
 
 	catalog := api.NewCatalog()
 	loader := api.NewLoader(db, catalog, logger)
 	server := &api.Server{Config: config, Catalog: catalog, Logger: logger,
+		SignIn:     api.NewSignIn(os.Getenv("Admin__ClientId"), os.Getenv("Admin__TenantId"), os.Getenv("Admin__Authority"), logger),
 		Screenings: &api.ScreeningService{Catalog: catalog, Screener: matching.NewScreener(matching.DefaultOptions()), Logger: logger, Now: time.Now}}
 	server.Admin = &api.AdminService{Server: server, DB: db, Loader: loader}
 

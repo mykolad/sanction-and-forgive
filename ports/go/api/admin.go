@@ -43,7 +43,7 @@ type adminMeResponse struct {
 }
 
 func (a *AdminService) me(w http.ResponseWriter, r *http.Request) {
-	enabled := a.Server.Config.SignInEnabled
+	enabled := a.Server.SignIn.Enabled()
 	user := a.Server.currentUser(r)
 	response := adminMeResponse{Enabled: enabled, SignedIn: user != nil}
 	if user != nil {
@@ -55,12 +55,13 @@ func (a *AdminService) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-// refuse writes why a request may not go on, and says whether it did: sign-in off (404), not signed in (401), without
-// the role (403), or a change without the site's own header (400).
-func (a *AdminService) refuse(w http.ResponseWriter, r *http.Request, change bool) bool {
+// authorize is the administrator a request is from, its session checked once for the whole request; or nil, with why
+// it may not go on written: sign-in off (404), not signed in (401), without the role (403), or a change without the
+// site's own header (400).
+func (a *AdminService) authorize(w http.ResponseWriter, r *http.Request, change bool) *AdminUser {
 	user := a.Server.currentUser(r)
 	switch {
-	case !a.Server.Config.SignInEnabled:
+	case !a.Server.SignIn.Enabled():
 		http.NotFound(w, r)
 	case user == nil:
 		w.WriteHeader(http.StatusUnauthorized)
@@ -69,9 +70,9 @@ func (a *AdminService) refuse(w http.ResponseWriter, r *http.Request, change boo
 	case change && !fromThisSite(r):
 		badRequest(w, map[string][]string{requestHeader: {"Send this request from the admin page."}})
 	default:
-		return false
+		return user
 	}
-	return true
+	return nil
 }
 
 type allowListEntryResponse struct {
@@ -85,7 +86,7 @@ type allowListEntryResponse struct {
 }
 
 func (a *AdminService) allowList(w http.ResponseWriter, r *http.Request) {
-	if a.refuse(w, r, false) {
+	if a.authorize(w, r, false) == nil {
 		return
 	}
 	records, err := store.AllowListHistory(r.Context(), a.DB)
