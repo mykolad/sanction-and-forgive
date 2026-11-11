@@ -82,9 +82,32 @@ Rust #42 at 0.25 vCPU (18:45, at 4/s). Each time:
 Memory doesn't explain it alone (one stall was at 470 MiB of 1 GiB). The runs that stalled were on revisions a few
 minutes old; the clean re-runs on the same revisions about ten minutes old, but some first runs on fresh revisions
 were clean too. Worth a look before a production size change: a run with the sign-in off (the sidecar gone), or the
-sidecar's own logs. Not investigated further here.
+sidecar's own logs.
 
 Production went back to .NET at 0.5 vCPU / 1 GiB with the rate limit at 120 at 19:19 UTC on 2026-11-10.
+
+**With the sign-in off (2026-11-10, 20:20-21:22 UTC).** Rust #42 at 0.25 vCPU / 0.5 GiB, the platform's sign-in
+switched off (no `http-auth` sidecar; the app first deployed with `Admin__SignInEnabled` false), three runs, each on a
+freshly restarted replica:
+
+| Run | Screenings | Failed | Sustained | p95 at 48/s | Then |
+|---|---|---|---|---|---|
+| 1 (20:23) | 22,754 | 0 | **48/s** | 943 ms | 64/s: p95 2.48 s |
+| 2 (20:50) | 23,323 | 0 | **48/s** | 36 ms | 64/s: p95 2.08 s |
+| 3 (21:15) | 566 | 6 | 4/s | | stalled at 6/s; the platform started a second replica of the same revision (21:20:56) and requests waited up to 60 s |
+
+So the sidecar isn't the cause: a run stalled without it. What every stall, with the sign-in on or off, has in common
+is a probe that timed out after the platform's default 1 s while the app was nearly idle; the readiness probe timed out
+73-77 times in each of the clean runs too. With one replica, three missed readiness probes in a row take it out of
+service and leave the ingress nothing to send requests to. The next step, below: give the probes 5 s.
+
+### Probes: 5 s to answer (2026-11-11)
+
+`infra/app.bicep`'s probes waited the platform's default 1 s for `/healthz` and `/readyz`. Now each waits 5 s
+(`timeoutSeconds`), and a ready replica is taken out of service after six missed readiness probes in a row (a minute)
+rather than three; liveness and startup keep their thresholds. Becoming ready still takes a single answer, so a new
+revision isn't slower to take traffic. The check: the same three fresh-replica runs of Rust at 0.25 vCPU / 0.5 GiB, the
+sign-in on. Results to follow in this section.
 
 ### .NET and Go, one after the other (2026-11-10)
 
