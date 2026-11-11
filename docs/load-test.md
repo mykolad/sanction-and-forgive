@@ -133,6 +133,33 @@ So the probe change **didn't stop the stall**:
 The 5 s probes stay: they cost nothing and keep a slow probe from taking the only replica out of service. The stall
 is the platform's (the Consumption plan's request path), and what to do about it is the owner's decision.
 
+### Two small replicas (2026-11-11)
+
+The owner asked (2026-11-11) for a run on **two** Rust replicas at 0.25 vCPU / 0.5 GiB: together the same vCPU and memory,
+and so the same Consumption price, as one 0.5 vCPU / 1 GiB replica. `APP_REPLICAS=2` (#46) sets both `minReplicas` and
+`maxReplicas`. Rust #42, the sign-in on, the 5 s probes, three runs on fresh replicas (13:21-14:49 UTC); steps up to
+128 a second, with 80 added from run 2.
+
+| Run | Screenings | Failed | Sustained | p95 there (p95 at 48/s) | Then | Probe timeouts (5 s) |
+|---|---|---|---|---|---|---|
+| 1 (13:21, new revision) | 32,187 | 0 | **64/s** | 94 ms (30 ms) | 96/s: p95 2.48 s | none |
+| 2 (13:50, restarted) | 32,034 | 0 | **64/s** | 553 ms (52 ms) | 80/s: p95 2.08 s | 28 readiness, one replica, 13:58-14:14 |
+| 3 (14:18, restarted) | 55,567 | 0 | **96/s** | 1.86 s (30 ms; 80/s: 264 ms) | 128/s: p95 3.84 s | 12 liveness, one replica, 14:29-14:37 |
+
+Each replica: up to 0.21-0.25 vCPU (the highest 1-minute values, so at its limit at the top steps), 370-494 MiB
+working set of the 512 MiB (a little more than one small replica's 301-448 MiB), no restarts. The ingress split the
+requests evenly (run 1: 16,205 and 16,204).
+
+- **No stall in the three runs**, against one in three on one small replica this morning (and in yesterday's three runs with the sign-in off). Three runs
+  are too few to call it fixed; the platform still timed out probes at 5 s, now under load with the replicas at their
+  CPU limit, but no request failed and no replica restarted or left service.
+- **Capacity: 64-96 a second**, against 48 on one small replica and 96 on one 0.5 vCPU replica (#42): at the same
+  price, two small replicas sustained no more than one large one, and in two runs of three less. Each small replica
+  carries its own copy of the indexes and its own sign-in sidecar.
+- Memory is the tighter limit: 494 MiB of 512 at the top steps. A list added later would need the larger size.
+
+Production went back to .NET at 0.5 vCPU / 1 GiB, one replica, the rate limit at 120, at 14:52 UTC.
+
 ### .NET and Go, one after the other (2026-11-10)
 
 The owner's experiment (2026-11-09, docs/conformance.md): the same application in .NET and in Go (`ports/go`, after
