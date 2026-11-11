@@ -7,6 +7,7 @@ use std::time::Duration;
 use sanction_and_forgive::api::catalog::{Catalog, Loader};
 use sanction_and_forgive::api::screening::ScreeningService;
 use sanction_and_forgive::api::server::{router, AppState, Config};
+use sanction_and_forgive::api::signin::SignIn;
 use sanction_and_forgive::log::Logger;
 use sanction_and_forgive::matching::{Options, Screener};
 use sanction_and_forgive::store::db::Database;
@@ -56,13 +57,14 @@ async fn serve() {
         concurrent_streams: number("Screening__ConcurrentStreams", 1),
         max_concurrent: number("Screening__MaxConcurrent", 4),
         max_waiting: number("Screening__MaxWaiting", 32),
-        sign_in_enabled: setting("Admin__SignInEnabled", "").eq_ignore_ascii_case("true"),
     };
 
     let catalog = Arc::new(Catalog::default());
     let loader = Arc::new(Loader::new(db.clone(), catalog.clone(), logger));
     let screenings = Arc::new(ScreeningService { catalog: catalog.clone(), screener: Screener::new(Options::default()), logger });
-    let state = Arc::new(AppState::new(config, catalog, screenings, loader.clone(), db));
+    let sign_in =
+        Arc::new(SignIn::new(setting("Admin__ClientId", ""), setting("Admin__TenantId", ""), setting("Admin__Authority", ""), logger));
+    let state = Arc::new(AppState::new(config, catalog, screenings, loader.clone(), db, sign_in));
     tokio::spawn(loader.run_refresh(Duration::from_secs_f64(refresh * 60.0)));
 
     let port = setting("PORT", "8080");

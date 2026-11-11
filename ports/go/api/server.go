@@ -5,7 +5,6 @@ import (
 	"bufio"
 	"bytes"
 	"embed"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -38,7 +37,6 @@ type Config struct {
 	ConcurrentStreams int
 	MaxConcurrent     int
 	MaxWaiting        int
-	SignInEnabled     bool
 }
 
 // Server serves the API and the pages.
@@ -47,6 +45,7 @@ type Server struct {
 	Catalog    *Catalog
 	Screenings *ScreeningService
 	Admin      *AdminService
+	SignIn     *SignIn
 	Logger     *slog.Logger
 	streams    chan struct{}
 	limiter    *fixedWindow
@@ -71,6 +70,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/lists/{code}/browse", s.browse)
 	mux.HandleFunc("POST /api/v1/screenings", s.screen)
 	mux.HandleFunc("POST /api/v1/screenings/stream", s.stream)
+	mux.HandleFunc("GET "+signInStart, s.signInStart)
+	mux.HandleFunc("POST "+signInCallback, s.signInCallback)
+	mux.HandleFunc("GET "+signOutPage, s.signOut)
 	s.Admin.routes(mux)
 	pages, _ := fs.Sub(wwwroot, "wwwroot")
 	mux.Handle("/", http.FileServerFS(pages))
@@ -410,7 +412,6 @@ func itoa(v int) string { return strconv.Itoa(v) }
 
 const (
 	adminRole          = "Lists.Admin"
-	principalHeader    = "X-MS-CLIENT-PRINCIPAL"
 	requestHeader      = "X-Requested-By"
 	requestHeaderValue = "sanction-and-forgive-admin"
 )
@@ -421,58 +422,16 @@ type AdminUser struct {
 	IsAdmin bool
 }
 
-// currentUser reads X-MS-CLIENT-PRINCIPAL (base64 JSON claims; the platform doesn't let clients set it), only when
-// sign-in is on.
+// currentUser is the administrator whose session cookie (an ID token, signin.go) is valid; nobody with sign-in off.
 func (s *Server) currentUser(r *http.Request) *AdminUser {
-	return readPrincipal(s.Config.SignInEnabled, r)
-}
-
-func readPrincipal(enabled bool, r *http.Request) *AdminUser {
-	values := r.Header.Values(principalHeader)
-	if !enabled || len(values) != 1 || len(values[0]) == 0 || len(values[0]) >= 16384 {
-		return nil
-	}
-	decoded, err := base64.StdEncoding.DecodeString(values[0])
+	cookie, err := r.Cookie(sessionCookie)
 	if err != nil {
 		return nil
 	}
-	var principal struct {
-		RoleType *string `json:"role_typ"`
-		NameType *string `json:"name_typ"`
-		Claims   []struct {
-			Type  *string `json:"typ"`
-			Value *string `json:"val"`
-		} `json:"claims"`
+	if signedIn := s.SignIn.validate(r.Context(), cookie.Value, ""); signedIn != nil {
+		return &signedIn.User
 	}
-	if err := json.Unmarshal(decoded, &principal); err != nil || principal.Claims == nil {
-		return nil
-	}
-	roleTypes := []string{"roles", "http://schemas.microsoft.com/ws/2008/06/identity/claims/role"}
-	nameTypes := []string{"preferred_username", "name", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"}
-	if principal.NameType != nil {
-		nameTypes = append([]string{*principal.NameType}, nameTypes...)
-	}
-	user := &AdminUser{Name: "signed-in user"}
-	for _, claim := range principal.Claims {
-		t, v := deref(claim.Type), deref(claim.Value)
-		if (principal.RoleType != nil && t == *principal.RoleType) || contains(roleTypes, t) {
-			if v == adminRole {
-				user.IsAdmin = true
-			}
-		}
-	}
-	for _, nameType := range nameTypes {
-		for _, claim := range principal.Claims {
-			if deref(claim.Type) == nameType {
-				if v := deref(claim.Value); v != "" {
-					user.Name = v
-					return user
-				}
-				break
-			}
-		}
-	}
-	return user
+	return nil
 }
 
 func fromThisSite(r *http.Request) bool { return r.Header.Get(requestHeader) == requestHeaderValue }

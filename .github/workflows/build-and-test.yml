@@ -220,4 +220,4 @@ jobs:
         shell: pwsh
         run: >-
           ./tests/conformance/run.ps1 -Build -Image 'conformance-${{ matrix.implementation }}' -Dockerfile '${{ matrix.dockerfile }}'
-          -CliCommand '${{ matrix.cli }}' -SqlServer 'localhost,1433' -ContainerSqlServer 'host.docker.internal,1433'
+          -CliCommand '${{ matrix.cli }}' -SqlServer 'localhost,1433' -ContainerSqlServer 'host.docker.internal,1433' -IssuerBind '0.0.0.0'

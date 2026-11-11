@@ -43,7 +43,7 @@ type adminMeResponse struct {
 }
 
 func (a *AdminService) me(w http.ResponseWriter, r *http.Request) {
-	enabled := a.Server.Config.SignInEnabled
+	enabled := a.Server.SignIn.Enabled()
 	user := a.Server.currentUser(r)
 	response := adminMeResponse{Enabled: enabled, SignedIn: user != nil}
 	if user != nil {
@@ -60,7 +60,7 @@ func (a *AdminService) me(w http.ResponseWriter, r *http.Request) {
 func (a *AdminService) refuse(w http.ResponseWriter, r *http.Request, change bool) bool {
 	user := a.Server.currentUser(r)
 	switch {
-	case !a.Server.Config.SignInEnabled:
+	case !a.Server.SignIn.Enabled():
 		http.NotFound(w, r)
 	case user == nil:
 		w.WriteHeader(http.StatusUnauthorized)

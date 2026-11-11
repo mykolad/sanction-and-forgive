@@ -8,13 +8,13 @@ account that may create app registrations. It's safe to run again: it finds the 
 what's missing.
 
 It creates:
-- an app registration for this tenant only, with the redirect URI of the deployed app's built-in sign-in and ID tokens
+- an app registration for this tenant only, with the redirect URI of the deployed app's sign-in and ID tokens
   on (no client secret: the ID token carries the role);
 - the app role Lists.Admin, which the admin page requires for reviewing updates;
 - its service principal with "assignment required", so only accounts given the role can sign in at all;
 - the role, assigned to you.
 
-Then set the repository variable it prints; the next deploy turns sign-in on (infra/app.bicep).
+Then set the repository variable it prints; the next deploy turns sign-in on (infra/app.bicep, docs/api.md).
 
 .EXAMPLE
 ./infra/admin-sign-in.ps1

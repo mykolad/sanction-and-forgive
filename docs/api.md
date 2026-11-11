@@ -194,10 +194,29 @@ official record). A list that is Not checked can still be browsed; its `state` s
 
 ## Admin: `/api/v1/admin` and `/admin`
 
-For the demo's administrators. Sign-in is Container Apps' built-in Microsoft Entra ID sign-in (`/.auth/login/aad`,
-`/.auth/logout`), set up by `infra/admin-sign-in.ps1`; screening never needs it. The app reads the signed-in user from
-the platform's `X-MS-CLIENT-PRINCIPAL` header, which clients can't set, and only where the deployment turned sign-in
-on (`Admin:SignInEnabled`): otherwise nobody is signed in, whatever a request says.
+For the demo's administrators. Screening never needs sign-in. Sign-in is the app's own (owner's decision, 2026-11-11:
+the platform's built-in sign-in ran as a sidecar in every replica), OpenID Connect with Microsoft Entra ID and the app
+registration `infra/admin-sign-in.ps1` sets up. Every implementation does the same:
+
+- **Settings:** `Admin:ClientId` (the app registration) and `Admin:TenantId` (Entra's issuer
+  `https://login.microsoftonline.com/{tenant}/v2.0`), or `Admin:Authority` for any OpenID Connect issuer (the conformance
+  suite's stand-in). Without a client id and an issuer, sign-in is off: nobody is signed in, the sign-in pages are 404.
+- **`GET /.auth/login/aad?post_login_redirect_uri=/admin`:** 302 to the issuer's `authorization_endpoint` (from
+  `{authority}/.well-known/openid-configuration`) with `client_id`, `response_type=id_token`, `response_mode=form_post`,
+  `redirect_uri` = this site's `/.auth/login/aad/callback`, `scope=openid profile`, and a new random `state` and
+  `nonce`, kept with the return path in the cookie `saf-sign-in` (HttpOnly, Secure, SameSite=None: the answer is a
+  POST from the issuer's site; Path `/.auth/login/aad`, 10 minutes). 503 if the issuer can't be reached.
+- **`POST /.auth/login/aad/callback`** (the form the issuer posts, `id_token` and `state`): the state must be the
+  cookie's, and the token valid (below) with the cookie's nonce. Then the **token itself is the session**: the cookie
+  `saf-admin` (HttpOnly, Secure, SameSite=Lax, Path `/`, until the token expires, about an hour) and 302 to the return
+  path. Otherwise 400 and no session; `error` from the issuer (an account without the role) is 403.
+- **A valid token:** RS256, signed by a key in the issuer's `jwks_uri` (read again, at most every five minutes, when a
+  token names a key it doesn't know), `iss` the metadata's issuer, `aud` the client id, `exp` not passed (five
+  minutes' leeway). The name is `preferred_username` (else `name`), an administrator holds `Lists.Admin` in `roles`.
+  Every admin request checks the session cookie this way, so nothing is kept on the server and any replica can check it.
+- **`GET /.auth/logout?post_logout_redirect_uri=/admin`:** clears `saf-admin`, 302 to the return path.
+- A return path is only ever a path on this site (`/…`, never `//host` or `/\host`); anything else returns to `/admin`.
+- The platform's `X-MS-CLIENT-PRINCIPAL` header means nothing: a request saying who it is counts for nothing.
 
 - `GET /api/v1/admin/me`: `enabled` (sign-in set up), `signedIn`, `name`, `isAdmin` (holds the `Lists.Admin` role),
   `signInUrl`, `signOutUrl`.
