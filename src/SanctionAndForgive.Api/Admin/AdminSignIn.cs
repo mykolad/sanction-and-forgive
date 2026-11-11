@@ -73,9 +73,12 @@ public sealed partial class AdminSignIn(SignInSettings settings, IConfigurationM
 
     public bool Enabled => settings.Enabled;
 
-    /// <summary>Only a path on this site: never another site's address (<c>//host</c>, <c>/\host</c>).</summary>
+    /// <summary>Only a path on this site: never another site's address (<c>//host</c>, <c>/\host</c>), nor one with a
+    /// control character (a browser drops a tab, so <c>/&#9;/host</c> would be <c>//host</c>).</summary>
     public static string LocalReturn(string? path) =>
-        path is { Length: > 0 and <= 512 } && path[0] == '/' && (path.Length == 1 || (path[1] != '/' && path[1] != '\\')) ? path : DefaultReturn;
+        path is { Length: > 0 and <= 512 } && path[0] == '/' && (path.Length == 1 || (path[1] != '/' && path[1] != '\\')) && !path.Any(char.IsControl)
+            ? path
+            : DefaultReturn;
 
     /// <summary>The issuer's sign-in address for this sign-in, with a new state and nonce, and the cookie that keeps
     /// them; null if the issuer can't be reached.</summary>

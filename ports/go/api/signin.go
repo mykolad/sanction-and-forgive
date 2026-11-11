@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -34,6 +35,7 @@ const (
 	maxToken       = 4000
 	metadataTTL    = 24 * time.Hour
 	keysRefreshGap = 5 * time.Minute
+	failedRetryGap = time.Minute
 )
 
 // SignIn is Admin:ClientId and Admin:TenantId (or Admin:Authority, any OpenID Connect issuer); on only with both.
@@ -46,8 +48,9 @@ type SignIn struct {
 
 	mu        sync.Mutex
 	meta      *issuerMetadata
-	fetched   time.Time
-	refreshed time.Time
+	fetched   time.Time // the last fetch that worked
+	attempted time.Time // the last fetch tried
+	failed    error     // why the last fetch tried didn't work, if it didn't
 }
 
 type issuerMetadata struct {
@@ -62,23 +65,47 @@ func NewSignIn(clientID, tenantID, authority string, logger *slog.Logger) *SignI
 	if authority == "" && tenantID != "" {
 		authority = "https://login.microsoftonline.com/" + tenantID + "/v2.0"
 	}
-	return &SignIn{ClientID: clientID, Authority: authority, Logger: logger, Now: time.Now, Client: &http.Client{Timeout: 30 * time.Second}}
+	return &SignIn{ClientID: clientID, Authority: authority, Logger: logger, Now: time.Now, Client: &http.Client{Timeout: 10 * time.Second}}
 }
 
 func (s *SignIn) Enabled() bool { return s != nil && s.ClientID != "" && s.Authority != "" }
 
 // metadata is the issuer's endpoints and keys, cached for a day; force reads them again (a token named a key it
-// doesn't know), at most every five minutes.
+// doesn't know), at most every five minutes. After a fetch that failed, the next is tried only a minute later: in an
+// outage the admin requests get the keys it had (or none) at once, instead of each waiting for another fetch.
 func (s *SignIn) metadata(ctx context.Context, force bool) (*issuerMetadata, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.Now()
-	if s.meta != nil && now.Sub(s.fetched) < metadataTTL && (!force || now.Sub(s.refreshed) < keysRefreshGap) {
+	if s.meta != nil && now.Sub(s.fetched) < metadataTTL && (!force || now.Sub(s.fetched) < keysRefreshGap) {
 		return s.meta, nil
 	}
+	if s.failed != nil && now.Sub(s.attempted) < failedRetryGap {
+		return s.staleOr(s.failed)
+	}
+	s.attempted = now
+	meta, err := s.fetch(ctx)
+	if err != nil {
+		s.failed = err
+		s.Logger.Error("The sign-in issuer's metadata couldn't be read", "error", err.Error())
+		return s.staleOr(err)
+	}
+	s.meta, s.fetched, s.failed = meta, now, nil
+	return s.meta, nil
+}
+
+// staleOr keeps the keys it had when the issuer can't be reached.
+func (s *SignIn) staleOr(err error) (*issuerMetadata, error) {
+	if s.meta != nil {
+		return s.meta, nil
+	}
+	return nil, err
+}
+
+func (s *SignIn) fetch(ctx context.Context) (*issuerMetadata, error) {
 	var meta issuerMetadata
 	if err := s.getJSON(ctx, strings.TrimRight(s.Authority, "/")+"/.well-known/openid-configuration", &meta); err != nil {
-		return s.stale(err)
+		return nil, err
 	}
 	var set struct {
 		Keys []struct {
@@ -90,7 +117,7 @@ func (s *SignIn) metadata(ctx context.Context, force bool) (*issuerMetadata, err
 		} `json:"keys"`
 	}
 	if err := s.getJSON(ctx, meta.JwksURI, &set); err != nil {
-		return s.stale(err)
+		return nil, err
 	}
 	meta.keys = map[string]*rsa.PublicKey{}
 	for _, key := range set.Keys {
@@ -104,17 +131,7 @@ func (s *SignIn) metadata(ctx context.Context, force bool) (*issuerMetadata, err
 		}
 		meta.keys[key.Kid] = &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(new(big.Int).SetBytes(e).Int64())}
 	}
-	s.meta, s.fetched, s.refreshed = &meta, now, now
-	return s.meta, nil
-}
-
-// stale keeps the keys it had when the issuer can't be reached.
-func (s *SignIn) stale(err error) (*issuerMetadata, error) {
-	s.Logger.Error("The sign-in issuer's metadata couldn't be read", "error", err.Error())
-	if s.meta != nil {
-		return s.meta, nil
-	}
-	return nil, err
+	return &meta, nil
 }
 
 func (s *SignIn) getJSON(ctx context.Context, address string, into any) error {
@@ -197,12 +214,18 @@ func (s *SignIn) validate(ctx context.Context, token, nonce string) *session {
 	return &session{User: user, Expires: expires.Time}
 }
 
-// localReturn is a path on this site only: never another site's address (//host, /\host).
+// localReturn is a path on this site only: never another site's address (//host, /\host), nor one with a control
+// character (a browser drops a tab, so "/\t/host" would be "//host").
 func localReturn(path string) string {
-	if len(path) > 0 && len(path) <= 512 && path[0] == '/' && (len(path) == 1 || (path[1] != '/' && path[1] != '\\')) {
-		return path
+	if len(path) == 0 || len(path) > 512 || path[0] != '/' || (len(path) > 1 && (path[1] == '/' || path[1] == '\\')) {
+		return defaultReturn
 	}
-	return defaultReturn
+	for _, r := range path {
+		if unicode.IsControl(r) {
+			return defaultReturn
+		}
+	}
+	return path
 }
 
 func randomToken() string {

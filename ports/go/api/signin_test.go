@@ -81,9 +81,35 @@ func TestSignIn_AcceptsOnlyTheIssuersTokensForThisApp(t *testing.T) {
 }
 
 func TestLocalReturn_StaysOnThisSite(t *testing.T) {
-	for path, want := range map[string]string{"/allow-list": "/allow-list", "//elsewhere.example": "/admin", "/\\elsewhere.example": "/admin", "https://elsewhere.example/": "/admin", "": "/admin"} {
+	for path, want := range map[string]string{"/allow-list": "/allow-list", "//elsewhere.example": "/admin", "/\\elsewhere.example": "/admin", "https://elsewhere.example/": "/admin", "": "/admin", "/\t/elsewhere.example": "/admin"} {
 		if got := localReturn(path); got != want {
 			t.Errorf("%q: %q, want %q", path, got, want)
 		}
+	}
+}
+
+func TestSignIn_AfterAFailedFetch_WaitsBeforeTryingAgain(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	now := time.Now()
+	signIn := NewSignIn("client", "", server.URL+"/tenant/v2.0", slog.New(slog.DiscardHandler))
+	signIn.Now = func() time.Time { return now }
+
+	for range 3 {
+		if _, err := signIn.metadata(context.Background(), false); err == nil {
+			t.Fatal("no metadata, yet no error")
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("%d fetches within a minute of a failed one, want 1", calls)
+	}
+	now = now.Add(2 * time.Minute)
+	signIn.metadata(context.Background(), false) //nolint:errcheck // only the fetch counts
+	if calls != 2 {
+		t.Fatalf("%d fetches after the minute, want 2", calls)
 	}
 }

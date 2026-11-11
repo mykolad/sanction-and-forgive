@@ -30,6 +30,7 @@ const SKEW_SECONDS: u64 = 300;
 const MAX_TOKEN: usize = 4000;
 const METADATA_TTL: Duration = Duration::from_secs(24 * 3600);
 const KEYS_REFRESH_GAP: Duration = Duration::from_secs(300);
+const FAILED_RETRY_GAP: Duration = Duration::from_secs(60);
 
 /// Admin:ClientId and Admin:TenantId (or Admin:Authority, any OpenID Connect issuer); on only with both.
 pub struct SignIn {
@@ -37,7 +38,14 @@ pub struct SignIn {
     authority: String,
     http: reqwest::Client,
     logger: Logger,
-    cache: Mutex<Option<Arc<Metadata>>>,
+    cache: Mutex<Cache>,
+}
+
+#[derive(Default)]
+struct Cache {
+    meta: Option<Arc<Metadata>>,
+    /// When a fetch last failed: the next is tried only after FAILED_RETRY_GAP.
+    failed_at: Option<Instant>,
 }
 
 struct Metadata {
@@ -85,8 +93,8 @@ impl SignIn {
         } else {
             authority
         };
-        let http = reqwest::Client::builder().timeout(Duration::from_secs(30)).build().expect("an HTTP client");
-        SignIn { client_id, authority, http, logger, cache: Mutex::new(None) }
+        let http = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().expect("an HTTP client");
+        SignIn { client_id, authority, http, logger, cache: Mutex::new(Cache::default()) }
     }
 
     pub fn enabled(&self) -> bool {
@@ -94,24 +102,30 @@ impl SignIn {
     }
 
     /// The issuer's endpoints and keys, cached for a day; `force` reads them again (a token named a key it doesn't
-    /// know), at most every five minutes. The keys it had stay when the issuer can't be reached.
+    /// know), at most every five minutes. The keys it had stay when the issuer can't be reached, and after a fetch that
+    /// failed the next is tried only a minute later: in an outage admin requests get those keys (or none) at once,
+    /// instead of each waiting for another fetch.
     async fn metadata(&self, force: bool) -> Option<Arc<Metadata>> {
         let mut cache = self.cache.lock().await;
-        if let Some(meta) = cache.as_ref() {
+        if let Some(meta) = cache.meta.as_ref() {
             let age = meta.fetched.elapsed();
             if age < METADATA_TTL && (!force || age < KEYS_REFRESH_GAP) {
                 return Some(meta.clone());
             }
         }
+        if cache.failed_at.is_some_and(|at| at.elapsed() < FAILED_RETRY_GAP) {
+            return cache.meta.clone();
+        }
         match self.fetch().await {
             Ok(meta) => {
                 let meta = Arc::new(meta);
-                *cache = Some(meta.clone());
+                *cache = Cache { meta: Some(meta.clone()), failed_at: None };
                 Some(meta)
             }
             Err(e) => {
                 self.logger.error("The sign-in issuer's metadata couldn't be read", &[("error", e.into())]);
-                cache.clone()
+                cache.failed_at = Some(Instant::now());
+                cache.meta.clone()
             }
         }
     }
@@ -200,10 +214,16 @@ fn cookie(headers: &HeaderMap, name: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-/// A path on this site only: never another site's address (//host, /\host).
+/// A path on this site only: never another site's address (//host, /\host), nor one with a control character (a
+/// browser drops a tab, so "/\t/host" would be "//host").
 pub fn local_return(path: &str) -> &str {
     let bytes = path.as_bytes();
-    if !path.is_empty() && path.len() <= 512 && bytes[0] == b'/' && (bytes.len() == 1 || (bytes[1] != b'/' && bytes[1] != b'\\')) {
+    if !path.is_empty()
+        && path.len() <= 512
+        && bytes[0] == b'/'
+        && (bytes.len() == 1 || (bytes[1] != b'/' && bytes[1] != b'\\'))
+        && !path.chars().any(char::is_control)
+    {
         path
     } else {
         DEFAULT_RETURN
@@ -334,6 +354,7 @@ mod tests {
             ("/allow-list", "/allow-list"),
             ("//elsewhere.example", "/admin"),
             ("/\\elsewhere.example", "/admin"),
+            ("/\t/elsewhere.example", "/admin"),
             ("https://elsewhere.example/", "/admin"),
             ("", "/admin"),
         ] {

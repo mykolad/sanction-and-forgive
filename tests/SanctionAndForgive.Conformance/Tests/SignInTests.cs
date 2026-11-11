@@ -117,7 +117,7 @@ public sealed class SignInTests
     public async Task SignInAndSignOut_ReturnOnlyToThisSite()
     {
         await Suite.ReadyAsync();
-        foreach (var elsewhere in new[] { "//elsewhere.example/admin", "https://elsewhere.example/", "/\\elsewhere.example" })
+        foreach (var elsewhere in new[] { "//elsewhere.example/admin", "https://elsewhere.example/", "/\\elsewhere.example", "/\t/elsewhere.example" })
         {
             var (query, pending) = await StartAsync(elsewhere);
             using var answer = await AnswerAsync(pending, new() { ["id_token"] = AnswerToken(query, nonce: null), ["state"] = query["state"] });

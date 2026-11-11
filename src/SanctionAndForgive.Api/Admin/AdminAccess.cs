@@ -27,7 +27,8 @@ public sealed class AdminAccess(AdminSignIn signIn)
     /// <see cref="Current"/>.</summary>
     public static void UseAdminSession(WebApplication app) => app.Use(async (context, next) =>
     {
-        if (context.Request.Path.StartsWithSegments("/api/v1/admin", StringComparison.Ordinal)
+        // Case-insensitive, as the controllers' routes are: every request that reaches them is checked.
+        if (context.Request.Path.StartsWithSegments("/api/v1/admin", StringComparison.OrdinalIgnoreCase)
             && context.Request.Cookies.TryGetValue(AdminSignIn.SessionCookie, out var token) && token is { Length: > 0 }
             && await context.RequestServices.GetRequiredService<AdminSignIn>().ValidateAsync(token, nonce: null, context.RequestAborted) is { } session)
         {

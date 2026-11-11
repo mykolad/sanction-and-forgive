@@ -131,6 +131,7 @@ public sealed class SignInTests : IDisposable
     [InlineData("//elsewhere.example/admin")]
     [InlineData("https://elsewhere.example/")]
     [InlineData("/\\elsewhere.example")]
+    [InlineData("/\t/elsewhere.example")]
     public async Task SignInAndSignOut_ReturnOnlyToThisSite(string returnTo)
     {
         using var client = Client(signInEnabled: true);
@@ -163,6 +164,18 @@ public sealed class SignInTests : IDisposable
         var me = await MeAsync(client, $"{AdminSignIn.SessionCookie}={token}", header: null);
 
         Assert.False(me.GetProperty("signedIn").GetBoolean());
+    }
+
+    [Fact]
+    public async Task TheSessionIsChecked_HoweverTheAdminPathIsCased()
+    {
+        using var client = Client(signInEnabled: true);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/API/V1/Admin/me");
+        request.Headers.Add("Cookie", $"{AdminSignIn.SessionCookie}={TestSignIn.Token("owner@example.invalid", AdminAccess.Role)}");
+
+        using var response = await client.SendAsync(request);
+
+        Assert.True((await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("signedIn").GetBoolean());
     }
 
     [Fact]
