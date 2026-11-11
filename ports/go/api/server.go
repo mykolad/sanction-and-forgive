@@ -216,11 +216,15 @@ func (s *Server) screen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var response any
-	if !s.gate.run(r.Context(), func() { response = s.Screenings.Screen(&body) }) {
+	switch s.gate.run(r.Context(), func() { response = s.Screenings.Screen(&body) }) {
+	case full:
 		busy(w)
-		return
+	case gone:
+		// Nobody to answer: the caller left while it waited for a place.
+		s.Logger.Info("A screening's caller left while it waited for a place")
+	case ran:
+		writeJSON(w, http.StatusOK, response)
 	}
-	writeJSON(w, http.StatusOK, response)
 }
 
 const maxLineBytes = 4096
