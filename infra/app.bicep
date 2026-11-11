@@ -134,6 +134,9 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
               value: string(signInEnabled && adminSignInReady)
             }
           ])
+          // Every probe waits 5 s for an answer, not the platform's default 1 s: on a small replica a probe sometimes
+          // took longer than 1 s while the app was nearly idle, and the replica was then restarted or taken out of
+          // service mid-load (docs/load-test.md, "Probes").
           probes: [
             {
               // The process answers; no database call.
@@ -143,17 +146,20 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
                 port: 8080
               }
               periodSeconds: 30
+              timeoutSeconds: 5
               failureThreshold: 3
             }
             {
-              // The first index load finished: until then the old revision keeps serving.
+              // The first index load finished: until then the old revision keeps serving. Six misses in a row (a
+              // minute) before a ready replica is taken out of service; becoming ready still takes one answer.
               type: 'Readiness'
               httpGet: {
                 path: '/readyz'
                 port: 8080
               }
               periodSeconds: 10
-              failureThreshold: 3
+              timeoutSeconds: 5
+              failureThreshold: 6
             }
             {
               type: 'Startup'
@@ -162,6 +168,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
                 port: 8080
               }
               periodSeconds: 5
+              timeoutSeconds: 5
               failureThreshold: 24
             }
           ]
