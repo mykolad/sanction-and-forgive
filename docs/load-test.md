@@ -106,8 +106,32 @@ service and leave the ingress nothing to send requests to. The next step, below:
 `infra/app.bicep`'s probes waited the platform's default 1 s for `/healthz` and `/readyz`. Now each waits 5 s
 (`timeoutSeconds`), and a ready replica is taken out of service after six missed readiness probes in a row (a minute)
 rather than three; liveness and startup keep their thresholds. Becoming ready still takes a single answer, so a new
-revision isn't slower to take traffic. The check: the same three fresh-replica runs of Rust at 0.25 vCPU / 0.5 GiB, the
-sign-in on. Results to follow in this section.
+revision isn't slower to take traffic. The check (11:47-12:53 UTC): the same three fresh-replica runs of Rust #42 at
+0.25 vCPU / 0.5 GiB, the sign-in on.
+
+| Run | Screenings | Failed | Sustained | p95 at 48/s | Then | Probe failures (other than 503 while loading) |
+|---|---|---|---|---|---|---|
+| 1 (11:49, new revision) | 385 | 5 | 2/s | | stalled at 2/s, 6 minutes after the replica started | none |
+| 2 (12:02, restarted) | 22,276 | 0 | **48/s** | 861 ms | 64/s: p95 4.31 s | none |
+| 3 (12:27, restarted) | 22,536 | 0 | **48/s** | 193 ms | 64/s: p95 4.33 s | 8 liveness timeouts (5 s), 12:31-12:41 |
+
+So the probe change **didn't stop the stall**:
+
+- **Run 1 stalled with no platform event at all**: no probe failure, no restart, no replica moved (the system log has
+  nothing between 11:48:52 and 12:00:36). The app screened a steady 2 a second until 11:53:40 and then received
+  nothing. The sign-in sidecar logged nothing either until 11:54:37, when it failed about a dozen requests within
+  four seconds, each "Unexpected end of request content" while reading the request from the ingress: their callers had
+  gone (k6 stopped at 11:53:53). Requests stopped somewhere in the platform, before the app, for about a minute.
+- **The readiness timeouts are gone** (none in the three runs, 73-77 a run before), so the replica is no longer taken
+  out of service by a slow probe. But run 3, a clean run, had 8 liveness timeouts at 5 s while screenings were
+  answered with a p95 of 26 ms and `/readyz`, on the same port, never failed: `/healthz` answers from memory on the
+  app's async threads, apart from the screening pool. The probes' own path is slow at times, not the app.
+- Across the two days, five runs stalled, all on Go or Rust, each within the first ten minutes of a new or restarted
+  replica; runs on the same replica afterwards were clean. None of the .NET runs stalled, but there were only a few,
+  too few to say .NET is immune.
+
+The 5 s probes stay: they cost nothing and keep a slow probe from taking the only replica out of service. The stall
+is the platform's (the Consumption plan's request path), and what to do about it is the owner's decision.
 
 ### .NET and Go, one after the other (2026-11-10)
 
