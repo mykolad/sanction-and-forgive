@@ -35,7 +35,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 unicode-general-category = "1"
 unicode-normalization = "0.1"
-jsonwebtoken = { version = "9", default-features = false }
+jsonwebtoken = { version = "10", default-features = false }
 
 [profile.release]
 codegen-units = 1
