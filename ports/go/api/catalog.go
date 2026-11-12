@@ -289,6 +289,9 @@ func ToListed(s store.Subject) *matching.ListedSubject {
 	return &matching.ListedSubject{ExternalID: s.ExternalID, Kind: kind, PrimaryName: s.PrimaryName, Names: names, Addresses: addresses, Programme: s.Programmes, SourceURL: s.SourceURL}
 }
 
+// changeCheckTimeout bounds one check for changes; one that takes longer counts as failed.
+const changeCheckTimeout = 10 * time.Second
+
 // RunRefresh loads the lists at startup, then refreshes every refreshEvery, and sooner whenever store.ChangesSQL moved:
 // it's read every checkEvery (0: no check), so an administrator's change made on another replica applies here within
 // seconds. A check that fails is logged once, and once again when the database answers again.
@@ -304,7 +307,10 @@ func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.D
 		due := refreshedAt.IsZero() || time.Since(refreshedAt) >= refreshEvery
 		changes, read := "", false
 		if checkEvery > 0 {
-			value, err := store.Changes(ctx, l.db)
+			// Bounded: a database that takes the query and never answers must not stop the checks or the refresh.
+			checkCtx, cancel := context.WithTimeout(ctx, changeCheckTimeout)
+			value, err := store.Changes(checkCtx, l.db)
+			cancel()
 			switch {
 			case err == nil:
 				changes, read = value, true

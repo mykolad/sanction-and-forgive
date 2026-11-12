@@ -122,6 +122,9 @@ impl Catalog {
     }
 }
 
+/// Bounds one check for changes; one that takes longer counts as failed (and its connection is dropped).
+const CHANGE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// How many updates GET /api/v1/sources shows per list.
 pub const HISTORY_SHOWN: usize = 10;
 
@@ -305,6 +308,13 @@ impl Loader {
                         conn = Some(self.db.connect().await?);
                     }
                     queries::changes(conn.as_mut().expect("connected above")).await
+                };
+                // Bounded: a database that takes the query and never answers must not stop the checks or the refresh.
+                let read = async {
+                    match tokio::time::timeout(CHANGE_CHECK_TIMEOUT, read).await {
+                        Ok(result) => result,
+                        Err(_) => Err("Checking the database for changes timed out.".into()),
+                    }
                 };
                 match read.await {
                     Ok(value) => {

@@ -243,6 +243,9 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
 /// logged once, and once again when the database answers again; the catalog keeps serving meanwhile.</summary>
 public sealed partial class ListRefreshService(ListLoader loader, IConfiguration configuration, TimeProvider clock, ILogger<ListRefreshService> logger) : BackgroundService
 {
+    /// <summary>Bounds one check for changes; one that takes longer counts as failed.</summary>
+    private static readonly TimeSpan ChangeCheckTimeout = TimeSpan.FromSeconds(10);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var refreshEvery = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
@@ -259,14 +262,17 @@ public sealed partial class ListRefreshService(ListLoader loader, IConfiguration
             {
                 try
                 {
-                    changes = await loader.ChangesAsync(stoppingToken);
+                    // Bounded: a database that takes the query and never answers must not stop the checks or the refresh.
+                    using var bounded = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    bounded.CancelAfter(ChangeCheckTimeout);
+                    changes = await loader.ChangesAsync(bounded.Token);
                     if (checkFailing)
                     {
                         checkFailing = false;
                         ChangeCheckRecovered(logger);
                     }
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException)
+                catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
                 {
                     if (!checkFailing)
                     {
