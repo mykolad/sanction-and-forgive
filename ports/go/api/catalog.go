@@ -289,6 +289,14 @@ func ToListed(s store.Subject) *matching.ListedSubject {
 	return &matching.ListedSubject{ExternalID: s.ExternalID, Kind: kind, PrimaryName: s.PrimaryName, Names: names, Addresses: addresses, Programme: s.Programmes, SourceURL: s.SourceURL}
 }
 
+// nextRetryWait is the wait before trying a failed refresh again: 5 s, then twice the last, at most a minute.
+func nextRetryWait(last time.Duration) time.Duration {
+	if last <= 0 {
+		return 5 * time.Second
+	}
+	return min(2*last, time.Minute)
+}
+
 // changeCheckTimeout bounds one check for changes; one that takes longer counts as failed.
 const changeCheckTimeout = 10 * time.Second
 
@@ -301,7 +309,8 @@ func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.D
 		wait = refreshEvery
 	}
 	var seen string
-	var refreshedAt time.Time
+	var refreshedAt, retryAt time.Time
+	var retryWait time.Duration
 	checkFailing := false
 	for {
 		due := refreshedAt.IsZero() || time.Since(refreshedAt) >= refreshEvery
@@ -324,20 +333,34 @@ func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.D
 			}
 		}
 		// Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-		if due || (read && changes != seen) {
-			if err := l.Refresh(ctx); err != nil && ctx.Err() == nil {
-				l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has", "error", err.Error())
-			}
-			// Even after a failure: the next try is the next change or the next refreshEvery, never every check.
-			if read {
-				seen = changes
+		// A refresh that failed stays pending: tried again after retryWait (5 s, doubling up to a minute), never at
+		// every check, and the change counts as seen only once a refresh has worked (an allow-list removal seen while
+		// the database stumbled still applies as soon as it answers).
+		retry := !retryAt.IsZero() && !time.Now().Before(retryAt)
+		if due || retry || (retryAt.IsZero() && read && changes != seen) {
+			if err := l.Refresh(ctx); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				retryWait = nextRetryWait(retryWait)
+				retryAt = time.Now().Add(retryWait)
+				l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has, and tries again", "error", err.Error(), "seconds", retryWait.Seconds())
+			} else {
+				if read {
+					seen = changes
+				}
+				retryAt, retryWait = time.Time{}, 0
 			}
 			refreshedAt = time.Now()
+		}
+		next := wait
+		if !retryAt.IsZero() {
+			next = min(wait, retryWait)
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(wait):
+		case <-time.After(next):
 		}
 	}
 }

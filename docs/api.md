@@ -198,7 +198,8 @@ official record). A list that is Not checked can still be browsed; its `state` s
 it, and by every other replica within `Lists:ChangeCheckSeconds` (2); a new version of a list (the daily import) is
 noticed by every replica within the same 2 seconds, and each searches it once it has built its index (seconds). Each reads a small value from the database that
 moves with any source, import or allow-list change (`ListLoader.ChangesSql`, the same query in every implementation)
-and reloads when it moved. Screenings still never read the database.
+and reloads when it moved; a reload that fails is retried (5 s, doubling up to a minute) until it works, and only then
+counts the change as applied. Screenings still never read the database.
 
 For the demo's administrators. Screening never needs sign-in. Sign-in is the app's own (owner's decision, 2026-11-11:
 the platform's built-in sign-in ran as a sidecar in every replica), OpenID Connect with Microsoft Entra ID and the app
@@ -229,8 +230,8 @@ registration `infra/admin-sign-in.ps1` sets up. Every implementation does the sa
 - `POST /api/v1/admin/imports/{id}/confirm` and `…/reject`: review an update held for review (its `importId` from
   `held` in `/api/v1/sources`). Needs the `Lists.Admin` role and the header `X-Requested-By: sanction-and-forgive-admin`
   (which another site can't send, so a signed-in admin's cookie can't be used against them). 200
-  `{importId, result, reloaded}` (`reloaded` false: the review stands, and the next check for changes, within seconds unless the database is
-  unreachable, shows it); 401 not signed in; 403 without the role; 400 without the header; 404 sign-in off or no such
+  `{importId, result, reloaded}` (`reloaded` false: the review stands, and the next check for changes shows it within seconds, or, if the
+  database is unreachable, the refresh retried until it answers (5 s, doubling up to a minute) does); 401 not signed in; 403 without the role; 400 without the header; 404 sign-in off or no such
   import; 409 `NotPending` (already reviewed, superseded, or held against a list that has changed since). Confirming
   makes it the active list (searched while it's current: the status page shows whether it is) and reloads the lists
   at once; the review is logged with the reviewer's sign-in name.
@@ -278,7 +279,8 @@ of them has been shown and confirmed.
   - 503 `unavailable`: a list can't be checked now (loading, or not current).
 
   The log line for an addition names the possible matches confirmed by key (never the name).
-  Both answer `{id, reloaded}`: a committed change is reported as such; `reloaded` false means the next check for changes, within
-  seconds unless the database is unreachable, applies an addition (a removal stops applying at once regardless, on the
-  replica that answered). An entry is never deleted, so the
+  Both answer `{id, reloaded}`: a committed change is reported as such; `reloaded` false means the next check for changes applies an
+  addition within seconds, or, if the database is unreachable, the refresh retried until it answers (5 s, doubling up to
+  a minute) does; a removal stops applying at once regardless on the replica that answered, and on every other one as
+  soon as its refresh works (a failed one stays pending, never counted as done). An entry is never deleted, so the
   history stays; the version is the number of additions plus removals.

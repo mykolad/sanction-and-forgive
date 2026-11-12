@@ -122,6 +122,15 @@ impl Catalog {
     }
 }
 
+/// The wait before trying a failed refresh again: 5 s, then twice the last, at most a minute.
+fn next_retry_wait(last: std::time::Duration) -> std::time::Duration {
+    if last.is_zero() {
+        std::time::Duration::from_secs(5)
+    } else {
+        (last * 2).min(std::time::Duration::from_secs(60))
+    }
+}
+
 /// Bounds one check for changes; one that takes longer counts as failed (and its connection is dropped).
 const CHANGE_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
@@ -298,6 +307,8 @@ impl Loader {
         let mut seen: Option<String> = None;
         let mut refreshed_at: Option<std::time::Instant> = None;
         let mut conn = None;
+        let mut retry_at: Option<std::time::Instant> = None;
+        let mut retry_wait = std::time::Duration::ZERO;
         let mut check_failing = false;
         loop {
             let due = refreshed_at.is_none_or(|at| at.elapsed() >= refresh_every);
@@ -337,18 +348,34 @@ impl Loader {
                 }
             }
             // Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-            if due || (changes.is_some() && changes != seen) {
-                if let Err(e) = self.refresh().await {
-                    self.logger
-                        .error("Refreshing the lists failed; the catalog keeps serving what it has", &[("error", e.to_string().into())]);
-                }
-                // Even after a failure: the next try is the next change or the next refresh_every, never every check.
-                if changes.is_some() {
-                    seen = changes;
+            // A refresh that failed stays pending: tried again after retry_wait (5 s, doubling up to a minute), never at
+            // every check, and the change counts as seen only once a refresh has worked (an allow-list removal seen
+            // while the database stumbled still applies as soon as it answers).
+            let retry = retry_at.is_some_and(|at| std::time::Instant::now() >= at);
+            if due || retry || (retry_at.is_none() && changes.is_some() && changes != seen) {
+                match self.refresh().await {
+                    Ok(()) => {
+                        if changes.is_some() {
+                            seen = changes;
+                        }
+                        retry_at = None;
+                        retry_wait = std::time::Duration::ZERO;
+                    }
+                    Err(e) => {
+                        retry_wait = next_retry_wait(retry_wait);
+                        retry_at = Some(std::time::Instant::now() + retry_wait);
+                        self.logger.error(
+                            &format!(
+                                "Refreshing the lists failed; the catalog keeps serving what it has, and tries again in {} s",
+                                retry_wait.as_secs()
+                            ),
+                            &[("error", e.to_string().into())],
+                        );
+                    }
                 }
                 refreshed_at = Some(std::time::Instant::now());
             }
-            tokio::time::sleep(wait).await;
+            tokio::time::sleep(if retry_at.is_some() { wait.min(retry_wait) } else { wait }).await;
         }
     }
 }
@@ -372,5 +399,24 @@ pub fn to_listed(s: Subject) -> ListedSubject {
             .collect(),
         programme: s.programmes,
         source_url: s.source_url,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::next_retry_wait;
+    use std::time::Duration;
+
+    /// A refresh that failed is tried again after a wait that grows: never at every check, never more than a minute apart.
+    #[test]
+    fn a_failed_refresh_is_tried_again_after_5s_then_twice_as_long_at_most_a_minute() {
+        let mut wait = Duration::ZERO;
+        let waits: Vec<u64> = (0..7)
+            .map(|_| {
+                wait = next_retry_wait(wait);
+                wait.as_secs()
+            })
+            .collect();
+        assert_eq!(waits, [5, 10, 20, 40, 60, 60, 60]);
     }
 }

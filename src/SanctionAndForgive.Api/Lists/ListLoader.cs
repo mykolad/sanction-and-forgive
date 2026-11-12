@@ -253,6 +253,8 @@ public sealed partial class ListRefreshService(ListLoader loader, IConfiguration
         var checkEvery = checkSeconds > 0 ? TimeSpan.FromSeconds(checkSeconds) : refreshEvery;
         string? seen = null;
         var refreshedAt = DateTimeOffset.MinValue;
+        DateTimeOffset? retryAt = null;
+        var retryWait = TimeSpan.Zero;
         var checkFailing = false;
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -283,25 +285,39 @@ public sealed partial class ListRefreshService(ListLoader loader, IConfiguration
             }
 
             // Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-            if (due || (changes is not null && changes != seen))
+            // A refresh that failed stays pending: tried again after RetryWait (5 s, doubling up to a minute), never at
+            // every check, and the change counts as seen only once a refresh has worked (an allow-list removal seen
+            // while the database stumbled still applies as soon as it answers).
+            var now = clock.GetUtcNow();
+            var retry = retryAt is { } at && now >= at;
+            if (due || retry || (retryAt is null && changes is not null && changes != seen))
             {
                 try
                 {
                     await loader.RefreshAsync(stoppingToken);
+                    seen = changes ?? seen;
+                    retryAt = null;
+                    retryWait = TimeSpan.Zero;
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before");
+                    retryWait = RetryWait(retryWait);
+                    retryAt = clock.GetUtcNow() + retryWait;
+                    logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before, and trying again in {Seconds} s", retryWait.TotalSeconds);
                 }
 
-                // Even after a failure: the next try is the next change or the next RefreshMinutes, never every check.
-                seen = changes ?? seen;
                 refreshedAt = clock.GetUtcNow();
             }
 
-            await Task.Delay(checkEvery, clock, stoppingToken);
+            await Task.Delay(retryAt is null ? checkEvery : Min(checkEvery, retryWait), clock, stoppingToken);
         }
     }
+
+    /// <summary>The wait before trying a failed refresh again: 5 s, then twice the last, at most a minute.</summary>
+    internal static TimeSpan RetryWait(TimeSpan last) =>
+        last <= TimeSpan.Zero ? TimeSpan.FromSeconds(5) : Min(last * 2, TimeSpan.FromMinutes(1));
+
+    private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Checking the database for changes failed; serving what was loaded, and checking again")]
     private static partial void ChangeCheckFailed(ILogger logger, Exception exception);
