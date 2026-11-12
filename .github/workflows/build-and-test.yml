@@ -76,7 +76,7 @@ jobs:
           retention-days: 14
 
   # Nothing else builds the database from scratch with the real migrations on real SQL Server. Runs in parallel with
-  # build-and-test; both are required on master.
+  # build-and-test; every job here is required on master.
   clean-database-migrations:
     name: clean-database-migrations
     runs-on: ubuntu-latest
@@ -147,7 +147,7 @@ jobs:
   # The conformance suite (docs/conformance.md): each implementation's image built from this commit, run as a black
   # box with a fresh database, compared with the golden files. Not a required check yet: it's the yardstick for the
   # implementations in other languages (ports/).
-  # The Rust port's format, lints and unit tests (ports/rust); the conformance matrix below runs its image. Not required.
+  # The Rust port's format, lints and unit tests (ports/rust); the conformance matrix below runs its image. Required.
   rust:
     name: rust
     runs-on: ubuntu-latest

@@ -214,7 +214,7 @@ shared database, references no app project, and compares with golden files from 
 behaviour, then changes that it puts back. Fictional feeds in all nine formats come from a fixed seed (`Feeds/`).
 `tests/conformance/run.ps1` builds the image, makes a fresh database, starts the API with the conformance settings
 (`Lists__RefreshMinutes=0.05`, rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
-containers from the same image, and runs the suite. CI job `conformance`, not required. A change in what the reference
+containers from the same image, and runs the suite. CI jobs `conformance (dotnet|go|rust)`, required on `master` (owner's decision, 2026-11-12). A change in what the reference
 answers updates the golden files in the same PR (`run.ps1 -Build -UpdateGolden`, review the diff); another
 implementation never rewrites them. **A change to the .NET app is a change to every port** (`ports/go`, `ports/rust`): the CI job
 runs the suite against each, so a behaviour change lands in all of them in the same PR, or the port's job fails.
@@ -261,14 +261,16 @@ Shared settings live at the root: `Directory.Build.props` (framework, nullable, 
 
 ## Build and Test (CI)
 
-`.github/workflows/build-and-test.yml` (**Build and Test**) runs on every PR and push to `master`, two jobs, both
-required on `master`:
+`.github/workflows/build-and-test.yml` (**Build and Test**) runs on every PR and push to `master`; every job is
+required on `master` (the `rust` job and the `conformance` matrix since 2026-11-12, owner's decision):
 
 - `build-and-test`: build, code style, tests, and `az bicep lint` / `build` on every file in `infra/`.
 - `clean-database-migrations`: against a throwaway SQL Server 2022 service container (SQL auth; the password is not a
   secret), `has-pending-model-changes`, then the migration bundle applied to an empty database, rolled back to `0`
   and applied again, then the `SqlServerFact` import tests (`Tests.Data`), which are skipped elsewhere unless
   `SQLSERVER_TEST_CONNECTION` is set.
+- `rust`: the Rust port's format, lints and unit tests.
+- `conformance (dotnet)`, `conformance (go)`, `conformance (rust)`: the conformance suite against each implementation.
 
 ## Data and import (`SanctionAndForgive.Data`, CLI)
 
