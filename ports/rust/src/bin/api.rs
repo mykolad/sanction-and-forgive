@@ -48,6 +48,7 @@ async fn serve() {
         }
     };
     let refresh = Some(number("Lists__RefreshMinutes", 15.0_f64)).filter(|v| *v > 0.0).unwrap_or(15.0);
+    let change_check = Some(number("Lists__ChangeCheckSeconds", 2.0_f64)).filter(|v| *v >= 0.0).unwrap_or(2.0);
     let config = Config {
         version: setting("App__Version", "dev"),
         revision: setting("CONTAINER_APP_REVISION", ""),
@@ -65,7 +66,7 @@ async fn serve() {
     let sign_in =
         Arc::new(SignIn::new(setting("Admin__ClientId", ""), setting("Admin__TenantId", ""), setting("Admin__Authority", ""), logger));
     let state = Arc::new(AppState::new(config, catalog, screenings, loader.clone(), db, sign_in));
-    tokio::spawn(loader.run_refresh(Duration::from_secs_f64(refresh * 60.0)));
+    tokio::spawn(loader.run_refresh(Duration::from_secs_f64(refresh * 60.0), Duration::from_secs_f64(change_check)));
 
     let port = setting("PORT", "8080");
     // HOST: every interface by default (a container needs that); 127.0.0.1 for a run on a desktop, so its firewall

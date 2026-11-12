@@ -200,6 +200,47 @@ public sealed class ChangeTests
         }
     }
 
+    /// <summary>Another replica's administrator changes only the database: this replica applies it within seconds
+    /// (<c>Lists:ChangeCheckSeconds</c>), long before its full refresh (<c>Lists:RefreshMinutes</c>, an hour in a
+    /// conformance run). An allow-list entry added, then removed (never looser for long), and a list switched off.</summary>
+    [ConformanceFact]
+    public async Task AnAdministratorsChange_MadeOnAnotherReplica_AppliesHereWithinSeconds()
+    {
+        await Suite.ReadyAsync();
+        var (name, kind) = await PossibleMatchAsync();
+        object Screening() => kind == "Company" ? new { companyName = name } : new { receiverName = name };
+        async Task<bool> AllowedAsync() => (await Suite.ScreenAsync(Screening())).GetProperty("entries")[0].GetProperty("cells").EnumerateArray()
+            .Any(cell => cell.GetProperty("allowed").GetBoolean());
+        await using var connection = await Suite.OpenSqlAsync();
+        try
+        {
+            Assert.False(await AllowedAsync());
+            await Suite.ExecuteAsync(connection, "INSERT INTO AllowListEntries (Name, Reason, AddedBy, AddedAt) VALUES (@name, N'Another replica (conformance).', N'conformance', SYSDATETIMEOFFSET())", ("name", name));
+            await WithinSecondsAsync(10, AllowedAsync, "an allow-list entry added elsewhere");
+
+            await Suite.ExecuteAsync(connection, "UPDATE AllowListEntries SET RemovedBy = N'conformance', RemovedAt = SYSDATETIMEOFFSET() WHERE Name = @name AND RemovedAt IS NULL", ("name", name));
+            await WithinSecondsAsync(10, async () => !await AllowedAsync(), "an allow-list entry removed elsewhere");
+
+            await Suite.ExecuteAsync(connection, "UPDATE Sources SET SwitchedOffAt = SYSDATETIMEOFFSET(), SwitchedOffBy = N'conformance', SwitchedOffReason = N'Another replica (conformance).' WHERE Code = @code", ("code", Sfms));
+            await WithinSecondsAsync(10, async () => (await Suite.GetAsync("api/v1/status")).GetProperty("lists").EnumerateArray()
+                .Any(list => list.GetProperty("code").GetString() == Sfms && list.GetProperty("state").GetString() == "SwitchedOff"), "a list switched off elsewhere");
+        }
+        finally
+        {
+            await Suite.RestoreBaseAsync();
+        }
+    }
+
+    private static async Task WithinSecondsAsync(int seconds, Func<Task<bool>> condition, string what)
+    {
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (!await condition())
+        {
+            Assert.True(deadline.Elapsed < TimeSpan.FromSeconds(seconds), $"The API didn't apply {what} within {seconds} s.");
+            await Task.Delay(250);
+        }
+    }
+
     /// <summary>A name from the golden set that is a possible match (Review) and no Match: an allow-list candidate.</summary>
     private static async Task<(string Name, string Kind)> PossibleMatchAsync()
     {

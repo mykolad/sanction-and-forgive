@@ -110,6 +110,20 @@ type SourceRow struct {
 }
 
 // Sources lists every source ordered by code (SQL Server's collation, as the reference's query orders them).
+// ChangesSQL is what a refresh reads, in one small value that changes whenever any of it does: each source's row, each
+// import's row and the allow-list's version. The same query as the reference's ListLoader.ChangesSql.
+const ChangesSQL = `SELECT CONCAT(
+    (SELECT COUNT_BIG(*) FROM Sources), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Sources), ':',
+    (SELECT COUNT_BIG(*) FROM Imports), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Imports), ':',
+    (SELECT COUNT_BIG(*) FROM AllowListEntries), ':', (SELECT COUNT_BIG(RemovedAt) FROM AllowListEntries)) AS [Value]`
+
+// Changes reads ChangesSQL.
+func Changes(ctx context.Context, db *sql.DB) (string, error) {
+	var value string
+	err := db.QueryRowContext(ctx, ChangesSQL).Scan(&value)
+	return value, err
+}
+
 func Sources(ctx context.Context, db *sql.DB) ([]SourceRow, error) {
 	rows, err := db.QueryContext(ctx, `
 SELECT s.Id, s.Code, s.Name, s.Url, s.MaxAgeHours, s.ActiveImportId, s.LastCheckedAt, s.SwitchedOffAt, s.SwitchedOffReason,

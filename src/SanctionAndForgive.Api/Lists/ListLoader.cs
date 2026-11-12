@@ -88,6 +88,25 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
         catalog.ReplaceAllowList(AllowList.Build(snapshot.Entries.Select(entry => new AllowListEntry(entry.Id, entry.Name, entry.Reason)), snapshot.Version));
     }
 
+    /// <summary>What a refresh reads, in one small value that changes whenever any of it does: each source's row, each
+    /// import's row (a check, a new update, a hold, a review) and the allow-list's version (additions and removals). Every
+    /// replica reads it every <c>Lists:ChangeCheckSeconds</c> and refreshes when it moved, so an administrator's change on
+    /// one replica reaches the others within seconds (docs/api.md, "Admin"). The same query in every implementation.</summary>
+    public const string ChangesSql = """
+        SELECT CONCAT(
+            (SELECT COUNT_BIG(*) FROM Sources), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Sources), ':',
+            (SELECT COUNT_BIG(*) FROM Imports), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Imports), ':',
+            (SELECT COUNT_BIG(*) FROM AllowListEntries), ':', (SELECT COUNT_BIG(RemovedAt) FROM AllowListEntries)) AS [Value]
+        """;
+
+    /// <summary>Reads <see cref="ChangesSql"/>: no lock, no gate (it never waits for a refresh).</summary>
+    public async Task<string> ChangesAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<ListsDbContext>();
+        return await context.Database.SqlQueryRaw<string>(ChangesSql).SingleAsync(cancellationToken);
+    }
+
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken);
@@ -217,26 +236,70 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
         subject.SourceUrl);
 }
 
-/// <summary>Loads the lists at startup (in the background: the API listens at once and answers 503 until then),
-/// then checks every <c>Lists:RefreshMinutes</c> (15) for changed imports and fresher check times. A fraction is
-/// allowed: the conformance run uses 0.05 (3 seconds) so it sees each change it makes without waiting.</summary>
-public sealed class ListRefreshService(ListLoader loader, IConfiguration configuration, ILogger<ListRefreshService> logger) : BackgroundService
+/// <summary>Loads the lists at startup (in the background: the API listens at once and answers 503 until then), then
+/// refreshes every <c>Lists:RefreshMinutes</c> (15; a fraction is allowed), and sooner whenever
+/// <see cref="ListLoader.ChangesSql"/> moved: it's read every <c>Lists:ChangeCheckSeconds</c> (2; 0 turns the check
+/// off), so an administrator's change made on another replica applies here within seconds. A check that fails is
+/// logged once, and once again when the database answers again; the catalog keeps serving meanwhile.</summary>
+public sealed partial class ListRefreshService(ListLoader loader, IConfiguration configuration, TimeProvider clock, ILogger<ListRefreshService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var interval = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
+        var refreshEvery = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
+        var checkSeconds = configuration.GetValue("Lists:ChangeCheckSeconds", 2.0);
+        var checkEvery = checkSeconds > 0 ? TimeSpan.FromSeconds(checkSeconds) : refreshEvery;
+        string? seen = null;
+        var refreshedAt = DateTimeOffset.MinValue;
+        var checkFailing = false;
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
+            var due = clock.GetUtcNow() - refreshedAt >= refreshEvery;
+            string? changes = null;
+            if (checkSeconds > 0)
             {
-                await loader.RefreshAsync(stoppingToken);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before");
+                try
+                {
+                    changes = await loader.ChangesAsync(stoppingToken);
+                    if (checkFailing)
+                    {
+                        checkFailing = false;
+                        ChangeCheckRecovered(logger);
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    if (!checkFailing)
+                    {
+                        checkFailing = true;
+                        ChangeCheckFailed(logger, exception);
+                    }
+                }
             }
 
-            await Task.Delay(interval, stoppingToken);
+            // Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
+            if (due || (changes is not null && changes != seen))
+            {
+                try
+                {
+                    await loader.RefreshAsync(stoppingToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before");
+                }
+
+                // Even after a failure: the next try is the next change or the next RefreshMinutes, never every check.
+                seen = changes ?? seen;
+                refreshedAt = clock.GetUtcNow();
+            }
+
+            await Task.Delay(checkEvery, clock, stoppingToken);
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Checking the database for changes failed; serving what was loaded, and checking again")]
+    private static partial void ChangeCheckFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Checking the database for changes works again")]
+    private static partial void ChangeCheckRecovered(ILogger logger);
 }

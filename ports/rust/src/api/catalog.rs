@@ -286,12 +286,59 @@ impl Loader {
     }
 
     /// Loads the lists at startup, then every interval.
-    pub async fn run_refresh(self: Arc<Self>, interval: std::time::Duration) {
+    /// Loads the lists at startup, then refreshes every refresh_every, and sooner whenever queries::CHANGES_SQL moved:
+    /// it's read every check_every (zero: no check), so an administrator's change made on another replica applies here
+    /// within seconds. The check keeps one connection open (a new one is a sign-in, with a token in Azure) and opens
+    /// another only after a failure; a failing check is logged once, and once again when the database answers again.
+    pub async fn run_refresh(self: Arc<Self>, refresh_every: std::time::Duration, check_every: std::time::Duration) {
+        let wait = if check_every.is_zero() { refresh_every } else { check_every };
+        let mut seen: Option<String> = None;
+        let mut refreshed_at: Option<std::time::Instant> = None;
+        let mut conn = None;
+        let mut check_failing = false;
         loop {
-            if let Err(e) = self.refresh().await {
-                self.logger.error("Refreshing the lists failed; the catalog keeps serving what it has", &[("error", e.to_string().into())]);
+            let due = refreshed_at.is_none_or(|at| at.elapsed() >= refresh_every);
+            let mut changes = None;
+            if !check_every.is_zero() {
+                let read = async {
+                    if conn.is_none() {
+                        conn = Some(self.db.connect().await?);
+                    }
+                    queries::changes(conn.as_mut().expect("connected above")).await
+                };
+                match read.await {
+                    Ok(value) => {
+                        changes = Some(value);
+                        if check_failing {
+                            check_failing = false;
+                            self.logger.info("Checking the database for changes works again", &[]);
+                        }
+                    }
+                    Err(e) => {
+                        conn = None;
+                        if !check_failing {
+                            check_failing = true;
+                            self.logger.warn(
+                                "Checking the database for changes failed; serving what was loaded, and checking again",
+                                &[("error", e.to_string().into())],
+                            );
+                        }
+                    }
+                }
             }
-            tokio::time::sleep(interval).await;
+            // Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
+            if due || (changes.is_some() && changes != seen) {
+                if let Err(e) = self.refresh().await {
+                    self.logger
+                        .error("Refreshing the lists failed; the catalog keeps serving what it has", &[("error", e.to_string().into())]);
+                }
+                // Even after a failure: the next try is the next change or the next refresh_every, never every check.
+                if changes.is_some() {
+                    seen = changes;
+                }
+                refreshed_at = Some(std::time::Instant::now());
+            }
+            tokio::time::sleep(wait).await;
         }
     }
 }

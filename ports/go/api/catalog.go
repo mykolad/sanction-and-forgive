@@ -289,16 +289,49 @@ func ToListed(s store.Subject) *matching.ListedSubject {
 	return &matching.ListedSubject{ExternalID: s.ExternalID, Kind: kind, PrimaryName: s.PrimaryName, Names: names, Addresses: addresses, Programme: s.Programmes, SourceURL: s.SourceURL}
 }
 
-// RunRefresh loads the lists at startup, then every interval.
-func (l *Loader) RunRefresh(ctx context.Context, interval time.Duration) {
+// RunRefresh loads the lists at startup, then refreshes every refreshEvery, and sooner whenever store.ChangesSQL moved:
+// it's read every checkEvery (0: no check), so an administrator's change made on another replica applies here within
+// seconds. A check that fails is logged once, and once again when the database answers again.
+func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.Duration) {
+	wait := checkEvery
+	if wait <= 0 {
+		wait = refreshEvery
+	}
+	var seen string
+	var refreshedAt time.Time
+	checkFailing := false
 	for {
-		if err := l.Refresh(ctx); err != nil && ctx.Err() == nil {
-			l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has", "error", err.Error())
+		due := refreshedAt.IsZero() || time.Since(refreshedAt) >= refreshEvery
+		changes, read := "", false
+		if checkEvery > 0 {
+			value, err := store.Changes(ctx, l.db)
+			switch {
+			case err == nil:
+				changes, read = value, true
+				if checkFailing {
+					checkFailing = false
+					l.logger.Info("Checking the database for changes works again")
+				}
+			case ctx.Err() == nil && !checkFailing:
+				checkFailing = true
+				l.logger.Warn("Checking the database for changes failed; serving what was loaded, and checking again", "error", err.Error())
+			}
+		}
+		// Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
+		if due || (read && changes != seen) {
+			if err := l.Refresh(ctx); err != nil && ctx.Err() == nil {
+				l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has", "error", err.Error())
+			}
+			// Even after a failure: the next try is the next change or the next refreshEvery, never every check.
+			if read {
+				seen = changes
+			}
+			refreshedAt = time.Now()
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-time.After(wait):
 		}
 	}
 }

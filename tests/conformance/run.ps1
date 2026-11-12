@@ -76,7 +76,8 @@ finally {
 docker rm -f $name 2>$null | Out-Null
 $settings = @(
     '-e', "ConnectionStrings__Lists=$containerConnection",
-    '-e', 'Lists__RefreshMinutes=0.05',
+    '-e', 'Lists__RefreshMinutes=60',
+    '-e', 'Lists__ChangeCheckSeconds=1',
     '-e', 'RateLimiting__PerMinute=0',
     '-e', 'Admin__ClientId=conformance-admin',
     '-e', "Admin__Authority=$issuer",
