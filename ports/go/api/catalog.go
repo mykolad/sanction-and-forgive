@@ -298,6 +298,51 @@ func ToListed(s store.Subject) *matching.ListedSubject {
 	return &matching.ListedSubject{ExternalID: s.ExternalID, Kind: kind, PrimaryName: s.PrimaryName, Names: names, Addresses: addresses, Programme: s.Programmes, SourceURL: s.SourceURL}
 }
 
+// refreshSchedule decides when RunRefresh refreshes, from the time and the value of store.ChangesSQL just read (read
+// false when the check failed or is off), so it can be tested without a clock or a database. It refreshes:
+//   - at the first call, and when refreshEvery has passed since the last refresh (the backstop);
+//   - at once for each new value, even while an earlier failure waits for its retry (an allow-list removal made on
+//     another replica never waits behind a list that won't build). The value is read before the refresh, so a change
+//     made while it runs gives a new value at the next check;
+//   - after a failed refresh, once retryWait has passed (5 s, doubling up to a minute): never at every check, and
+//     until it works.
+type refreshSchedule struct {
+	refreshEvery, checkEvery time.Duration
+	attempted                string
+	refreshedAt, retryAt     time.Time
+	retryWait                time.Duration
+}
+
+// begin says whether to refresh now; when it says so, the refresh is for changes.
+func (s *refreshSchedule) begin(now time.Time, changes string, read bool) bool {
+	refresh := s.refreshedAt.IsZero() || now.Sub(s.refreshedAt) >= s.refreshEvery ||
+		(!s.retryAt.IsZero() && !now.Before(s.retryAt)) ||
+		(read && changes != s.attempted)
+	if refresh && read {
+		s.attempted = changes
+	}
+	return refresh
+}
+
+// finished records how the refresh begin asked for went.
+func (s *refreshSchedule) finished(now time.Time, succeeded bool) {
+	s.refreshedAt = now
+	if succeeded {
+		s.retryAt, s.retryWait = time.Time{}, 0
+		return
+	}
+	s.retryWait = nextRetryWait(s.retryWait)
+	s.retryAt = now.Add(s.retryWait)
+}
+
+// nextWait is how long to sleep before the next check: the check interval, or less when a retry falls sooner.
+func (s *refreshSchedule) nextWait() time.Duration {
+	if s.retryAt.IsZero() {
+		return s.checkEvery
+	}
+	return min(s.checkEvery, s.retryWait)
+}
+
 // nextRetryWait is the wait before trying a failed refresh again: 5 s, then twice the last, at most a minute.
 func nextRetryWait(last time.Duration) time.Duration {
 	if last <= 0 {
@@ -309,20 +354,18 @@ func nextRetryWait(last time.Duration) time.Duration {
 // changeCheckTimeout bounds one check for changes; one that takes longer counts as failed.
 const changeCheckTimeout = 10 * time.Second
 
-// RunRefresh loads the lists at startup, then refreshes every refreshEvery, and sooner whenever store.ChangesSQL moved:
-// it's read every checkEvery (0: no check), so an administrator's change made on another replica applies here within
-// seconds. A check that fails is logged once, and once again when the database answers again.
+// RunRefresh loads the lists at startup, then refreshes as refreshSchedule says: every refreshEvery, at once whenever
+// store.ChangesSQL moved (read every checkEvery; 0: no check), so an administrator's change made on another replica
+// applies here within seconds, and after a failure until it works. A check that fails is logged once, and once again
+// when the database answers again.
 func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.Duration) {
 	wait := checkEvery
 	if wait <= 0 {
 		wait = refreshEvery
 	}
-	var attempted string
-	var refreshedAt, retryAt time.Time
-	var retryWait time.Duration
+	schedule := &refreshSchedule{refreshEvery: refreshEvery, checkEvery: wait}
 	checkFailing := false
 	for {
-		due := refreshedAt.IsZero() || time.Since(refreshedAt) >= refreshEvery
 		changes, read := "", false
 		if checkEvery > 0 {
 			// Bounded: a database that takes the query and never answers must not stop the checks or the refresh.
@@ -341,35 +384,20 @@ func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.D
 				l.logger.Warn("Checking the database for changes failed; serving what was loaded, and checking again", "error", err.Error())
 			}
 		}
-		// Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-		// Each new value is refreshed for once, at once, even while an earlier failure waits for its retry (an
-		// allow-list removal never waits behind a list that won't build). A refresh that failed stays pending: tried
-		// again after retryWait (5 s, doubling up to a minute), never at every check.
-		retry := !retryAt.IsZero() && !time.Now().Before(retryAt)
-		if due || retry || (read && changes != attempted) {
-			if read {
-				attempted = changes
+		if schedule.begin(time.Now(), changes, read) {
+			err := l.Refresh(ctx)
+			if err != nil && ctx.Err() != nil {
+				return
 			}
-			if err := l.Refresh(ctx); err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				retryWait = nextRetryWait(retryWait)
-				retryAt = time.Now().Add(retryWait)
-				l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has, and tries again", "error", err.Error(), "seconds", retryWait.Seconds())
-			} else {
-				retryAt, retryWait = time.Time{}, 0
+			schedule.finished(time.Now(), err == nil)
+			if err != nil {
+				l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has, and tries again", "error", err.Error(), "seconds", schedule.retryWait.Seconds())
 			}
-			refreshedAt = time.Now()
-		}
-		next := wait
-		if !retryAt.IsZero() {
-			next = min(wait, retryWait)
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(next):
+		case <-time.After(schedule.nextWait()):
 		}
 	}
 }

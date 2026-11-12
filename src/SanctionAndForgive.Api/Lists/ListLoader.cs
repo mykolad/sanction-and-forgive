@@ -261,15 +261,10 @@ public sealed partial class ListRefreshService(ListLoader loader, IConfiguration
     {
         var refreshEvery = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
         var checkSeconds = configuration.GetValue("Lists:ChangeCheckSeconds", 2.0);
-        var checkEvery = checkSeconds > 0 ? TimeSpan.FromSeconds(checkSeconds) : refreshEvery;
-        string? attempted = null;
-        var refreshedAt = DateTimeOffset.MinValue;
-        DateTimeOffset? retryAt = null;
-        var retryWait = TimeSpan.Zero;
+        var schedule = new RefreshSchedule(refreshEvery, checkSeconds > 0 ? TimeSpan.FromSeconds(checkSeconds) : refreshEvery);
         var checkFailing = false;
         while (!stoppingToken.IsCancellationRequested)
         {
-            var due = clock.GetUtcNow() - refreshedAt >= refreshEvery;
             string? changes = null;
             if (checkSeconds > 0)
             {
@@ -295,44 +290,77 @@ public sealed partial class ListRefreshService(ListLoader loader, IConfiguration
                 }
             }
 
-            // Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-            // Each new value is refreshed for once, at once, even while an earlier failure waits for its retry (an
-            // allow-list removal never waits behind a list that won't build). A refresh that failed stays pending: tried
-            // again after RetryWait (5 s, doubling up to a minute), never at every check.
-            var now = clock.GetUtcNow();
-            var retry = retryAt is { } at && now >= at;
-            if (due || retry || (changes is not null && changes != attempted))
+            if (schedule.Begin(clock.GetUtcNow(), changes))
             {
-                attempted = changes ?? attempted;
                 try
                 {
                     await loader.RefreshAsync(stoppingToken);
-                    retryAt = null;
-                    retryWait = TimeSpan.Zero;
+                    schedule.Finished(clock.GetUtcNow(), succeeded: true);
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    retryWait = RetryWait(retryWait);
-                    retryAt = clock.GetUtcNow() + retryWait;
-                    logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before, and trying again in {Seconds} s", retryWait.TotalSeconds);
+                    schedule.Finished(clock.GetUtcNow(), succeeded: false);
+                    logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before, and trying again in {Seconds} s", schedule.RetryWait.TotalSeconds);
                 }
-
-                refreshedAt = clock.GetUtcNow();
             }
 
-            await Task.Delay(retryAt is null ? checkEvery : Min(checkEvery, retryWait), clock, stoppingToken);
+            await Task.Delay(schedule.NextWait, clock, stoppingToken);
         }
     }
-
-    /// <summary>The wait before trying a failed refresh again: 5 s, then twice the last, at most a minute.</summary>
-    internal static TimeSpan RetryWait(TimeSpan last) =>
-        last <= TimeSpan.Zero ? TimeSpan.FromSeconds(5) : Min(last * 2, TimeSpan.FromMinutes(1));
-
-    private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Checking the database for changes failed; serving what was loaded, and checking again")]
     private static partial void ChangeCheckFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Checking the database for changes works again")]
     private static partial void ChangeCheckRecovered(ILogger logger);
+}
+
+/// <summary>When <see cref="ListRefreshService"/> refreshes, decided from the time and the value of
+/// <see cref="ListLoader.ChangesSql"/> just read (null when the check failed or is off), so it can be tested without a
+/// clock or a database. It refreshes:
+/// <list type="bullet">
+/// <item>at the first call, and when <c>refreshEvery</c> has passed since the last refresh (the backstop);</item>
+/// <item>at once for each new value, even while an earlier failure waits for its retry (an allow-list removal made on
+/// another replica never waits behind a list that won't build). The value is read before the refresh, so a change made
+/// while it runs gives a new value at the next check;</item>
+/// <item>after a failed refresh, once <see cref="RetryWait"/> has passed (5 s, doubling up to a minute): never at every
+/// check, and until it works.</item>
+/// </list></summary>
+internal sealed class RefreshSchedule(TimeSpan refreshEvery, TimeSpan checkEvery)
+{
+    private string? attempted;
+    private DateTimeOffset? refreshedAt;
+    private DateTimeOffset? retryAt;
+
+    /// <summary>The wait before the pending retry (zero when none is pending).</summary>
+    public TimeSpan RetryWait { get; private set; }
+
+    /// <summary>How long to sleep before the next check: the check interval, or less when a retry falls sooner.</summary>
+    public TimeSpan NextWait => retryAt is null || checkEvery <= RetryWait ? checkEvery : RetryWait;
+
+    /// <summary>Whether to refresh now; when it says so, the refresh is for <paramref name="changes"/>.</summary>
+    public bool Begin(DateTimeOffset now, string? changes)
+    {
+        var refresh = refreshedAt is not { } at || now - at >= refreshEvery
+            || (retryAt is { } retry && now >= retry)
+            || (changes is not null && changes != attempted);
+        if (refresh && changes is not null)
+        {
+            attempted = changes;
+        }
+
+        return refresh;
+    }
+
+    /// <summary>Records how the refresh <see cref="Begin"/> asked for went.</summary>
+    public void Finished(DateTimeOffset now, bool succeeded)
+    {
+        refreshedAt = now;
+        RetryWait = succeeded ? TimeSpan.Zero : NextRetryWait(RetryWait);
+        retryAt = succeeded ? null : now + RetryWait;
+    }
+
+    /// <summary>5 s, then twice the last, at most a minute.</summary>
+    internal static TimeSpan NextRetryWait(TimeSpan last) =>
+        last <= TimeSpan.Zero ? TimeSpan.FromSeconds(5) : last * 2 < TimeSpan.FromMinutes(1) ? last * 2 : TimeSpan.FromMinutes(1);
 }
