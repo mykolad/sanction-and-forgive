@@ -4,20 +4,23 @@ import (
 	"context"
 	"net/http"
 	"sync/atomic"
+	"time"
 )
 
-// screeningGate holds single screenings at once (Screening:MaxConcurrent) and waiting for one of those places
-// (Screening:MaxWaiting). One more is refused at once (503 busy, Retry-After 1) rather than queued: past its capacity a
-// replica answers quickly instead of making every caller wait for seconds.
+// screeningGate holds single screenings at once (Screening:MaxConcurrent, 4), waiting for one of those places at most
+// Screening:MaxWaitSeconds (2), and at most Screening:MaxWaiting (256) waiting at all, a bound on memory. One that would
+// wait longer, or one more, is refused (503 busy, Retry-After 1): past its capacity a replica answers quickly instead
+// of making every caller wait longer and longer. The time, not the count, is the limit in practice.
 type screeningGate struct {
 	running  chan struct{}
 	admitted atomic.Int64
 	limit    int64
+	maxWait  time.Duration
 }
 
-func newScreeningGate(maxConcurrent, maxWaiting int) *screeningGate {
+func newScreeningGate(maxConcurrent, maxWaiting int, maxWait time.Duration) *screeningGate {
 	concurrent := max(1, maxConcurrent)
-	return &screeningGate{running: make(chan struct{}, concurrent), limit: int64(concurrent + max(0, maxWaiting))}
+	return &screeningGate{running: make(chan struct{}, concurrent), limit: int64(concurrent + max(0, maxWaiting)), maxWait: max(0, maxWait)}
 }
 
 // gateResult says what became of a screening at the gate.
@@ -25,7 +28,7 @@ type gateResult int
 
 const (
 	ran  gateResult = iota // it ran
-	full                   // refused at once: every place taken and as many waiting as allowed
+	full                   // refused: every place taken and as many waiting as allowed, or no place within maxWait
 	gone                   // the caller gave up while it waited
 )
 
@@ -36,8 +39,17 @@ func (g *screeningGate) run(ctx context.Context, work func()) gateResult {
 		return full
 	}
 	defer g.admitted.Add(-1)
+	timer := time.NewTimer(g.maxWait)
+	defer timer.Stop()
 	select {
 	case g.running <- struct{}{}:
+	case <-timer.C:
+		// A free place and the time running out together: take the place.
+		select {
+		case g.running <- struct{}{}:
+		default:
+			return full
+		}
 	case <-ctx.Done():
 		return gone
 	}

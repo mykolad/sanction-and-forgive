@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // hold takes one of g's places until release is closed.
@@ -19,7 +20,7 @@ func hold(g *screeningGate, release <-chan struct{}) <-chan bool {
 }
 
 func TestGate_WaitsWhileThereIsRoom_RefusesBeyondIt(t *testing.T) {
-	g := newScreeningGate(1, 1)
+	g := newScreeningGate(1, 1, time.Minute)
 	release := make(chan struct{})
 	held := hold(g, release)
 
@@ -50,7 +51,7 @@ func TestBusy_Is503WithRetryAfter(t *testing.T) {
 }
 
 func TestGate_ACallerWhoLeavesWhileWaiting_IsGone_NotBusy(t *testing.T) {
-	g := newScreeningGate(1, 1)
+	g := newScreeningGate(1, 1, time.Minute)
 	release := make(chan struct{})
 	held := hold(g, release)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -70,7 +71,7 @@ func TestGate_ACallerWhoLeavesWhileWaiting_IsGone_NotBusy(t *testing.T) {
 func TestScreen_ACallerWhoSeemsGone_GetsBusy_NeverAnEmptySuccess(t *testing.T) {
 	catalog := NewCatalog()
 	catalog.Replace(nil)
-	s := &Server{Config: Config{MaxConcurrent: 1, MaxWaiting: 1}, Catalog: catalog, Logger: slog.New(slog.DiscardHandler)}
+	s := &Server{Config: Config{MaxConcurrent: 1, MaxWaiting: 1, MaxWait: time.Minute}, Catalog: catalog, Logger: slog.New(slog.DiscardHandler)}
 	handler := s.Handler()
 	release := make(chan struct{})
 	held := hold(s.gate, release)
@@ -85,5 +86,24 @@ func TestScreen_ACallerWhoSeemsGone_GetsBusy_NeverAnEmptySuccess(t *testing.T) {
 	<-held
 	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") != "1" || w.Body.String() != "{\"state\":\"busy\"}\n" {
 		t.Fatalf("got %d %q %q", w.Code, w.Header().Get("Retry-After"), w.Body.String())
+	}
+}
+
+func TestGate_AScreeningThatWaitsLongerThanAllowed_IsRefused_AndLeavesNoPlaceTaken(t *testing.T) {
+	g := newScreeningGate(1, 10, 100*time.Millisecond)
+	release := make(chan struct{})
+	held := hold(g, release)
+
+	started := time.Now()
+	if got := g.run(context.Background(), func() { t.Error("ran past its wait") }); got != full {
+		t.Fatalf("got %d, want full", got)
+	}
+	if waited := time.Since(started); waited < 90*time.Millisecond {
+		t.Fatalf("refused after %v, before its wait", waited)
+	}
+	close(release)
+	<-held
+	if g.admitted.Load() != 0 || g.run(context.Background(), func() {}) != ran {
+		t.Fatal("a place is still taken")
 	}
 }

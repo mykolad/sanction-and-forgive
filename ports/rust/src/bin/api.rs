@@ -57,7 +57,8 @@ async fn serve() {
         stream_max_seconds: number("Screening__StreamMaxSeconds", 200),
         concurrent_streams: number("Screening__ConcurrentStreams", 1),
         max_concurrent: number("Screening__MaxConcurrent", 4),
-        max_waiting: number("Screening__MaxWaiting", 32),
+        max_waiting: number("Screening__MaxWaiting", 256),
+        max_wait: Duration::from_secs_f64(Some(number("Screening__MaxWaitSeconds", 2.0_f64)).filter(|v| *v >= 0.0).unwrap_or(2.0)),
     };
 
     let catalog = Arc::new(Catalog::default());

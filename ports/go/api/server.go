@@ -39,6 +39,7 @@ type Config struct {
 	ConcurrentStreams int
 	MaxConcurrent     int
 	MaxWaiting        int
+	MaxWait           time.Duration
 }
 
 // Server serves the API and the pages.
@@ -57,7 +58,7 @@ type Server struct {
 func (s *Server) Handler() http.Handler {
 	s.streams = make(chan struct{}, max(1, s.Config.ConcurrentStreams))
 	s.limiter = &fixedWindow{limit: s.Config.RateLimitPerMin, counts: map[string]int{}}
-	s.gate = newScreeningGate(s.Config.MaxConcurrent, s.Config.MaxWaiting)
+	s.gate = newScreeningGate(s.Config.MaxConcurrent, s.Config.MaxWaiting, s.Config.MaxWait)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /readyz", s.ready)
