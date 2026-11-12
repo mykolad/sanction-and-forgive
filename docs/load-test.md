@@ -5,6 +5,11 @@ How fast the app (always on; since 2026-11-12 Rust on two 0.25 vCPU / 0.5 GiB re
 
 ## How to run it
 
+Every screening writes an audit line, so a run logs far more than a normal day: on 2026-11-12, six configurations used
+up the workspace's daily cap (then 0.2 GB) by 14:00 UTC, and nothing was logged until the next day's reset (06:00 UTC),
+the import alert included. The cap is 0.5 GB since; for more runs in one day, check
+`az monitor log-analytics workspace show -g sanction-and-forgive-rg -n sanction-and-forgive-logs --query workspaceCapping`.
+
 From the owner's machine, with k6 installed:
 
 ```powershell

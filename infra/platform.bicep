@@ -11,8 +11,8 @@ param sqlAdminObjectId string
 @description('Login name shown for the SQL Entra admin. Kept out of the repo: SQL_ADMIN_LOGIN.')
 param sqlAdminLogin string
 
-@description('Log Analytics daily ingestion cap in GB. Console logs only, so a small cap is plenty.')
-param logDailyCapGb string = '0.2'
+@description('Log Analytics daily ingestion cap in GB (0.5 since 2026-11-12, the owner decided): a normal day logs about 0.02, a load-test day writes an audit line per screening and used up 0.2 by 14:00 UTC, leaving the day, and the import alert, without logs. Billed for what is ingested, not the cap.')
+param logDailyCapGb string = '0.5'
 
 @description('Monthly cost budget for the resource group, in the billing currency. Notifies at 80% spent and 100% forecast.')
 param monthlyBudget int = 20
