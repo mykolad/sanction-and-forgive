@@ -316,7 +316,7 @@ impl Loader {
     /// another only after a failure; a failing check is logged once, and once again when the database answers again.
     pub async fn run_refresh(self: Arc<Self>, refresh_every: std::time::Duration, check_every: std::time::Duration) {
         let wait = if check_every.is_zero() { refresh_every } else { check_every };
-        let mut seen: Option<String> = None;
+        let mut attempted: Option<String> = None;
         let mut refreshed_at: Option<std::time::Instant> = None;
         let mut conn = None;
         let mut retry_at: Option<std::time::Instant> = None;
@@ -360,16 +360,16 @@ impl Loader {
                 }
             }
             // Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-            // A refresh that failed stays pending: tried again after retry_wait (5 s, doubling up to a minute), never at
-            // every check, and the change counts as seen only once a refresh has worked (an allow-list removal seen
-            // while the database stumbled still applies as soon as it answers).
+            // Each new value is refreshed for once, at once, even while an earlier failure waits for its retry (an
+            // allow-list removal never waits behind a list that won't build). A refresh that failed stays pending:
+            // tried again after retry_wait (5 s, doubling up to a minute), never at every check.
             let retry = retry_at.is_some_and(|at| std::time::Instant::now() >= at);
-            if due || retry || (retry_at.is_none() && changes.is_some() && changes != seen) {
+            if due || retry || (changes.is_some() && changes != attempted) {
+                if changes.is_some() {
+                    attempted = changes;
+                }
                 match self.refresh().await {
                     Ok(()) => {
-                        if changes.is_some() {
-                            seen = changes;
-                        }
                         retry_at = None;
                         retry_wait = std::time::Duration::ZERO;
                     }

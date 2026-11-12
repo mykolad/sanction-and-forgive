@@ -317,7 +317,7 @@ func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.D
 	if wait <= 0 {
 		wait = refreshEvery
 	}
-	var seen string
+	var attempted string
 	var refreshedAt, retryAt time.Time
 	var retryWait time.Duration
 	checkFailing := false
@@ -342,11 +342,14 @@ func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.D
 			}
 		}
 		// Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-		// A refresh that failed stays pending: tried again after retryWait (5 s, doubling up to a minute), never at
-		// every check, and the change counts as seen only once a refresh has worked (an allow-list removal seen while
-		// the database stumbled still applies as soon as it answers).
+		// Each new value is refreshed for once, at once, even while an earlier failure waits for its retry (an
+		// allow-list removal never waits behind a list that won't build). A refresh that failed stays pending: tried
+		// again after retryWait (5 s, doubling up to a minute), never at every check.
 		retry := !retryAt.IsZero() && !time.Now().Before(retryAt)
-		if due || retry || (retryAt.IsZero() && read && changes != seen) {
+		if due || retry || (read && changes != attempted) {
+			if read {
+				attempted = changes
+			}
 			if err := l.Refresh(ctx); err != nil {
 				if ctx.Err() != nil {
 					return
@@ -355,9 +358,6 @@ func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.D
 				retryAt = time.Now().Add(retryWait)
 				l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has, and tries again", "error", err.Error(), "seconds", retryWait.Seconds())
 			} else {
-				if read {
-					seen = changes
-				}
 				retryAt, retryWait = time.Time{}, 0
 			}
 			refreshedAt = time.Now()

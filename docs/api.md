@@ -198,8 +198,8 @@ official record). A list that is Not checked can still be browsed; its `state` s
 it, and by every other replica within `Lists:ChangeCheckSeconds` (2); a new version of a list (the daily import) is
 noticed by every replica within the same 2 seconds, and each searches it once it has built its index (seconds). Each reads a small value from the database that
 moves with any source, import or allow-list change (`ListLoader.ChangesSql`, the same query in every implementation)
-and reloads when it moved; a reload that fails is retried (5 s, doubling up to a minute) until it works, and only then
-counts the change as applied. Screenings still never read the database.
+and reloads at once for each new value; a reload that fails is retried (5 s, doubling up to a minute) until it works,
+and a newer change never waits for that retry. Screenings still never read the database.
 
 For the demo's administrators. Screening never needs sign-in. Sign-in is the app's own (owner's decision, 2026-11-11:
 the platform's built-in sign-in ran as a sidecar in every replica), OpenID Connect with Microsoft Entra ID and the app

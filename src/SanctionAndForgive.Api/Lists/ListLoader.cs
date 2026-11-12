@@ -262,7 +262,7 @@ public sealed partial class ListRefreshService(ListLoader loader, IConfiguration
         var refreshEvery = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
         var checkSeconds = configuration.GetValue("Lists:ChangeCheckSeconds", 2.0);
         var checkEvery = checkSeconds > 0 ? TimeSpan.FromSeconds(checkSeconds) : refreshEvery;
-        string? seen = null;
+        string? attempted = null;
         var refreshedAt = DateTimeOffset.MinValue;
         DateTimeOffset? retryAt = null;
         var retryWait = TimeSpan.Zero;
@@ -296,17 +296,17 @@ public sealed partial class ListRefreshService(ListLoader loader, IConfiguration
             }
 
             // Read before the refresh: a change made while it runs moves the value again, and the next check sees it.
-            // A refresh that failed stays pending: tried again after RetryWait (5 s, doubling up to a minute), never at
-            // every check, and the change counts as seen only once a refresh has worked (an allow-list removal seen
-            // while the database stumbled still applies as soon as it answers).
+            // Each new value is refreshed for once, at once, even while an earlier failure waits for its retry (an
+            // allow-list removal never waits behind a list that won't build). A refresh that failed stays pending: tried
+            // again after RetryWait (5 s, doubling up to a minute), never at every check.
             var now = clock.GetUtcNow();
             var retry = retryAt is { } at && now >= at;
-            if (due || retry || (retryAt is null && changes is not null && changes != seen))
+            if (due || retry || (changes is not null && changes != attempted))
             {
+                attempted = changes ?? attempted;
                 try
                 {
                     await loader.RefreshAsync(stoppingToken);
-                    seen = changes ?? seen;
                     retryAt = null;
                     retryWait = TimeSpan.Zero;
                 }
