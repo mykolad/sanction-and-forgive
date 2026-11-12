@@ -35,7 +35,9 @@ serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 unicode-general-category = "1"
 unicode-normalization = "0.1"
-jsonwebtoken = { version = "9", default-features = false }
+# The admin sign-in's ID tokens (RS256). Version 10 needs a crypto backend chosen, or the first signature check panics
+# (Dependabot's #50): rust_crypto, pure Rust like the rest of the build.
+jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
 
 [profile.release]
 codegen-units = 1
