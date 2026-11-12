@@ -234,9 +234,16 @@ public sealed class ChangeTests
     private static async Task WithinSecondsAsync(int seconds, Func<Task<bool>> condition, string what)
     {
         var deadline = System.Diagnostics.Stopwatch.StartNew();
-        while (!await condition())
+        while (true)
         {
-            Assert.True(deadline.Elapsed < TimeSpan.FromSeconds(seconds), $"The API didn't apply {what} within {seconds} s.");
+            // An answer counts only if the request for it started within the time allowed.
+            var asked = deadline.Elapsed;
+            Assert.True(asked < TimeSpan.FromSeconds(seconds), $"The API didn't apply {what} within {seconds} s.");
+            if (await condition())
+            {
+                return;
+            }
+
             await Task.Delay(250);
         }
     }
