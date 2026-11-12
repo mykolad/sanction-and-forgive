@@ -127,7 +127,7 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   lists whose active import changed (one at a time); `ListRefreshService` runs it at startup in the background and
   every `Lists:RefreshMinutes` (15), and sooner whenever `ListLoader.ChangesSql` moved: every replica reads it every
   `Lists:ChangeCheckSeconds` (2; owner's decision 2026-11-12, production runs two replicas), so an administrator's change
-  on one replica reaches the others within seconds. One swap per refresh, every source in it, so a list is never missing from the
+  on one replica, and a new version of a list, reach every replica within seconds. One swap per refresh, every source in it, so a list is never missing from the
   rows; the first swap makes the API ready. If SQL is down, the catalog keeps serving and lists become overdue.
 - **Fail closed:** `LoadedList.IsSearched`: it has an index; otherwise the screener gets none and the cell is
   `NotChecked`, with no percentage. `IsOverdue(now)`: searched, but its last successful check is older than

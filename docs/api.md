@@ -195,7 +195,8 @@ official record). A list that is Not checked can still be browsed; its `state` s
 ## Admin: `/api/v1/admin` and `/admin`
 
 **Several replicas** (production runs two): an administrator's change is applied at once by the replica that answered
-it, and by every other replica within `Lists:ChangeCheckSeconds` (2): each reads a small value from the database that
+it, and by every other replica within `Lists:ChangeCheckSeconds` (2); a new version of a list (the daily import) is
+noticed by every replica within the same 2 seconds, and each searches it once it has built its index (seconds). Each reads a small value from the database that
 moves with any source, import or allow-list change (`ListLoader.ChangesSql`, the same query in every implementation)
 and reloads when it moved. Screenings still never read the database.
 
