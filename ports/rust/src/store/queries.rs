@@ -43,6 +43,19 @@ pub async fn simple(conn: &mut Connection, sql: &str) -> DbResult<()> {
     Ok(())
 }
 
+/// What a refresh reads, in one small value that changes whenever any of it does: each source's row, each import's row
+/// and the allow-list's version. The same query as the reference's ListLoader.ChangesSql.
+pub const CHANGES_SQL: &str = "SELECT CONCAT(
+    (SELECT COUNT_BIG(*) FROM Sources), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Sources), ':',
+    (SELECT COUNT_BIG(*) FROM Imports), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Imports), ':',
+    (SELECT COUNT_BIG(*) FROM AllowListEntries), ':', (SELECT COUNT_BIG(RemovedAt) FROM AllowListEntries)) AS [Value]";
+
+/// Reads CHANGES_SQL.
+pub async fn changes(conn: &mut Connection) -> DbResult<String> {
+    let found = rows(conn, CHANGES_SQL, &[]).await?;
+    Ok(found.first().and_then(|row| row.get::<&str, _>(0)).unwrap_or_default().to_string())
+}
+
 /// A source with its active import's count and completion.
 #[derive(Debug, Clone)]
 pub struct SourceRow {

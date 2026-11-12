@@ -10,7 +10,7 @@ param imageTag string
 
 param image string = 'ghcr.io/mykolad/sanction-and-forgive'
 
-@description('Which implementation runs (the experiment of 2026-11-09, docs/conformance.md): dotnet, the reference and the default, or a port (go, rust), whose image is tag <implementation>-<sha> of the same package.')
+@description('Which implementation runs (the experiment of 2026-11-09, docs/conformance.md): dotnet (the reference) or a port (go, rust; rust in production since 2026-11-12), whose image is tag <implementation>-<sha> of the same package.')
 @allowed([
   'dotnet'
   'go'
@@ -18,11 +18,11 @@ param image string = 'ghcr.io/mykolad/sanction-and-forgive'
 ])
 param implementation string = 'dotnet'
 
-@description('One replica, always on (section 8). Raise only after measuring, and with the owner.')
+@description('Replicas, always on (section 8); app.bicepparam passes two since 2026-11-12. Change only after measuring, and with the owner.')
 param minReplicas int = 1
 param maxReplicas int = 1
 
-@description('vCPU per replica, as a string (Bicep has no decimals). 0.5 with 1Gi since 2026-11-07 (owner\'s decision, after the load test: memory was the limit at 0.25 with 0.5Gi).')
+@description('vCPU per replica, as a string (Bicep has no decimals). app.bicepparam passes 0.25 with 0.5Gi since 2026-11-12 (owner\'s decision: Rust, two replicas, without the sign-in sidecar; docs/load-test.md).')
 param cpu string = '0.5'
 param memory string = '1Gi'
 

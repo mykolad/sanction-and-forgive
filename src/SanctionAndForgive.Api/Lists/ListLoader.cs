@@ -88,6 +88,25 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
         catalog.ReplaceAllowList(AllowList.Build(snapshot.Entries.Select(entry => new AllowListEntry(entry.Id, entry.Name, entry.Reason)), snapshot.Version));
     }
 
+    /// <summary>What a refresh reads, in one small value that changes whenever any of it does: each source's row, each
+    /// import's row (a check, a new update, a hold, a review) and the allow-list's version (additions and removals). Every
+    /// replica reads it every <c>Lists:ChangeCheckSeconds</c> and refreshes when it moved, so an administrator's change on
+    /// one replica reaches the others within seconds (docs/api.md, "Admin"). The same query in every implementation.</summary>
+    public const string ChangesSql = """
+        SELECT CONCAT(
+            (SELECT COUNT_BIG(*) FROM Sources), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Sources), ':',
+            (SELECT COUNT_BIG(*) FROM Imports), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Imports), ':',
+            (SELECT COUNT_BIG(*) FROM AllowListEntries), ':', (SELECT COUNT_BIG(RemovedAt) FROM AllowListEntries)) AS [Value]
+        """;
+
+    /// <summary>Reads <see cref="ChangesSql"/>: no lock, no gate (it never waits for a refresh).</summary>
+    public async Task<string> ChangesAsync(CancellationToken cancellationToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var context = scope.ServiceProvider.GetRequiredService<ListsDbContext>();
+        return await context.Database.SqlQueryRaw<string>(ChangesSql).SingleAsync(cancellationToken);
+    }
+
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
         await gate.WaitAsync(cancellationToken);
@@ -148,12 +167,19 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
             }
         }
 
+        var notBuilt = new List<string>();
         foreach (var (position, target) in pending)
         {
             // A build that fails or finds the list moved on keeps whatever served before (or Not checked for a new
-            // list); the next refresh tries again.
+            // list), and the refresh reports it once everything else is published: the change isn't applied yet, so
+            // ListRefreshService tries again shortly, never waiting for RefreshMinutes.
             var index = await BuildAsync(context, target.Code, target.ActiveImportId!.Value, target.RecordCount, cancellationToken);
             lists[position] = index is not null ? target with { Index = index } : lists[position];
+            if (index is null)
+            {
+                notBuilt.Add(target.Code);
+            }
+
             if (catalog.IsReady)
             {
                 catalog.Replace([.. lists]);
@@ -162,6 +188,10 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
 
         // One full swap with every source in it: the first one is what makes the API ready.
         catalog.Replace(lists);
+        if (notBuilt.Count > 0)
+        {
+            throw new InvalidOperationException($"Not built: {string.Join(", ", notBuilt)}. Everything else is loaded; the list's previous version serves until it's built.");
+        }
     }
 
     internal async Task<ListIndex?> BuildAsync(ListsDbContext context, string code, int importId, int expectedCount, CancellationToken cancellationToken)
@@ -217,26 +247,120 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
         subject.SourceUrl);
 }
 
-/// <summary>Loads the lists at startup (in the background: the API listens at once and answers 503 until then),
-/// then checks every <c>Lists:RefreshMinutes</c> (15) for changed imports and fresher check times. A fraction is
-/// allowed: the conformance run uses 0.05 (3 seconds) so it sees each change it makes without waiting.</summary>
-public sealed class ListRefreshService(ListLoader loader, IConfiguration configuration, ILogger<ListRefreshService> logger) : BackgroundService
+/// <summary>Loads the lists at startup (in the background: the API listens at once and answers 503 until then), then
+/// refreshes every <c>Lists:RefreshMinutes</c> (15; a fraction is allowed), and sooner whenever
+/// <see cref="ListLoader.ChangesSql"/> moved: it's read every <c>Lists:ChangeCheckSeconds</c> (2; 0 turns the check
+/// off), so an administrator's change made on another replica applies here within seconds. A check that fails is
+/// logged once, and once again when the database answers again; the catalog keeps serving meanwhile.</summary>
+public sealed partial class ListRefreshService(ListLoader loader, IConfiguration configuration, TimeProvider clock, ILogger<ListRefreshService> logger) : BackgroundService
 {
+    /// <summary>Bounds one check for changes; one that takes longer counts as failed.</summary>
+    private static readonly TimeSpan ChangeCheckTimeout = TimeSpan.FromSeconds(10);
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var interval = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
+        var refreshEvery = TimeSpan.FromMinutes(configuration.GetValue("Lists:RefreshMinutes", 15.0));
+        var checkSeconds = configuration.GetValue("Lists:ChangeCheckSeconds", 2.0);
+        var schedule = new RefreshSchedule(refreshEvery, checkSeconds > 0 ? TimeSpan.FromSeconds(checkSeconds) : refreshEvery);
+        var checkFailing = false;
         while (!stoppingToken.IsCancellationRequested)
         {
-            try
+            string? changes = null;
+            if (checkSeconds > 0)
             {
-                await loader.RefreshAsync(stoppingToken);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before");
+                try
+                {
+                    // Bounded: a database that takes the query and never answers must not stop the checks or the refresh.
+                    using var bounded = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                    bounded.CancelAfter(ChangeCheckTimeout);
+                    changes = await loader.ChangesAsync(bounded.Token);
+                    if (checkFailing)
+                    {
+                        checkFailing = false;
+                        ChangeCheckRecovered(logger);
+                    }
+                }
+                catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+                {
+                    if (!checkFailing)
+                    {
+                        checkFailing = true;
+                        ChangeCheckFailed(logger, exception);
+                    }
+                }
             }
 
-            await Task.Delay(interval, stoppingToken);
+            if (schedule.Begin(clock.GetUtcNow(), changes))
+            {
+                try
+                {
+                    await loader.RefreshAsync(stoppingToken);
+                    schedule.Finished(clock.GetUtcNow(), succeeded: true);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    schedule.Finished(clock.GetUtcNow(), succeeded: false);
+                    logger.LogError(exception, "Refreshing the lists failed; serving what was loaded before, and trying again in {Seconds} s", schedule.RetryWait.TotalSeconds);
+                }
+            }
+
+            await Task.Delay(schedule.NextWait, clock, stoppingToken);
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Checking the database for changes failed; serving what was loaded, and checking again")]
+    private static partial void ChangeCheckFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Checking the database for changes works again")]
+    private static partial void ChangeCheckRecovered(ILogger logger);
+}
+
+/// <summary>When <see cref="ListRefreshService"/> refreshes, decided from the time and the value of
+/// <see cref="ListLoader.ChangesSql"/> just read (null when the check failed or is off), so it can be tested without a
+/// clock or a database. It refreshes:
+/// <list type="bullet">
+/// <item>at the first call, and when <c>refreshEvery</c> has passed since the last refresh (the backstop);</item>
+/// <item>at once for each new value, even while an earlier failure waits for its retry (an allow-list removal made on
+/// another replica never waits behind a list that won't build). The value is read before the refresh, so a change made
+/// while it runs gives a new value at the next check;</item>
+/// <item>after a failed refresh, once <see cref="RetryWait"/> has passed (5 s, doubling up to a minute): never at every
+/// check, and until it works.</item>
+/// </list></summary>
+internal sealed class RefreshSchedule(TimeSpan refreshEvery, TimeSpan checkEvery)
+{
+    private string? attempted;
+    private DateTimeOffset? refreshedAt;
+    private DateTimeOffset? retryAt;
+
+    /// <summary>The wait before the pending retry (zero when none is pending).</summary>
+    public TimeSpan RetryWait { get; private set; }
+
+    /// <summary>How long to sleep before the next check: the check interval, or less when a retry falls sooner.</summary>
+    public TimeSpan NextWait => retryAt is null || checkEvery <= RetryWait ? checkEvery : RetryWait;
+
+    /// <summary>Whether to refresh now; when it says so, the refresh is for <paramref name="changes"/>.</summary>
+    public bool Begin(DateTimeOffset now, string? changes)
+    {
+        var refresh = refreshedAt is not { } at || now - at >= refreshEvery
+            || (retryAt is { } retry && now >= retry)
+            || (changes is not null && changes != attempted);
+        if (refresh && changes is not null)
+        {
+            attempted = changes;
+        }
+
+        return refresh;
+    }
+
+    /// <summary>Records how the refresh <see cref="Begin"/> asked for went.</summary>
+    public void Finished(DateTimeOffset now, bool succeeded)
+    {
+        refreshedAt = now;
+        RetryWait = succeeded ? TimeSpan.Zero : NextRetryWait(RetryWait);
+        retryAt = succeeded ? null : now + RetryWait;
+    }
+
+    /// <summary>5 s, then twice the last, at most a minute.</summary>
+    internal static TimeSpan NextRetryWait(TimeSpan last) =>
+        last <= TimeSpan.Zero ? TimeSpan.FromSeconds(5) : last * 2 < TimeSpan.FromMinutes(1) ? last * 2 : TimeSpan.FromMinutes(1);
 }

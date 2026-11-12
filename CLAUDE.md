@@ -125,7 +125,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Lists in memory:** `ListCatalog` holds one snapshot of `LoadedList`s (code, name, URL, `MaxAgeHours`, active import,
   `LastCheckedAt`, count, `ListIndex`), swapped whole. `ListLoader.RefreshAsync` reads `Sources` and rebuilds only the
   lists whose active import changed (one at a time); `ListRefreshService` runs it at startup in the background and
-  every `Lists:RefreshMinutes` (15). One swap per refresh, every source in it, so a list is never missing from the
+  every `Lists:RefreshMinutes` (15), and sooner whenever `ListLoader.ChangesSql` moved: every replica reads it every
+  `Lists:ChangeCheckSeconds` (2; owner's decision 2026-11-12, production runs two replicas), so an administrator's change
+  on one replica, and a new version of a list, reach every replica within seconds. One swap per refresh, every source in it, so a list is never missing from the
   rows; the first swap makes the API ready. If SQL is down, the catalog keeps serving and lists become overdue.
 - **Fail closed:** `LoadedList.IsSearched`: it has an index; otherwise the screener gets none and the cell is
   `NotChecked`, with no percentage. `IsOverdue(now)`: searched, but its last successful check is older than
@@ -200,8 +202,8 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `wwwroot`).
 - **Memory** (`ServerGarbageCollection` and `ConcurrentGarbageCollection` off, `System.GC.ConserveMemory` 5): with
   all 10 fetched lists loaded locally, about 320-340 MB private / 400-415 MB working set, also under load. Production
-  has fewer active lists. Production is 0.5 vCPU / 1 GiB since 2026-11-07 (owner's decision: at 0.25 / 0.5 GiB the
-  working set reached the limit under load, `docs/load-test.md`); a larger size is the owner's decision too.
+  has fewer active lists. Production runs the Rust port since 2026-11-12, not this app (owner's decision, `docs/load-test.md`); measured
+  without the sign-in sidecar, this app at 0.5 vCPU / 1 GiB peaks at 421-485 MiB under load. Size is the owner's decision.
 - **Tests:** `Api/ApiTests.cs` with `ApiFactory` (the real `Program`, environment `Testing`, refresh off, a fake clock,
   a database that counts connection attempts).
 
@@ -213,8 +215,8 @@ shared database, references no app project, and compares with golden files from 
 (`tests/conformance/golden`): 600 screenings through the stream, 60 single ones, the catalogue, browsing. Then
 behaviour, then changes that it puts back. Fictional feeds in all nine formats come from a fixed seed (`Feeds/`).
 `tests/conformance/run.ps1` builds the image, makes a fresh database, starts the API with the conformance settings
-(`Lists__RefreshMinutes=0.05`, rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
-containers from the same image, and runs the suite. CI job `conformance`, not required. A change in what the reference
+(`Lists__RefreshMinutes=60` and `Lists__ChangeCheckSeconds=1`, so every change arrives through the check; rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
+containers from the same image, and runs the suite. CI jobs `conformance (dotnet|go|rust)`, required on `master` (owner's decision, 2026-11-12). A change in what the reference
 answers updates the golden files in the same PR (`run.ps1 -Build -UpdateGolden`, review the diff); another
 implementation never rewrites them. **A change to the .NET app is a change to every port** (`ports/go`, `ports/rust`): the CI job
 runs the suite against each, so a behaviour change lands in all of them in the same PR, or the port's job fails.
@@ -261,14 +263,16 @@ Shared settings live at the root: `Directory.Build.props` (framework, nullable, 
 
 ## Build and Test (CI)
 
-`.github/workflows/build-and-test.yml` (**Build and Test**) runs on every PR and push to `master`, two jobs, both
-required on `master`:
+`.github/workflows/build-and-test.yml` (**Build and Test**) runs on every PR and push to `master`; every job is
+required on `master` (the `rust` job and the `conformance` matrix since 2026-11-12, owner's decision):
 
 - `build-and-test`: build, code style, tests, and `az bicep lint` / `build` on every file in `infra/`.
 - `clean-database-migrations`: against a throwaway SQL Server 2022 service container (SQL auth; the password is not a
   secret), `has-pending-model-changes`, then the migration bundle applied to an empty database, rolled back to `0`
   and applied again, then the `SqlServerFact` import tests (`Tests.Data`), which are skipped elsewhere unless
   `SQLSERVER_TEST_CONNECTION` is set.
+- `rust`: the Rust port's format, lints and unit tests.
+- `conformance (dotnet)`, `conformance (go)`, `conformance (rust)`: the conformance suite against each implementation.
 
 ## Data and import (`SanctionAndForgive.Data`, CLI)
 
@@ -345,8 +349,8 @@ be public).
 - **Deploy** (`.github/workflows/deploy.yml`, after Build and Test on master): image + migration bundle, then in
   environment `production`: platform what-if and deploy, firewall open, migrations, firewall closed, app, smoke tests.
   `app.bicepparam` reads `IMAGE_TAG` and `RATE_LIMIT_PER_MINUTE` (120; 0 for a load test only), and
-  `APP_IMPLEMENTATION`, `APP_CPU`, `APP_MEMORY`, `APP_REPLICAS` (dotnet, 0.5, 1Gi, 1 by default). Run by hand, the workflow's input
-  `implementation` deploys `dotnet` (the default, and always after a push), `go` or `rust`: a port's image is the same
+  `APP_IMPLEMENTATION`, `APP_CPU`, `APP_MEMORY`, `APP_REPLICAS` (rust, 0.25, 0.5Gi, 2 by default: production since 2026-11-12, owner's decision). Run by hand, the
+  workflow's input `implementation` deploys `rust` (the default, and always after a push), `dotnet` or `go`: a port's image is the same
   package's tag `<implementation>-<sha>`, and `app.bicep` gives the import job the CLI's command for each.
 - **Alerts** (all to the subscription's Owner role through the action group): database storage above 80%, an import
   that failed, was rejected or was held for review (a log query on the job's console and system logs), and a $20

@@ -4,9 +4,11 @@ package api
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -222,7 +224,7 @@ func (s *Server) screen(w http.ResponseWriter, r *http.Request) {
 	case gone:
 		// The connection says the caller left while it waited for a place, but that can be wrong (a read side closed
 		// while the caller still waits). Never a 200 without a result: busy, which nobody reads if they did leave.
-		s.Logger.Info("A screening's caller left while it waited for a place")
+		s.Logger.Info("A screening's caller left while it waited for a place", "why", fmt.Sprint(context.Cause(r.Context())))
 		busy(w)
 	case ran:
 		writeJSON(w, http.StatusOK, response)
