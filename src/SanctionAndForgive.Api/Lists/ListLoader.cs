@@ -167,12 +167,19 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
             }
         }
 
+        var notBuilt = new List<string>();
         foreach (var (position, target) in pending)
         {
             // A build that fails or finds the list moved on keeps whatever served before (or Not checked for a new
-            // list); the next refresh tries again.
+            // list), and the refresh reports it once everything else is published: the change isn't applied yet, so
+            // ListRefreshService tries again shortly, never waiting for RefreshMinutes.
             var index = await BuildAsync(context, target.Code, target.ActiveImportId!.Value, target.RecordCount, cancellationToken);
             lists[position] = index is not null ? target with { Index = index } : lists[position];
+            if (index is null)
+            {
+                notBuilt.Add(target.Code);
+            }
+
             if (catalog.IsReady)
             {
                 catalog.Replace([.. lists]);
@@ -181,6 +188,10 @@ public sealed partial class ListLoader(IServiceScopeFactory scopes, ListCatalog 
 
         // One full swap with every source in it: the first one is what makes the API ready.
         catalog.Replace(lists);
+        if (notBuilt.Count > 0)
+        {
+            throw new InvalidOperationException($"Not built: {string.Join(", ", notBuilt)}. Everything else is loaded; the list's previous version serves until it's built.");
+        }
     }
 
     internal async Task<ListIndex?> BuildAsync(ListsDbContext context, string code, int importId, int expectedCount, CancellationToken cancellationToken)

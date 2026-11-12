@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -225,17 +226,25 @@ func (l *Loader) refreshOnce(ctx context.Context) error {
 	// Only lists holds the old indexes now: each swap below can release the one it replaces (Copilot's point on #37,
 	// the same pattern there): never two whole generations at once.
 	current = nil
+	// A build that fails keeps whatever served before, and the refresh reports it once everything else is published:
+	// the change isn't applied yet, so RunRefresh tries again shortly, never waiting for refreshEvery.
+	var notBuilt []string
 	for _, p := range pending {
 		if index := l.build(ctx, p.target.Code, *p.target.ActiveImportID, p.target.RecordCount); index != nil {
 			built := *p.target
 			built.Index = index
 			lists[p.position] = &built
+		} else {
+			notBuilt = append(notBuilt, p.target.Code)
 		}
 		if l.catalog.IsReady() {
 			l.catalog.Replace(append([]*LoadedList{}, lists...))
 		}
 	}
 	l.catalog.Replace(lists)
+	if len(notBuilt) > 0 {
+		return fmt.Errorf("not built: %s; everything else is loaded, and the list's previous version serves until it's built", strings.Join(notBuilt, ", "))
+	}
 	return nil
 }
 

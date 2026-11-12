@@ -257,18 +257,30 @@ impl Loader {
         }
         // Only lists holds the old indexes now: each swap below can release the one it replaces.
         drop(current);
+        // A build that fails keeps whatever served before, and the refresh reports it once everything else is
+        // published: the change isn't applied yet, so run_refresh tries again shortly, never waiting for refresh_every.
+        let mut not_built = Vec::new();
         for (position, target) in pending {
             let import_id = target.active_import_id.unwrap();
             if let Some(index) = self.build(&mut conn, &target.code, import_id, target.record_count).await {
                 let mut built = target;
                 built.index = Some(Arc::new(index));
                 lists[position] = Arc::new(built);
+            } else {
+                not_built.push(target.code.clone());
             }
             if self.catalog.is_ready() {
                 self.catalog.replace(lists.clone());
             }
         }
         self.catalog.replace(lists);
+        if !not_built.is_empty() {
+            return Err(format!(
+                "Not built: {}; everything else is loaded, and the list's previous version serves until it's built",
+                not_built.join(", ")
+            )
+            .into());
+        }
         Ok(())
     }
 
