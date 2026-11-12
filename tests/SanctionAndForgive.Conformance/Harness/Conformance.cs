@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -313,15 +314,41 @@ public static class Suite
     public static async Task<HttpResponseMessage> PostAsync(string path, object body) =>
         await Http.PostAsync(new Uri(path, UriKind.Relative), JsonContent.Create(body, options: Json));
 
-    /// <summary>A screening (the reference added if missing); asserts a 200.</summary>
+    /// <summary>Times a screening answered 503 busy is tried again, as docs/api.md ("Busy") tells a caller to.</summary>
+    private const int BusyRetries = 3;
+
+    /// <summary>A screening (the reference added if missing); asserts a 200. A 503 <c>busy</c> is tried again after
+    /// its <c>Retry-After</c>, up to <see cref="BusyRetries"/> times, as a real caller would.</summary>
     public static async Task<JsonElement> ScreenAsync(object body)
     {
         var json = JsonSerializer.SerializeToNode(body, Json)!.AsObject();
         json.TryAdd("reference", "conformance-1");
-        using var response = await PostAsync("api/v1/screenings", json);
-        var text = await response.Content.ReadAsStringAsync();
-        Assert.True(response.IsSuccessStatusCode, $"Screening: {(int)response.StatusCode} {text}");
-        return JsonDocument.Parse(text).RootElement.Clone();
+        for (var attempt = 0; ; attempt++)
+        {
+            using var response = await PostAsync("api/v1/screenings", json);
+            var text = await response.Content.ReadAsStringAsync();
+            if (response.StatusCode == HttpStatusCode.ServiceUnavailable && attempt < BusyRetries && IsBusy(text))
+            {
+                await Task.Delay(response.Headers.RetryAfter?.Delta ?? TimeSpan.FromSeconds(1));
+                continue;
+            }
+
+            Assert.True(response.IsSuccessStatusCode, $"Screening: {(int)response.StatusCode} {text}");
+            return JsonDocument.Parse(text).RootElement.Clone();
+        }
+    }
+
+    private static bool IsBusy(string text)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            return document.RootElement.TryGetProperty("state", out var state) && state.GetString() == "busy";
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>The stream endpoint: NDJSON in, every line out.</summary>

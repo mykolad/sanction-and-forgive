@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -60,5 +63,27 @@ func TestGate_ACallerWhoLeavesWhileWaiting_IsGone_NotBusy(t *testing.T) {
 	<-held
 	if g.admitted.Load() != 0 {
 		t.Fatalf("%d places still taken", g.admitted.Load())
+	}
+}
+
+// The gate's "caller left" comes from the connection, which can be wrong: the answer is still busy, never an empty 200.
+func TestScreen_ACallerWhoSeemsGone_GetsBusy_NeverAnEmptySuccess(t *testing.T) {
+	catalog := NewCatalog()
+	catalog.Replace(nil)
+	s := &Server{Config: Config{MaxConcurrent: 1, MaxWaiting: 1}, Catalog: catalog, Logger: slog.New(slog.DiscardHandler)}
+	handler := s.Handler()
+	release := make(chan struct{})
+	held := hold(s.gate, release)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/screenings", strings.NewReader(`{"reference":"r-1","receiverName":"Someone"}`))
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, request)
+
+	close(release)
+	<-held
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") != "1" || w.Body.String() != "{\"state\":\"busy\"}\n" {
+		t.Fatalf("got %d %q %q", w.Code, w.Header().Get("Retry-After"), w.Body.String())
 	}
 }
