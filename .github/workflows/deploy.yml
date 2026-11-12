@@ -7,7 +7,7 @@ name: Deploy
 #
 # By hand, the input chooses the implementation (the owner's experiment, 2026-11-09: docs/conformance.md): .NET, the
 # reference, or a port (ports/go, ports/rust), whose image is the same package's tag <implementation>-<sha>. A deploy
-# after a push to master always runs .NET, the default.
+# after a push to master always runs Rust, production's (the owner's decision, 2026-11-12).
 on:
   workflow_run:
     workflows: [Build and Test]
@@ -19,7 +19,7 @@ on:
         description: Which implementation to deploy
         type: choice
         options: [dotnet, go, rust]
-        default: dotnet
+        default: rust
 
 permissions:
   contents: read
@@ -34,8 +34,8 @@ env:
   RESOURCE_GROUP: sanction-and-forgive-rg
   SQL_SERVER: sanction-and-forgive-sql
   IMAGE: ghcr.io/mykolad/sanction-and-forgive
-  # Empty after a push (no inputs): .NET.
-  IMPLEMENTATION: ${{ inputs.implementation || 'dotnet' }}
+  # Empty after a push (no inputs): Rust, production's.
+  IMPLEMENTATION: ${{ inputs.implementation || 'rust' }}
 
 jobs:
   build:

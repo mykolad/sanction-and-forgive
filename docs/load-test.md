@@ -1,7 +1,7 @@
 # Load test
 
-How fast one replica (always on; 0.5 vCPU / 1 GiB since 2026-11-07, 0.25 vCPU / 0.5 GiB before) can screen, and
-what limits it. Spec section 7, "Load test".
+How fast the app (always on; since 2026-11-12 Rust on two 0.25 vCPU / 0.5 GiB replicas, before that .NET on one
+0.5 vCPU / 1 GiB) can screen, and what limits it. Spec section 7, "Load test".
 
 ## How to run it
 
@@ -39,6 +39,42 @@ what stopped the run.
 
 ## Results
 
+### Without the sign-in sidecar: every implementation, both sizes (2026-11-12)
+
+The platform's sign-in sidecar is gone since #49 (the app signs administrators in itself). The owner asked (2026-11-12)
+to measure again: Rust on two small replicas (three runs on fresh replicas), then each implementation on one 0.5 vCPU /
+1 GiB replica and on two 0.25 vCPU / 0.5 GiB replicas (together the same price). Commit 190dc27 (images `190dc27`,
+`go-190dc27`, `rust-190dc27`), the same 2,000 inputs (2026-11-07) and six lists as every run below, the rate limit
+off, the busy cap on (#48: 4 screenings running and 32 waiting per replica, then 503 `busy`). k6 counts a 503 as a
+failure, so a step fails when more than 2% are refused, as well as when its p95 passes 2 s. 11:26-15:35 UTC.
+
+| Implementation | Replicas | Sustained screenings/s | p95 there (p50) | Next step | CPU per replica (highest minute) | Memory per replica | With the sidecar |
+|---|---|---|---|---|---|---|---|
+| Rust | 2 × 0.25 vCPU / 0.5 GiB, run 1 | **96** | 59 ms (18 ms) | 128/s: 8.0% busy, p95 839 ms | 0.17-0.19 | 249-355 MiB | 64 |
+| Rust | 2 × 0.25 vCPU / 0.5 GiB, run 2 | **96** | 547 ms (17 ms) | 112/s: 2.02% busy, p95 719 ms | 0.22-0.23 | 255-361 MiB | 64 |
+| Rust | 2 × 0.25 vCPU / 0.5 GiB, run 3 | **96** | 45 ms (17 ms) | 112/s: 2.07% busy, p95 739 ms | 0.18-0.19 | 263-348 MiB | 96 |
+| Rust | 1 × 0.5 vCPU / 1 GiB | **96** | 63 ms (17 ms) | 112/s: 2.15% busy, p95 374 ms | 0.42 | 236-380 MiB | 96 |
+| Go | 1 × 0.5 vCPU / 1 GiB | **80** | 268 ms (19 ms) | 96/s: 2.13% busy, p95 463 ms | 0.46 | 288-372 MiB | 64 |
+| Go | 2 × 0.25 vCPU / 0.5 GiB | **64** | 307 ms (20 ms) | 80/s: 2.10% busy, p95 999 ms | 0.22-0.24 | 256-352 MiB | (not run) |
+| .NET | 1 × 0.5 vCPU / 1 GiB | **32** | 230 ms (22 ms) | 48/s: 10.9% busy, p95 1.12 s | 0.35 | 421-485 MiB | 24 |
+| .NET | 2 × 0.25 vCPU / 0.5 GiB | **32** | 556 ms (24 ms) | 48/s: 11.8% busy, p95 2.37 s | 0.18-0.20 | 322-457 MiB | (not run) |
+
+Every failed request was a 503 `busy` from the cap (Azure Monitor's count by status code): nothing timed out, no
+replica restarted or ran out of memory, the ingress split the requests evenly between two replicas, and no run
+stalled. The readiness probe timed out at 5 s 9-13 times in each Rust run on two replicas, never six in a row, so no
+replica left service.
+
+- **Without the sidecar, every implementation is faster or the same on the same replica**: .NET 24 to 32 a second,
+  Go 64 to 80, Rust 96 (its p95 there 164 ms to 63 ms), and Rust on two small replicas 96 in all three runs (64, 64
+  and 96 with it). The sidecar took CPU from every request, as well as 80-120 MiB.
+- **Memory is no longer tight**: Rust's small replicas peaked at 348-361 MiB of 512 (494 with the sidecar); .NET fits
+  on the small replicas too, at 457 MiB.
+- **The cap now ends the Rust and Go runs, not speed**: at the first failing step the p95 was still under 1 s, and
+  more than 2% were refused when short pauses (half a vCPU's throttling, the platform) filled the 36 places. Whether to
+  let requests wait longer (a time limit on waiting instead of a count) is open with the owner.
+- **Production since 2026-11-12, 15:37 UTC: Rust on two 0.25 vCPU / 0.5 GiB replicas, the rate limit at 120** (the
+  owner's decision: Rust there if good enough). The deploy workflow's defaults follow.
+
 ### Rust, before and after its tuning (2026-11-10)
 
 The owner asked (2026-11-10) to load-test Rust (`ports/rust`, deployable since #40) at 0.5 vCPU / 1 GiB, tune it if
@@ -67,7 +103,8 @@ All five implementations and sizes side by side (sustained screenings/s):
   result the same.
 - **Tuned, Rust is 4 times .NET on the same replica** (96 against 24, 48 against 12) and 1.5 times Go. At 0.25 vCPU /
   0.5 GiB it handles twice what .NET handles at 0.5 vCPU / 1 GiB, in 301-448 MiB.
-- Which implementation runs, and at what size, is the owner's decision. Production stays on .NET at 0.5 vCPU / 1 GiB.
+- Which implementation runs, and at what size, is the owner's decision. Production stayed on .NET at 0.5 vCPU / 1 GiB
+  until 2026-11-12 (above).
 
 **An open finding: a stall that isn't the app.** Three of the eleven runs on 2026-11-10 stalled at a few screenings a
 second, at a different place each time: Go at 0.25 vCPU (14:17 UTC, at 2/s), Rust #42 at 0.5 vCPU (18:03, at 6/s) and

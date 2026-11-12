@@ -7,7 +7,7 @@ reproducible from an empty group. Nothing here belongs to or touches lazydad.
 |---|---|---|---|
 | `bootstrap.bicep` | Subscription | The owner, once | Resource group; `sanction-and-forgive-github-cd` (the identity GitHub Actions deploys as), trusted from this repository's `production` environment only, Contributor on the group only |
 | `platform.bicep` | Resource group | The deploy workflow (first time: by hand) | Log Analytics (30 days, daily cap), Container Apps environment `sanction-and-forgive-cae`, app identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` (Entra-only), database `sanction-and-forgive-db` (Basic, 5 DTU, 2 GB), the Azure services firewall rule; alerts to the subscription's Owner role: database storage above 80%, a failed or rejected import, and a $20 monthly budget (80% spent, 100% forecast) |
-| `app.bicep` | Resource group | The deploy workflow | Container App `sanction-and-forgive` (0.5 vCPU / 1 GiB since 2026-11-07, min = max = 1, port 8080, liveness `/healthz`, readiness `/readyz`, public ingress unless `allowedCidrs`) and the job `sanction-and-forgive-import` (daily 03:30 UTC, `import --source all`, 0.5 vCPU / 1 GiB, 30 minutes), both from `ghcr.io/mykolad/sanction-and-forgive:<sha>` as identity `sanction-and-forgive-app` |
+| `app.bicep` | Resource group | The deploy workflow | Container App `sanction-and-forgive` (Rust, two replicas of 0.25 vCPU / 0.5 GiB since 2026-11-12, min = max = 2, port 8080, liveness `/healthz`, readiness `/readyz`, public ingress unless `allowedCidrs`) and the job `sanction-and-forgive-import` (daily 03:30 UTC, `import --source all`, 0.5 vCPU / 1 GiB, 30 minutes), both from `ghcr.io/mykolad/sanction-and-forgive:<sha>` as identity `sanction-and-forgive-app` |
 | `sql/grant-identities.sql` | Database | The owner, once (or after re-creating the database) | Database users for the app and deploy identities: what Bicep can't do |
 | `admin-sign-in.ps1` | Tenant | The owner, once | The admin sign-in's Entra app registration (role `Lists.Admin`, assignment required, assigned to the owner); the app then signs administrators in itself |
 
@@ -71,11 +71,11 @@ registration, Users and groups).
 ## Deploying
 
 `.github/workflows/deploy.yml` (**Deploy**) runs after Build and Test passes on a push to `master`, or by hand. By
-hand, its input **implementation** chooses what runs: `dotnet` (the reference, the default, and always after a push),
-`go` or `rust` (the ports, `ports/go` and `ports/rust`; docs/conformance.md):
+hand, its input **implementation** chooses what runs: `rust` (production's since 2026-11-12: the default, and always after a push),
+`dotnet` (the reference) or `go` (the ports, `ports/go` and `ports/rust`; docs/conformance.md):
 
 ```powershell
-gh workflow run deploy.yml --ref master -f implementation=go   # and -f implementation=dotnet to go back
+gh workflow run deploy.yml --ref master -f implementation=go   # and -f implementation=rust to go back
 ```
 
 1. **build**: the image `ghcr.io/mykolad/sanction-and-forgive:<sha>` (a port's: the same package's tag
@@ -97,12 +97,12 @@ az containerapp job execution list -g sanction-and-forgive-rg -n sanction-and-fo
 ```
 
 **Load tests** (Phase 5): deploy with the rate limit off, then deploy again without it. `app.bicepparam` also reads
-`APP_IMPLEMENTATION` (`dotnet`, `go` or `rust`; a port's image tag `<implementation>-<sha>` must exist), `APP_CPU` and `APP_MEMORY` (0.5 and
-1Gi by default) for a run at another size:
+`APP_IMPLEMENTATION` (`dotnet`, `go` or `rust`; a port's image tag `<implementation>-<sha>` must exist), `APP_CPU`, `APP_MEMORY` and `APP_REPLICAS` (rust, 0.25,
+0.5Gi and 2 by default) for a run at another size:
 
 ```powershell
 $env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'
-# $env:APP_IMPLEMENTATION = 'go'; $env:APP_CPU = '0.25'; $env:APP_MEMORY = '0.5Gi'; $env:APP_REPLICAS = '2'
+# $env:APP_IMPLEMENTATION = 'go'; $env:APP_CPU = '0.5'; $env:APP_MEMORY = '1Gi'; $env:APP_REPLICAS = '1'
 az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/app.bicepparam
 Remove-Item Env:RATE_LIMIT_PER_MINUTE, Env:APP_IMPLEMENTATION, Env:APP_CPU, Env:APP_MEMORY, Env:APP_REPLICAS -ErrorAction Ignore   # then the same create again
 ```

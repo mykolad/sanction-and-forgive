@@ -200,8 +200,8 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `wwwroot`).
 - **Memory** (`ServerGarbageCollection` and `ConcurrentGarbageCollection` off, `System.GC.ConserveMemory` 5): with
   all 10 fetched lists loaded locally, about 320-340 MB private / 400-415 MB working set, also under load. Production
-  has fewer active lists. Production is 0.5 vCPU / 1 GiB since 2026-11-07 (owner's decision: at 0.25 / 0.5 GiB the
-  working set reached the limit under load, `docs/load-test.md`); a larger size is the owner's decision too.
+  has fewer active lists. Production runs the Rust port since 2026-11-12, not this app (owner's decision, `docs/load-test.md`); measured
+  without the sign-in sidecar, this app at 0.5 vCPU / 1 GiB peaks at 421-485 MiB under load. Size is the owner's decision.
 - **Tests:** `Api/ApiTests.cs` with `ApiFactory` (the real `Program`, environment `Testing`, refresh off, a fake clock,
   a database that counts connection attempts).
 
@@ -347,8 +347,8 @@ be public).
 - **Deploy** (`.github/workflows/deploy.yml`, after Build and Test on master): image + migration bundle, then in
   environment `production`: platform what-if and deploy, firewall open, migrations, firewall closed, app, smoke tests.
   `app.bicepparam` reads `IMAGE_TAG` and `RATE_LIMIT_PER_MINUTE` (120; 0 for a load test only), and
-  `APP_IMPLEMENTATION`, `APP_CPU`, `APP_MEMORY`, `APP_REPLICAS` (dotnet, 0.5, 1Gi, 1 by default). Run by hand, the workflow's input
-  `implementation` deploys `dotnet` (the default, and always after a push), `go` or `rust`: a port's image is the same
+  `APP_IMPLEMENTATION`, `APP_CPU`, `APP_MEMORY`, `APP_REPLICAS` (rust, 0.25, 0.5Gi, 2 by default: production since 2026-11-12, owner's decision). Run by hand, the
+  workflow's input `implementation` deploys `rust` (the default, and always after a push), `dotnet` or `go`: a port's image is the same
   package's tag `<implementation>-<sha>`, and `app.bicep` gives the import job the CLI's command for each.
 - **Alerts** (all to the subscription's Owner role through the action group): database storage above 80%, an import
   that failed, was rejected or was held for review (a log query on the job's console and system logs), and a $20
