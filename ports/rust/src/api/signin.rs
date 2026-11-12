@@ -348,6 +348,34 @@ async fn sign_out(Query(query): Query<HashMap<String, String>>) -> Response {
 mod tests {
     use super::*;
 
+    /// RFC 7515, appendix A.2.1: a token signed RS256 and its key's public half (n, e). A published example: no key of
+    /// this app's, nothing secret.
+    const RFC_N: &str = "ofgWCuLjybRlzo0tZWJjNiuSfb4p4fAkd_wWJcyQoTbji9k0l8W26mPddxHmfHQp-Vaw-4qPCJrcS2mJPMEzP1Pt0Bm4d4QlL-yRT-SFd2lZS-pCgNMsD1W_YpRPEwOWvG6b32690r2jZ47soMZo9wGzjb_7OMg0LOL-bSf63kpaSHSXndS5z5rexMdbBYUsLA9e-KXBdQOS-UTo7WTBEMa2R2CapHg665xsmtdVMTBQY4uDZlxvb3qCo5ZwKh9kG4LT6_I5IhlJH7aGhyxXFvUK-DWNmoudF8NAco9_h9iaGNj8q2ethFkMLs91kzk2PAcDTW9gb54h4FRWyuXpoQ";
+    const RFC_E: &str = "AQAB";
+    const RFC_TOKEN: &str = "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJqb2UiLA0KICJleHAiOjEzMDA4MTkzODAsDQogImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ.cC4hiUPoj9Eetdgtv3hF80EGrhuB__dzERat0XF9g2VtQgr9PJbu3XOiZj5RZmh7AAuHIm4Bh-0Qc_lF5YKt_O8W2Fp5jujGbds9uJdbF9CUAr7t1dnZcAcQjbKBYNX4BAynRFdiuB--f_nZLgrnbyTyWzO75vRK5h6xBArLIARNPvkSjtQBMHlb1L07Qe7K0GarZRmB_eSN9383LcOLn6_dO--xi12jzDwusC-eOkHWEsqtFZESc6BfI7noOPqvhJ1phCnvWh6IeYI2w9QOYEUipUTI8np6LbgGY9Fs98rqVt5AXLIhWkWywlVmtVrBp0igcN_IoypGlUPQGe77Rw";
+
+    /// The signature check itself, as the sign-in uses it (RS256 with a key from its n and e): a library or build
+    /// change that leaves it without a crypto backend panics here, not at the first sign-in (Dependabot's #50).
+    #[test]
+    fn an_rs256_signature_is_checked() {
+        let key = jsonwebtoken::DecodingKey::from_rsa_components(RFC_N, RFC_E).expect("the RFC's key");
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+        // Only the signature: the example expired in 2011 and names no audience.
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        validation.required_spec_claims.clear();
+
+        let claims = jsonwebtoken::decode::<serde_json::Value>(RFC_TOKEN, &key, &validation).expect("the RFC's signature").claims;
+        assert_eq!(claims["iss"], "joe");
+
+        // One character in the middle of the signature changed.
+        let middle = RFC_TOKEN.len() - 150;
+        let other = if &RFC_TOKEN[middle..=middle] == "A" { "B" } else { "A" };
+        let tampered = format!("{}{other}{}", &RFC_TOKEN[..middle], &RFC_TOKEN[middle + 1..]);
+        let refused = jsonwebtoken::decode::<serde_json::Value>(&tampered, &key, &validation).expect_err("a changed signature");
+        assert_eq!(refused.kind(), &jsonwebtoken::errors::ErrorKind::InvalidSignature);
+    }
+
     #[test]
     fn returns_only_to_this_site() {
         for (path, want) in [
