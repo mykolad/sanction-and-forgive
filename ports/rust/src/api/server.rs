@@ -43,6 +43,7 @@ pub struct Config {
     pub concurrent_streams: usize,
     pub max_concurrent: usize,
     pub max_waiting: usize,
+    pub max_wait: std::time::Duration,
 }
 
 pub struct AppState {
@@ -70,18 +71,20 @@ impl AppState {
     ) -> Self {
         let streams = Arc::new(Semaphore::new(config.concurrent_streams.max(1)));
         let limiter = FixedWindow { limit: config.rate_limit_per_minute, window: Mutex::new((Instant::now(), HashMap::new())) };
-        let gate = Arc::new(ScreeningGate::new(config.max_concurrent, config.max_waiting));
+        let gate = Arc::new(ScreeningGate::new(config.max_concurrent, config.max_waiting, config.max_wait));
         AppState { config, catalog, screenings, loader, db, sign_in, streams, limiter, gate }
     }
 }
 
-/// Single screenings at once (`Screening:MaxConcurrent`) and waiting for one of those places (`Screening:MaxWaiting`):
-/// one more is refused at once, 503 busy, rather than queued, so an overload doesn't hold memory for requests that
-/// would wait for seconds anyway.
+/// Single screenings at once (`Screening:MaxConcurrent`, 4), waiting for one of those places at most
+/// `Screening:MaxWaitSeconds` (2), and at most `Screening:MaxWaiting` (256) waiting at all, a bound on memory. One that
+/// would wait longer, or one more, is refused, 503 busy: past its capacity a replica answers quickly instead of making
+/// every caller wait longer and longer. The time, not the count, is the limit in practice.
 struct ScreeningGate {
     running: Arc<Semaphore>,
     admitted: AtomicUsize,
     limit: usize,
+    max_wait: std::time::Duration,
 }
 
 /// A screening's place in the gate, given back when dropped.
@@ -94,9 +97,22 @@ impl Drop for Admitted {
 }
 
 impl ScreeningGate {
-    fn new(concurrent: usize, waiting: usize) -> Self {
+    fn new(concurrent: usize, waiting: usize, max_wait: std::time::Duration) -> Self {
         let concurrent = concurrent.max(1);
-        ScreeningGate { running: Arc::new(Semaphore::new(concurrent)), admitted: AtomicUsize::new(0), limit: concurrent + waiting }
+        ScreeningGate {
+            running: Arc::new(Semaphore::new(concurrent)),
+            admitted: AtomicUsize::new(0),
+            limit: concurrent + waiting,
+            max_wait,
+        }
+    }
+
+    /// A place to run in, waiting at most max_wait for one; None when none was free in time.
+    async fn place(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        match tokio::time::timeout(self.max_wait, self.running.clone().acquire_owned()).await {
+            Ok(permit) => Some(permit.expect("the gate is never closed")),
+            Err(_) => None,
+        }
     }
 
     fn enter(self: &Arc<Self>) -> Option<Admitted> {
@@ -325,7 +341,9 @@ async fn screen(State(s): State<Shared>, ConnectInfo(peer): ConnectInfo<SocketAd
         return busy();
     };
     // The place and the permit go with the screening, so a caller that gives up doesn't free them while it runs.
-    let permit = s.gate.running.clone().acquire_owned().await.expect("the gate is never closed");
+    let Some(permit) = s.gate.place().await else {
+        return busy();
+    };
     let service = s.screenings.clone();
     let response = tokio::task::spawn_blocking(move || {
         let _held = (admitted, permit);
@@ -336,7 +354,7 @@ async fn screen(State(s): State<Shared>, ConnectInfo(peer): ConnectInfo<SocketAd
     json_response(StatusCode::OK, &response)
 }
 
-/// 503 when as many screenings as allowed are running and waiting: try again in a second.
+/// 503 when as many screenings as allowed are running and waiting, or none got a place in time: try again in a second.
 fn busy() -> Response {
     let mut response = warming_up("busy");
     response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("1"));
@@ -596,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn gate_lets_screenings_wait_while_there_is_room_and_refuses_beyond_it() {
-        let gate = Arc::new(ScreeningGate::new(1, 1));
+        let gate = Arc::new(ScreeningGate::new(1, 1, std::time::Duration::from_secs(60)));
         let running = gate.enter().expect("a free gate admits");
         let permit = gate.running.clone().acquire_owned().await.unwrap();
         let waiting = gate.enter().expect("room to wait");
@@ -607,6 +625,23 @@ mod tests {
         assert!(gate.enter().is_some(), "the place freed");
         drop(waiting);
         assert_eq!(gate.admitted.load(Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn a_screening_that_waits_longer_than_allowed_is_refused_and_leaves_no_place_taken() {
+        let gate = Arc::new(ScreeningGate::new(1, 10, std::time::Duration::from_millis(100)));
+        let running = gate.enter().expect("a free gate admits");
+        let permit = gate.place().await.expect("a free place");
+
+        let waiting = gate.enter().expect("room to wait");
+        let started = std::time::Instant::now();
+        assert!(gate.place().await.is_none(), "a place after its wait");
+        assert!(started.elapsed() >= std::time::Duration::from_millis(90), "refused before its wait");
+        drop(waiting);
+
+        drop((running, permit));
+        assert_eq!(gate.admitted.load(Ordering::Acquire), 0);
+        assert!(gate.place().await.is_some(), "the place freed");
     }
 
     #[test]

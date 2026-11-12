@@ -339,7 +339,7 @@ public sealed class ScreeningGateTests
     [Fact]
     public async Task AScreeningWaitsForAFreePlace_WhileThereIsRoomToWait()
     {
-        using var gate = new ScreeningGate(1, 1);
+        using var gate = new ScreeningGate(1, 1, TimeSpan.FromMinutes(1));
         using var release = new ManualResetEventSlim();
         var held = await HoldAsync(gate, release);
 
@@ -350,6 +350,22 @@ public sealed class ScreeningGateTests
 
         release.Set();
         Assert.Equal(("held", "waited"), (await held, await waiting));
+        Assert.Equal("again", await gate.TryRunAsync(() => "again", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AScreeningThatWaitsLongerThanAllowed_IsRefused_AndLeavesNoPlaceTaken()
+    {
+        using var gate = new ScreeningGate(1, 10, TimeSpan.FromMilliseconds(100));
+        using var release = new ManualResetEventSlim();
+        var held = await HoldAsync(gate, release);
+
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Null(await gate.TryRunAsync(() => "too late", CancellationToken.None));
+        Assert.True(waited.Elapsed >= TimeSpan.FromMilliseconds(90), $"refused after {waited.ElapsedMilliseconds} ms, before its wait");
+
+        release.Set();
+        Assert.Equal("held", await held);
         Assert.Equal("again", await gate.TryRunAsync(() => "again", CancellationToken.None));
     }
 }

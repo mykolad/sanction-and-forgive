@@ -26,7 +26,7 @@ builder.Services.AddSingleton(AppInfo.From(builder.Configuration));
 builder.Services.AddSingleton<ListCatalog>();
 builder.Services.AddSingleton<ListLoader>();
 builder.Services.AddSingleton<ScreeningService>();
-builder.Services.AddSingleton(_ => new ScreeningGate(builder.Configuration.GetValue("Screening:MaxConcurrent", 4), builder.Configuration.GetValue("Screening:MaxWaiting", 32)));
+builder.Services.AddSingleton(_ => new ScreeningGate(builder.Configuration.GetValue("Screening:MaxConcurrent", 4), builder.Configuration.GetValue("Screening:MaxWaiting", 256), TimeSpan.FromSeconds(builder.Configuration.GetValue("Screening:MaxWaitSeconds", 2.0))));
 // Admin: the Entra sign-in (off unless the deployment names the app registration), and reviewing held updates.
 var signInSettings = SanctionAndForgive.Api.Admin.SignInSettings.From(builder.Configuration);
 builder.Services.AddSingleton(signInSettings);

@@ -25,6 +25,13 @@ func setting(name, fallback string) string {
 	return fallback
 }
 
+func floatSetting(name string, fallback float64) float64 {
+	if value, err := strconv.ParseFloat(os.Getenv(name), 64); err == nil && value >= 0 {
+		return value
+	}
+	return fallback
+}
+
 func intSetting(name string, fallback int) int {
 	if value, err := strconv.Atoi(os.Getenv(name)); err == nil {
 		return value
@@ -77,7 +84,8 @@ func main() {
 		StreamMaxSeconds:  intSetting("Screening__StreamMaxSeconds", 200),
 		ConcurrentStreams: intSetting("Screening__ConcurrentStreams", 1),
 		MaxConcurrent:     intSetting("Screening__MaxConcurrent", 4),
-		MaxWaiting:        intSetting("Screening__MaxWaiting", 32),
+		MaxWaiting:        intSetting("Screening__MaxWaiting", 256),
+		MaxWait:           time.Duration(floatSetting("Screening__MaxWaitSeconds", 2) * float64(time.Second)),
 	}
 
 	catalog := api.NewCatalog()

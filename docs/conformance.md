@@ -59,7 +59,7 @@ command).
 | `Lists__ChangeCheckSeconds` | `1` | How often the API reads `ChangesSql` (a value that moves with any source, import or allow-list change; the same query in every implementation, the reference's `ListLoader.ChangesSql`) and reloads when it moved; 2 by default, 0 is off. With the full reload an hour away, every change the suite makes reaches the API only through this check, as an administrator's change made on another replica does |
 | `RateLimiting__PerMinute` | `0` | Screenings per client IP a minute; 0 is off |
 | `Admin__ClientId`, `Admin__Authority` | `conformance-admin`, the suite's stand-in issuer (`Harness/Issuer.cs`, served by the suite on `-IssuerPort` 18090, reached at `host.docker.internal`) | The admin sign-in (docs/api.md, "Admin"); production sets `Admin__TenantId` instead of an authority |
-| `Screening__MaxConcurrent`, `Screening__MaxWaiting` | defaults (4, 32) | Single screenings at once and waiting; beyond them 503 `busy` |
+| `Screening__MaxConcurrent`, `Screening__MaxWaitSeconds`, `Screening__MaxWaiting` | defaults (4, 2, 256) | Single screenings at once, how long one may wait for a place, and how many may wait; beyond them 503 `busy` |
 | `Screening__StreamMaxRecords` | `1000` | A stream's record limit (50,000 by default) |
 | `Screening__StreamMaxSeconds`, `Screening__ConcurrentStreams`, `App__Version`, `App__Revision`, `LISTS_EU_TOKEN` | defaults | As in CLAUDE.md |
 
