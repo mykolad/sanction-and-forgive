@@ -174,7 +174,7 @@ public static class Suite
         await RemoveAllowListEntriesAsync();
     }
 
-    /// <summary>Waits (up to 60 s: the API reloads every few seconds in a conformance run) until <c>/api/v1/sources</c>,
+    /// <summary>Waits (up to 60 s: in a conformance run the API checks for changes every second) until <c>/api/v1/sources</c>,
     /// by list code, satisfies <paramref name="condition"/>.</summary>
     public static async Task<Dictionary<string, JsonElement>> WaitForListsAsync(Func<Dictionary<string, JsonElement>, bool> condition)
     {

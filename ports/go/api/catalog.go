@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -225,17 +226,25 @@ func (l *Loader) refreshOnce(ctx context.Context) error {
 	// Only lists holds the old indexes now: each swap below can release the one it replaces (Copilot's point on #37,
 	// the same pattern there): never two whole generations at once.
 	current = nil
+	// A build that fails keeps whatever served before, and the refresh reports it once everything else is published:
+	// the change isn't applied yet, so RunRefresh tries again shortly, never waiting for refreshEvery.
+	var notBuilt []string
 	for _, p := range pending {
 		if index := l.build(ctx, p.target.Code, *p.target.ActiveImportID, p.target.RecordCount); index != nil {
 			built := *p.target
 			built.Index = index
 			lists[p.position] = &built
+		} else {
+			notBuilt = append(notBuilt, p.target.Code)
 		}
 		if l.catalog.IsReady() {
 			l.catalog.Replace(append([]*LoadedList{}, lists...))
 		}
 	}
 	l.catalog.Replace(lists)
+	if len(notBuilt) > 0 {
+		return fmt.Errorf("not built: %s; everything else is loaded, and the list's previous version serves until it's built", strings.Join(notBuilt, ", "))
+	}
 	return nil
 }
 
@@ -289,16 +298,106 @@ func ToListed(s store.Subject) *matching.ListedSubject {
 	return &matching.ListedSubject{ExternalID: s.ExternalID, Kind: kind, PrimaryName: s.PrimaryName, Names: names, Addresses: addresses, Programme: s.Programmes, SourceURL: s.SourceURL}
 }
 
-// RunRefresh loads the lists at startup, then every interval.
-func (l *Loader) RunRefresh(ctx context.Context, interval time.Duration) {
+// refreshSchedule decides when RunRefresh refreshes, from the time and the value of store.ChangesSQL just read (read
+// false when the check failed or is off), so it can be tested without a clock or a database. It refreshes:
+//   - at the first call, and when refreshEvery has passed since the last refresh (the backstop);
+//   - at once for each new value, even while an earlier failure waits for its retry (an allow-list removal made on
+//     another replica never waits behind a list that won't build). The value is read before the refresh, so a change
+//     made while it runs gives a new value at the next check;
+//   - after a failed refresh, once retryWait has passed (5 s, doubling up to a minute): never at every check, and
+//     until it works.
+type refreshSchedule struct {
+	refreshEvery, checkEvery time.Duration
+	attempted                string
+	refreshedAt, retryAt     time.Time
+	retryWait                time.Duration
+}
+
+// begin says whether to refresh now; when it says so, the refresh is for changes.
+func (s *refreshSchedule) begin(now time.Time, changes string, read bool) bool {
+	refresh := s.refreshedAt.IsZero() || now.Sub(s.refreshedAt) >= s.refreshEvery ||
+		(!s.retryAt.IsZero() && !now.Before(s.retryAt)) ||
+		(read && changes != s.attempted)
+	if refresh && read {
+		s.attempted = changes
+	}
+	return refresh
+}
+
+// finished records how the refresh begin asked for went.
+func (s *refreshSchedule) finished(now time.Time, succeeded bool) {
+	s.refreshedAt = now
+	if succeeded {
+		s.retryAt, s.retryWait = time.Time{}, 0
+		return
+	}
+	s.retryWait = nextRetryWait(s.retryWait)
+	s.retryAt = now.Add(s.retryWait)
+}
+
+// nextWait is how long to sleep before the next check: the check interval, or less when a retry falls sooner.
+func (s *refreshSchedule) nextWait() time.Duration {
+	if s.retryAt.IsZero() {
+		return s.checkEvery
+	}
+	return min(s.checkEvery, s.retryWait)
+}
+
+// nextRetryWait is the wait before trying a failed refresh again: 5 s, then twice the last, at most a minute.
+func nextRetryWait(last time.Duration) time.Duration {
+	if last <= 0 {
+		return 5 * time.Second
+	}
+	return min(2*last, time.Minute)
+}
+
+// changeCheckTimeout bounds one check for changes; one that takes longer counts as failed.
+const changeCheckTimeout = 10 * time.Second
+
+// RunRefresh loads the lists at startup, then refreshes as refreshSchedule says: every refreshEvery, at once whenever
+// store.ChangesSQL moved (read every checkEvery; 0: no check), so an administrator's change made on another replica
+// applies here within seconds, and after a failure until it works. A check that fails is logged once, and once again
+// when the database answers again.
+func (l *Loader) RunRefresh(ctx context.Context, refreshEvery, checkEvery time.Duration) {
+	wait := checkEvery
+	if wait <= 0 {
+		wait = refreshEvery
+	}
+	schedule := &refreshSchedule{refreshEvery: refreshEvery, checkEvery: wait}
+	checkFailing := false
 	for {
-		if err := l.Refresh(ctx); err != nil && ctx.Err() == nil {
-			l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has", "error", err.Error())
+		changes, read := "", false
+		if checkEvery > 0 {
+			// Bounded: a database that takes the query and never answers must not stop the checks or the refresh.
+			checkCtx, cancel := context.WithTimeout(ctx, changeCheckTimeout)
+			value, err := store.Changes(checkCtx, l.db)
+			cancel()
+			switch {
+			case err == nil:
+				changes, read = value, true
+				if checkFailing {
+					checkFailing = false
+					l.logger.Info("Checking the database for changes works again")
+				}
+			case ctx.Err() == nil && !checkFailing:
+				checkFailing = true
+				l.logger.Warn("Checking the database for changes failed; serving what was loaded, and checking again", "error", err.Error())
+			}
+		}
+		if schedule.begin(time.Now(), changes, read) {
+			err := l.Refresh(ctx)
+			if err != nil && ctx.Err() != nil {
+				return
+			}
+			schedule.finished(time.Now(), err == nil)
+			if err != nil {
+				l.logger.Error("Refreshing the lists failed; the catalog keeps serving what it has, and tries again", "error", err.Error(), "seconds", schedule.retryWait.Seconds())
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-time.After(schedule.nextWait()):
 		}
 	}
 }

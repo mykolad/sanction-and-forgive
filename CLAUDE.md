@@ -125,7 +125,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Lists in memory:** `ListCatalog` holds one snapshot of `LoadedList`s (code, name, URL, `MaxAgeHours`, active import,
   `LastCheckedAt`, count, `ListIndex`), swapped whole. `ListLoader.RefreshAsync` reads `Sources` and rebuilds only the
   lists whose active import changed (one at a time); `ListRefreshService` runs it at startup in the background and
-  every `Lists:RefreshMinutes` (15). One swap per refresh, every source in it, so a list is never missing from the
+  every `Lists:RefreshMinutes` (15), and sooner whenever `ListLoader.ChangesSql` moved: every replica reads it every
+  `Lists:ChangeCheckSeconds` (2; owner's decision 2026-11-12, production runs two replicas), so an administrator's change
+  on one replica, and a new version of a list, reach every replica within seconds. One swap per refresh, every source in it, so a list is never missing from the
   rows; the first swap makes the API ready. If SQL is down, the catalog keeps serving and lists become overdue.
 - **Fail closed:** `LoadedList.IsSearched`: it has an index; otherwise the screener gets none and the cell is
   `NotChecked`, with no percentage. `IsOverdue(now)`: searched, but its last successful check is older than
@@ -213,7 +215,7 @@ shared database, references no app project, and compares with golden files from 
 (`tests/conformance/golden`): 600 screenings through the stream, 60 single ones, the catalogue, browsing. Then
 behaviour, then changes that it puts back. Fictional feeds in all nine formats come from a fixed seed (`Feeds/`).
 `tests/conformance/run.ps1` builds the image, makes a fresh database, starts the API with the conformance settings
-(`Lists__RefreshMinutes=0.05`, rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
+(`Lists__RefreshMinutes=60` and `Lists__ChangeCheckSeconds=1`, so every change arrives through the check; rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
 containers from the same image, and runs the suite. CI jobs `conformance (dotnet|go|rust)`, required on `master` (owner's decision, 2026-11-12). A change in what the reference
 answers updates the golden files in the same PR (`run.ps1 -Build -UpdateGolden`, review the diff); another
 implementation never rewrites them. **A change to the .NET app is a change to every port** (`ports/go`, `ports/rust`): the CI job

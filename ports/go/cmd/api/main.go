@@ -65,6 +65,10 @@ func main() {
 	if value, err := strconv.ParseFloat(os.Getenv("Lists__RefreshMinutes"), 64); err == nil && value > 0 {
 		refresh = value
 	}
+	changeCheck := 2.0
+	if value, err := strconv.ParseFloat(os.Getenv("Lists__ChangeCheckSeconds"), 64); err == nil && value >= 0 {
+		changeCheck = value
+	}
 	config := api.Config{
 		Version:           setting("App__Version", "dev"),
 		Revision:          os.Getenv("CONTAINER_APP_REVISION"),
@@ -85,7 +89,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go loader.RunRefresh(ctx, time.Duration(refresh*float64(time.Minute)))
+	go loader.RunRefresh(ctx, time.Duration(refresh*float64(time.Minute)), time.Duration(changeCheck*float64(time.Second)))
 
 	port := setting("PORT", "8080")
 	// HOST: all interfaces by default (a container needs that); 127.0.0.1 for a run on a desktop, so its firewall

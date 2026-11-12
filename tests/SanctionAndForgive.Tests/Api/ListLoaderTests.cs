@@ -81,8 +81,10 @@ public sealed class ListLoaderTests : IAsyncLifetime
         }
 
         var catalog = new ListCatalog();
-        await new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), catalog, TimeProvider.System, NullLogger<ListLoader>.Instance).RefreshAsync(CancellationToken.None);
+        // Reported, so the refresh is tried again shortly; everything else is published meanwhile.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new ListLoader(services.GetRequiredService<IServiceScopeFactory>(), catalog, TimeProvider.System, NullLogger<ListLoader>.Instance).RefreshAsync(CancellationToken.None));
 
+        Assert.True(catalog.IsReady);
         Assert.Null(Assert.Single(catalog.Lists).Index);
     }
 
