@@ -108,6 +108,17 @@ try {
     $env:CONFORMANCE_UPDATE_GOLDEN = if ($UpdateGolden) { '1' } else { '' }
     dotnet test (Join-Path $root 'tests/SanctionAndForgive.Conformance') --logger 'console;verbosity=normal' @TestArguments
     $result = $LASTEXITCODE
+    if ($result -ne 0) {
+        # What the API logged, to see a failure from its side (the suite's input is fictional, and an implementation
+        # never logs input anyway).
+        Start-Sleep -Seconds 1
+        foreach ($file in $log, "$log.err") {
+            if (Test-Path $file) {
+                Write-Host "--- The API's log, last 200 lines ($(Split-Path -Leaf $file)) ---"
+                Get-Content $file -Tail 200 | ForEach-Object { Write-Host $_ }
+            }
+        }
+    }
 }
 finally {
     Stop-Process -Id $logs.Id -ErrorAction SilentlyContinue
