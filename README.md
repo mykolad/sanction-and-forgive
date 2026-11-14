@@ -13,4 +13,20 @@ embargoes, and a person must review possible matches. Despite the name, nothing 
 
 Work in progress. Developer guide: [CLAUDE.md](CLAUDE.md). Infrastructure: [infra/README.md](infra/README.md).
 
+## Performance
+
+The same application exists three times, in .NET (the reference), Go and Rust ([conformance](docs/conformance.md)
+checks they answer alike). Production runs the Rust one on two replicas of 0.25 vCPU / 0.5 GiB. Measured on Azure with
+six lists (about 37,000 listed parties), details in [docs/load-test.md](docs/load-test.md):
+
+| | Single screenings sustained (two 0.25 vCPU / one 0.5 vCPU) | A batch of 50,000 (two 0.25 vCPU / one 0.5 vCPU) |
+|---|---|---|
+| Rust | 96 / 96 a second | 12.3 / 5.3 minutes |
+| Go | 64 / 80 a second | 14.8 / 7.5 minutes |
+| .NET | 32 / 32 a second | 29.9 / 14.6 minutes |
+
+A single screening takes about 17 ms (median) below capacity. Past it, one waits for a place at most 2 s, then gets
+503 `busy` with `Retry-After: 1`. A batch goes through the stream endpoint ([docs/api.md](docs/api.md), "Batches"), one
+stream at a time per replica, each up to 200 s and resumed from the line it names.
+
 Licence: MIT. List data belongs to its publishers; the website names each source.

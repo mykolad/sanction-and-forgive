@@ -36,8 +36,10 @@ entries have no cell for it (so it doesn't make a result `Incomplete`), and the 
 For many records at once. The request is **NDJSON**: one screening per line, each the same object as the single
 endpoint takes (`reference`, `receiverName`, `companyName`, `address`), with content type `application/x-ndjson`
 (`application/jsonl` and `text/plain` are accepted too). The response is NDJSON as well, written as each record is
-screened, so a client can read results while it's still sending. Nothing is held but the line in hand, and nothing
-is stored.
+screened, so a client can read results while it's still sending, and it has to: an implementation may stop reading
+the request while its answers aren't being read (Go does), so a client that sends the whole batch before reading waits
+until the stream's time limit. Nothing is held but the line in hand, and nothing is stored. How long a batch takes:
+docs/load-test.md ("Batches of 50,000").
 
 ```
 POST /api/v1/screenings/stream
