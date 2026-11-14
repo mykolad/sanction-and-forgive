@@ -50,7 +50,8 @@ python -I tests/load/stream.py https://<the app's address> 50000
 
 It builds the records from `tests/load/inputs.csv` (repeated, each with its own reference), sends them while reading
 the answers, and when a stream stops at its limit (200 s or 50,000 records) starts the next one from its `nextLine`, as
-a client would. It prints each stream and the whole batch: records screened, errors, the time to the first result, and
+a client would; a stream refused (429: the replica's one stream is taken, or 503) is sent again after its `Retry-After`. It
+prints each stream and the whole batch: records screened, errors, the time to the first result, and
 records a second. The rate limit can stay on (a stream is one request). A stream runs on one replica.
 
 ## Results

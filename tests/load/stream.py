@@ -83,6 +83,13 @@ async def stream(base: urllib.parse.SplitResult, lines: list[bytes]) -> dict:
     while (header := await reader.readline()) not in (b'\r\n', b'\n', b''):
         name, _, value = header.decode('latin-1').partition(':')
         headers[name.strip().lower()] = value.strip()
+    if len(status) >= 2 and status[1] in ('429', '503'):
+        # The replica's one stream is taken (another client's, or the previous stream's not yet released), or it's
+        # busy or loading: nothing was screened, so the same records go again after Retry-After.
+        sending.cancel()
+        writer.close()
+        retry_after = headers.get('retry-after', '1')
+        return {'retry': float(retry_after) if retry_after.replace('.', '', 1).isdigit() else 1.0, 'status': status[1]}
     if len(status) < 2 or status[1] != '200':
         raise SystemExit(f'Stream: {" ".join(status)}')
     first = None
@@ -115,6 +122,10 @@ async def main() -> None:
     started = time.monotonic()
     while offset < len(lines):
         part = await stream(base, lines[offset:])
+        if 'retry' in part:
+            print(f"stream refused ({part['status']}): again in {part['retry']:g} s", flush=True)
+            await asyncio.sleep(part['retry'])
+            continue
         streams += 1
         total_results += part['results']
         total_errors += part['errors']
