@@ -42,7 +42,59 @@ measured. It refuses to start unless the app is ready and at least one list is C
 Report below: the highest step sustained (its own p95 under 2 s and failures under 2%), its p95, CPU and memory, and
 what stopped the run.
 
+**A batch** goes through the stream endpoint (docs/api.md, "Batches"), not through k6:
+
+```powershell
+python -I tests/load/stream.py https://<the app's address> 50000
+```
+
+It builds the records from `tests/load/inputs.csv` (repeated, each with its own reference), sends them while reading
+the answers, and when a stream stops at its limit (200 s or 50,000 records) starts the next one from its `nextLine`, as
+a client would; a stream refused (429: the replica's one stream is taken, or 503) is sent again after its `Retry-After`. It
+prints each stream and the whole batch: records screened, errors, the time to the first result, and
+records a second. The rate limit can stay on (a stream is one request). A stream runs on one replica.
+
 ## Results
+
+### Batches of 50,000, and the 2 s wait (2026-11-13 and 14)
+
+The owner asked (2026-11-12) how long a batch takes on every implementation and both sizes: `tests/load/stream.py` with
+50,000 records, commit 02a1d8c, the same inputs and six lists as below, the rate limit at 120. Production in between.
+
+| Implementation | Two 0.25 vCPU / 0.5 GiB replicas (production's size) | One 0.5 vCPU / 1 GiB replica |
+|---|---|---|
+| Rust | **12.3 min**, 68 records/s, 4 streams | **5.3 min**, 156 records/s, 2 streams |
+| Go | **14.8 min**, 56 records/s, 5 streams | **7.5 min**, 111 records/s, 3 streams |
+| .NET | **29.9 min**, 28 records/s, 9 streams | **14.6 min**, 57 records/s, 5 streams |
+
+No errors in any of the 300,000 records; the first result of each stream came after 0.03-0.2 s.
+
+- **A stream uses one replica.** On two small replicas a batch goes at one small replica's speed, and the other keeps
+  answering single screenings; two batches at once (one a replica) would together go about twice as fast (not
+  measured: one stream at a time per replica, `Screening:ConcurrentStreams`).
+- **.NET** at 0.25 vCPU: 28 a second, against 14 on 2026-11-07 (the sign-in sidecar then, an older matcher).
+- **The client has to read while it sends.** The first client sent the whole batch, then read: Go, which stops reading
+  a request while its answers aren't read, waited for it until the stream's 200 s (1,774 records a stream), and the
+  same client held Rust at 108 a second on 0.5 vCPU against 156. `stream.py` now sends and reads on one asyncio
+  connection (its `curl` equivalent took the same time); every number above is from it. docs/api.md says so.
+
+**The 2 s wait** (#59: a single screening waits for a place at most `Screening:MaxWaitSeconds`, 2, instead of 32 waiting
+at most). The k6 run of Rust on two small replicas again, three times (2026-11-13 10:53, 2026-11-14 12:51 and 13:25 UTC),
+against the three on 2026-11-12 with the count:
+
+| | Sustained | At 96/s: p95, refused | First failing step |
+|---|---|---|---|
+| 32 waiting (2026-11-12) | 96, 96, 96 | 59 ms 0%; 547 ms 0.87%; 45 ms 0% | 128/s 8.0% refused; 112/s 2.02%; 112/s 2.07% |
+| 2 s wait (#59) | 80, 96, 96 | 2.0 s 1.43% (failed); 691 ms 0%; 59 ms 0% | 96/s; 112/s p95 2.1 s, 3.5%; 112/s p95 2.0 s, 0.73% |
+
+The capacity is the same, about 96 a second, and a short pause no longer refuses anyone (runs 2 and 3: nothing refused
+at 96). Past capacity a request now waits up to 2 s before it's refused, so k6's 2 s p95 threshold, not 2% refused,
+ends the run; the first 2 s-wait run met it at 96 during a pause (no restart, CPU at 0.17-0.19 of 0.25 vCPU).
+
+**Two replicas in practice** (2026-11-13): after the 03:30 UTC import the UK list's new version was built by both
+replicas 1.5 s apart (each reads `ChangesSql` every 2 s, #55). At 03:35, idle, one replica stopped answering its probes
+for about a minute and was restarted by the platform (the stall above, "Probes"); its first database read after the
+restart failed and was retried after 5 s, as designed, and the other replica served meanwhile.
 
 ### Without the sign-in sidecar: every implementation, both sizes (2026-11-12)
 
