@@ -15,7 +15,7 @@ public static class FeedFiles
     public static readonly IReadOnlyList<(string Code, int Count)> Feeds =
     [
         ("eu", 160), ("ofac-sdn", 200), ("ofac-cons", 60), ("un", 80), ("uk", 140), ("us-export", 120),
-        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40),
+        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60),
     ];
 
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
@@ -27,7 +27,7 @@ public static class FeedFiles
         Fixtures.For(code, Feeds.Single(feed => feed.Code == code).Count);
 
     /// <summary>The file name for a feed (its extension says the format).</summary>
-    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", _ => "xml" }}";
+    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", "nz-mfat" => "xlsx", _ => "xml" }}";
 
     /// <summary>Writes <paramref name="subjects"/> as <paramref name="code"/>'s feed to <paramref name="path"/>.</summary>
     public static void Write(string code, IReadOnlyList<FixtureSubject> subjects, string path)
@@ -42,6 +42,9 @@ public static class FeedFiles
                 return;
             case "nl-terrorism":
                 Netherlands(subjects, path);
+                return;
+            case "nz-mfat":
+                NewZealand(subjects, path);
                 return;
             default:
                 var document = code switch
@@ -474,6 +477,108 @@ public static class FeedFiles
         using var file = File.Create(path);
         using var zip = new System.IO.Compression.ZipArchive(file, System.IO.Compression.ZipArchiveMode.Create);
         foreach (var (name, text) in new[] { ("mimetype", "application/vnd.oasis.opendocument.spreadsheet"), ("content.xml", content.ToString()) })
+        {
+            using var entry = zip.CreateEntry(name).Open();
+            entry.Write(Encoding.UTF8.GetBytes(text));
+        }
+    }
+
+    /// <summary>New Zealand's register (a workbook): a legend sheet first, then the register sheet with its legend, the
+    /// header on row 11, a row per party (people with first, middle and last names; entities and banks named in First
+    /// name; aliases joined by semicolons; Excel serial dates), an asset row and a revoked row (both left out), and the
+    /// closing Total row. Text as shared strings, one cell as an inline string.</summary>
+    private static void NewZealand(IReadOnlyList<FixtureSubject> subjects, string path)
+    {
+        string[] header =
+        [
+            "Type", "Unique Identifier", "First name", "Middle name(s)", "Last name", "Name of Asset", "Name of Service", "DOB", "Title",
+            "Alias/Alternate Spellings", "Address", "Place of Birth", "Citizenship", "Citizenship 2", "Citizenship 3", "Passport Number",
+            "Sanction Status", "Date of Sanction", "Date of Additional Sanction", "Travel Ban", "Asset Freeze", "Aircraft Ban", "Ship Ban",
+            "Service Prohibition", "Dealing with Securities", "General Rationale for Sanction", "Associates/Relatives",
+        ];
+        string[] Row(params (int Column, string Value)[] cells)
+        {
+            var row = new string[header.Length];
+            Array.Fill(row, string.Empty);
+            foreach (var (column, value) in cells)
+            {
+                row[column] = value;
+            }
+
+            return row;
+        }
+
+        static string Serial(DateOnly date) => (date.DayNumber - new DateOnly(1899, 12, 30).DayNumber).ToString(CultureInfo.InvariantCulture);
+        var rows = new List<string[]> { new[] { "Sanction Type", "Link to Description" }, new[] { "Asset Freeze", "Russia Sanctions Regulations 2022 (fictional)" }, header };
+        foreach (var subject in subjects)
+        {
+            var kind = subject.Person ? "Individual" : subject.Number % 5 == 0 ? "Bank" : "Entity";
+            var id = $"{(subject.Person ? "IND" : kind == "Bank" ? "BAN" : "ENT")}-{subject.Number}";
+            var aliases = string.Join("; ", subject.Aliases);
+            var address = subject.Address is { } a ? $"{a.Street}, {a.City}, {a.Country}" : string.Empty;
+            rows.Add(subject.Person
+                ? Row((0, kind), (1, id), (2, subject.Given!), (4, subject.Family), (9, aliases), (10, address), (16, "Sanctioned"), (17, Serial(subject.ListedOn)), (25, "Fictional listing (conformance)"))
+                : Row((0, kind), (1, id), (2, subject.Family), (9, aliases), (10, address), (16, "Sanctioned"), (17, Serial(subject.ListedOn)), (25, "Fictional listing (conformance)")));
+        }
+
+        rows.Add(Row((0, "Asset"), (1, "AST-1"), (5, "Fictional government ships"), (16, "Sanctioned"), (17, "44638")));
+        rows.Add(Row((0, "Individual"), (1, "IND-9999"), (2, "Revoked"), (4, "Fictional"), (16, "Revoked"), (17, "44638")));
+        rows.Add(Row((0, "Total"), (26, subjects.Count.ToString(CultureInfo.InvariantCulture))));
+
+        const string main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var shared = new List<string>();
+        var sheet = new StringBuilder($"<worksheet xmlns=\"{main}\"><sheetData>");
+        for (var r = 0; r < rows.Count; r++)
+        {
+            // The real file's header is on row 11: rows 3-10 are empty, and cells are placed by reference.
+            var rowNumber = r < 2 ? r + 1 : r + 9;
+            sheet.Append(CultureInfo.InvariantCulture, $"<row r=\"{rowNumber}\">");
+            for (var c = 0; c < rows[r].Length; c++)
+            {
+                var cell = rows[r][c];
+                if (cell.Length == 0)
+                {
+                    continue;
+                }
+
+                var reference = (c < 26 ? ((char)('A' + c)).ToString() : $"A{(char)('A' + c - 26)}") + rowNumber.ToString(CultureInfo.InvariantCulture);
+                if (c == 17 || (rows[r][0] == "Total" && c == 26))
+                {
+                    sheet.Append(CultureInfo.InvariantCulture, $"<c r=\"{reference}\"><v>{cell}</v></c>");
+                }
+                else if (r == 2 && c == 0)
+                {
+                    sheet.Append(CultureInfo.InvariantCulture, $"<c r=\"{reference}\" t=\"inlineStr\"><is><t>{System.Security.SecurityElement.Escape(cell)}</t></is></c>");
+                }
+                else
+                {
+                    shared.Add(cell);
+                    sheet.Append(CultureInfo.InvariantCulture, $"<c r=\"{reference}\" t=\"s\"><v>{shared.Count - 1}</v></c>");
+                }
+            }
+
+            sheet.Append("</row>");
+        }
+
+        sheet.Append("</sheetData></worksheet>");
+        var strings = new StringBuilder($"<sst xmlns=\"{main}\">");
+        foreach (var text in shared)
+        {
+            strings.Append(CultureInfo.InvariantCulture, $"<si><t xml:space=\"preserve\">{System.Security.SecurityElement.Escape(text)}</t></si>");
+        }
+
+        strings.Append("</sst>");
+        var parts = new (string Name, string Content)[]
+        {
+            ("xl/workbook.xml", $"<workbook xmlns=\"{main}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Ships\" sheetId=\"2\" r:id=\"rId2\"/><sheet name=\"Russia Sanctions Register\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"),
+            ("xl/_rels/workbook.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet2.xml\"/></Relationships>"),
+            ("xl/sharedStrings.xml", strings.ToString()),
+            ("xl/worksheets/sheet1.xml", sheet.ToString()),
+            ("xl/worksheets/sheet2.xml", $"<worksheet xmlns=\"{main}\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Ship</t></is></c></row></sheetData></worksheet>"),
+        };
+        using var file = File.Create(path);
+        using var zip = new System.IO.Compression.ZipArchive(file, System.IO.Compression.ZipArchiveMode.Create);
+        foreach (var (name, text) in parts)
         {
             using var entry = zip.CreateEntry(name).Open();
             entry.Write(Encoding.UTF8.GetBytes(text));

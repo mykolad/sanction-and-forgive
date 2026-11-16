@@ -21,6 +21,7 @@ left out of the counts and the import, since the MVP doesn't screen them.
 | `ua-sfms` | Ukraine SFMS terrorism list | XML, 1.8 MB | 1,014 (724 / 290 / 0) | 3,893 (627, 99, 0) | 771 | Active |
 | `fr-tresor` | France national asset-freeze register (DG Trésor), from 2026-11-16 | JSON API, 15.0 MB | 8,187 (5,462 / 2,725 / 0) | 20,311 (134, 4,758, 438) | 3,491 | Active |
 | `nl-terrorism` | Netherlands national terrorism list (Ministry of Foreign Affairs), from 2026-11-16 | ODS, 14 KB | 117 (114 / 3 / 0) | 120 (0, 0, 0) | 0 | Active |
+| `nz-mfat` | New Zealand Russia Sanctions Register (MFAT), from 2026-11-16 | XLSX, 21.6 MB | 1,918 (1,389 / 529 / 0) | 2,896 (0, 0, 0) | 124 | Active |
 | **All fetched** | | 246 MB | **50,107** | **147,997** (7,062 weak, 20,175 Cyrillic) | 44,519 | |
 
 The handover estimated 60-90k subjects. Without Australia and NSDC there are about 50k. NSDC is probably the
@@ -70,6 +71,15 @@ largest list, so the total is likely to land inside that range once it's added.
   notification is the id (one per listing). No addresses; the place of birth is kept in the remarks. The notices'
   pages (zoek.officielebekendmakingen.nl) answer an automated client with an error, so no record is linked.
   The file is read by `Spreadsheets.OdsRows` (zip and XML only).
+- **New Zealand (`nz-mfat`, 2026-11-16):** MFAT's `Russia-Sanctions-Register.xlsx`, linked from
+  [the register page](https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register).
+  Five sheets; only `Russia Sanctions Register` is read (the others: ships, trade measures padded to Excel's last row,
+  exemptions). A legend, then the header on row 11: `Type`, `Unique Identifier` (`IND-1`, `ENT-1`, `BAN-1`, `AST-1`),
+  names, `DOB`, `Title`, `Alias/Alternate Spellings` (semicolons), `Address`, citizenships, `Sanction Status`, dates as
+  Excel serials, the measures (`Yes`/`No`), `General Rationale for Sanction`. `Individual` rows are people; `Entity`
+  (512) and `Bank` (17) rows are entities, named in `First name`; the 7 `Asset` rows (categories of ships and aircraft)
+  and the closing `Total` row are left out, as would be a row marked revoked, delisted or removed (none today). No
+  per-record page. Read by `Spreadsheets.XlsxRows` (zip and XML only).
 
 ## Terms of reuse
 
@@ -90,6 +100,7 @@ resell the lists.
 | SFMS | Unknown: the site refuses automated fetches. The file downloads. | | |
 | France | Yes: Licence Ouverte 2.0 (Etalab), the dataset's licence on data.gouv.fr (read 2026-11-16). | Name the source and its date. The website's footer: "France: Registre national des gels, Direction générale du Trésor, reused under the Licence Ouverte 2.0." | [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/) |
 | Netherlands | Yes: government.nl declares CC0 1.0 for its content (read 2026-11-16). | None required. | [government.nl copyright](https://www.government.nl/copyright) |
+| New Zealand | Yes: MFAT's site content is Crown copyright, licensed under CC BY 4.0 (read 2026-11-16). | Credit the Ministry. The website's footer: "New Zealand: Russia Sanctions Register, Ministry of Foreign Affairs and Trade, licensed under CC BY 4.0." | [MFAT copyright](https://www.mfat.govt.nz/en/copyright) |
 
 The UN's listings are also on the EU and UK lists, which implement them. Leaving out the UN row loses its own as-of
 date in the result, not coverage.

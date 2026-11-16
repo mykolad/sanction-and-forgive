@@ -304,11 +304,312 @@ fn dutch_surname(family: &str) -> String {
     family.to_string()
 }
 
+const XLSX_MAIN: &[u8] = b"http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+const XLSX_RELATIONSHIPS: &[u8] = b"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const PACKAGE_RELATIONSHIPS: &[u8] = b"http://schemas.openxmlformats.org/package/2006/relationships";
+
+/// An attribute's value by namespace and local name (an empty namespace: no prefix).
+fn attribute(reader: &NsReader<&[u8]>, element: &quick_xml::events::BytesStart, namespace: &[u8], local: &[u8]) -> Option<String> {
+    element.attributes().flatten().find_map(|a| {
+        let (resolved, name) = reader.resolve_attribute(a.key);
+        let matches = if namespace.is_empty() { matches!(resolved, ResolveResult::Unbound) } else { is(&resolved, namespace) };
+        (matches && name.as_ref() == local)
+            .then(|| a.decode_and_unescape_value(reader.decoder()).map(|v| v.into_owned()).unwrap_or_default())
+    })
+}
+
+/// The rows of an Office Open XML workbook's sheet named sheet_name: XlsxRows in the reference. The sheet and the
+/// shared strings are read to their ends, so one cut short or broken is refused; a shared string's text counts against
+/// the expansion limit each time a cell uses it.
+// A match guard would borrow the reader while the event still does: the attribute checks stay inside the arms.
+#[allow(clippy::collapsible_match)]
+pub fn xlsx_rows(input: &mut dyn BufRead, sheet_name: &str) -> Result<Vec<Vec<String>>, ParseError> {
+    let mut data = Vec::new();
+    input.read_to_end(&mut data)?;
+    let part = |name: &str| read_part(data.clone(), name);
+
+    // The workbook and its relationships are read to their ends, so one cut short after what's looked for is refused.
+    let workbook = part("xl/workbook.xml")?;
+    let mut reader = NsReader::from_reader(workbook.as_slice());
+    let (mut relationship, mut depth) = (None, 0usize);
+    loop {
+        let (resolved, event) = reader.read_resolved_event().map_err(xml_error)?;
+        depth = open_elements(&event, depth, "xl/workbook.xml")?;
+        match event {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) if is(&resolved, XLSX_MAIN) && e.local_name().as_ref() == b"sheet" => {
+                if relationship.is_none() && attribute(&reader, &e, b"", b"name").as_deref() == Some(sheet_name) {
+                    relationship = attribute(&reader, &e, XLSX_RELATIONSHIPS, b"id");
+                }
+            }
+            _ => {}
+        }
+    }
+    let relationship = relationship.ok_or_else(|| format_error(format!("The workbook has no sheet named \"{sheet_name}\".")))?;
+
+    let relationships = part("xl/_rels/workbook.xml.rels")?;
+    let mut reader = NsReader::from_reader(relationships.as_slice());
+    let (mut target, mut depth) = (None, 0usize);
+    loop {
+        let (resolved, event) = reader.read_resolved_event().map_err(xml_error)?;
+        depth = open_elements(&event, depth, "xl/_rels/workbook.xml.rels")?;
+        match event {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) if is(&resolved, PACKAGE_RELATIONSHIPS) && e.local_name().as_ref() == b"Relationship" => {
+                if target.is_none() && attribute(&reader, &e, b"", b"Id").as_deref() == Some(relationship.as_str()) {
+                    target = attribute(&reader, &e, b"", b"Target").map(|t| match t.strip_prefix('/') {
+                        Some(rooted) => rooted.to_string(),
+                        None => format!("xl/{t}"),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    let target = target.ok_or_else(|| format_error(format!("The workbook's relationship {relationship} has no target.")))?;
+
+    let has_shared = zip::ZipArchive::new(Cursor::new(&data)).ok().is_some_and(|mut a| a.by_name("xl/sharedStrings.xml").is_ok());
+    let mut shared: Vec<String> = Vec::new();
+    let mut expanded = Expansion(0);
+    if has_shared {
+        let strings = part("xl/sharedStrings.xml")?;
+        let mut reader = NsReader::from_reader(strings.as_slice());
+        let (mut current, mut phonetic, mut in_t, mut depth) = (String::new(), 0usize, false, 0usize);
+        loop {
+            let (resolved, event) = reader.read_resolved_event().map_err(xml_error)?;
+            let main = is(&resolved, XLSX_MAIN);
+            depth = open_elements(&event, depth, "xl/sharedStrings.xml")?;
+            match event {
+                Event::Eof => break,
+                Event::Start(e) if main => match e.local_name().as_ref() {
+                    b"si" => current.clear(),
+                    b"rPh" => phonetic += 1,
+                    b"t" => in_t = true,
+                    _ => {}
+                },
+                Event::Empty(e) if main && e.local_name().as_ref() == b"si" => {
+                    expanded.add(CELL_BYTES)?;
+                    shared.push(String::new());
+                }
+                Event::End(e) if main => match e.local_name().as_ref() {
+                    b"si" => {
+                        expanded.add(current.len() + CELL_BYTES)?;
+                        shared.push(std::mem::take(&mut current));
+                    }
+                    b"rPh" => phonetic = phonetic.saturating_sub(1),
+                    b"t" => in_t = false,
+                    _ => {}
+                },
+                Event::Text(t) if in_t && phonetic == 0 => push_cell_text(&mut current, &t.unescape().map_err(xml_error)?)?,
+                Event::CData(t) if in_t && phonetic == 0 => push_cell_text(&mut current, &String::from_utf8_lossy(&t))?,
+                _ => {}
+            }
+        }
+    }
+
+    let sheet = part(&target)?;
+    let mut reader = NsReader::from_reader(sheet.as_slice());
+    reader.config_mut().trim_text(false);
+    let mut rows = Vec::new();
+    let mut cells: Vec<String> = Vec::new();
+    let (mut in_row, mut column, mut cell_type) = (false, 0usize, String::new());
+    let (mut value, mut inline, mut element, mut phonetic) = (String::new(), String::new(), "", 0usize);
+    let mut depth = 0usize;
+    loop {
+        let (resolved, event) = reader.read_resolved_event().map_err(xml_error)?;
+        let main = is(&resolved, XLSX_MAIN);
+        depth = open_elements(&event, depth, &target)?;
+        match event {
+            Event::Eof => break,
+            Event::Start(ref e) | Event::Empty(ref e) if main && e.local_name().as_ref() == b"row" => {
+                in_row = true;
+                cells.clear();
+                if matches!(event, Event::Empty(_)) {
+                    in_row = false;
+                }
+            }
+            Event::Start(ref e) | Event::Empty(ref e) if main && in_row && e.local_name().as_ref() == b"c" => {
+                column = attribute(&reader, e, b"", b"r").and_then(|r| cell_column(&r)).unwrap_or(cells.len());
+                cell_type = attribute(&reader, e, b"", b"t").unwrap_or_default();
+                value.clear();
+                inline.clear();
+                if matches!(event, Event::Empty(_)) {
+                    if column < MAX_COLUMNS {
+                        expanded.add(CELL_BYTES * (column + 1).saturating_sub(cells.len()))?;
+                    }
+                    place(&mut cells, column, String::new());
+                }
+            }
+            Event::Start(e) if main => match e.local_name().as_ref() {
+                b"rPh" => phonetic += 1,
+                b"v" => element = "v",
+                b"t" => element = "t",
+                _ => {}
+            },
+            Event::End(e) if main => match e.local_name().as_ref() {
+                b"row" => {
+                    in_row = false;
+                    let last = cells.iter().rposition(|c| !c.trim().is_empty());
+                    cells.truncate(last.map_or(0, |i| i + 1));
+                    if !cells.is_empty() {
+                        rows.push(std::mem::take(&mut cells));
+                    }
+                }
+                b"c" if in_row => {
+                    let text = match cell_type.as_str() {
+                        "s" => {
+                            let index = value.trim().parse::<usize>().ok().filter(|i| *i < shared.len()).ok_or_else(|| {
+                                format_error(format!("A cell refers to shared string {value}, which the workbook doesn't have."))
+                            })?;
+                            shared[index].clone()
+                        }
+                        "inlineStr" => inline.clone(),
+                        _ => value.clone(),
+                    };
+                    if column < MAX_COLUMNS {
+                        expanded.add(text.len() + CELL_BYTES * (column + 1).saturating_sub(cells.len()))?;
+                    }
+                    place(&mut cells, column, text);
+                }
+                b"rPh" => phonetic = phonetic.saturating_sub(1),
+                b"v" | b"t" => element = "",
+                _ => {}
+            },
+            Event::Text(t) if element == "v" => push_cell_text(&mut value, &t.unescape().map_err(xml_error)?)?,
+            Event::CData(t) if element == "v" => push_cell_text(&mut value, &String::from_utf8_lossy(&t))?,
+            Event::Text(t) if element == "t" && phonetic == 0 => push_cell_text(&mut inline, &t.unescape().map_err(xml_error)?)?,
+            Event::CData(t) if element == "t" && phonetic == 0 => push_cell_text(&mut inline, &String::from_utf8_lossy(&t))?,
+            _ => {}
+        }
+    }
+    Ok(rows)
+}
+
+/// Text added to a cell's, refused once the cell is longer than MAX_CELL_TEXT.
+fn push_cell_text(cell: &mut String, text: &str) -> Result<(), ParseError> {
+    cell.push_str(text);
+    if cell.len() > MAX_CELL_TEXT {
+        return Err(format_error(format!("A cell of the spreadsheet is longer than {MAX_CELL_TEXT} characters.")));
+    }
+    Ok(())
+}
+
+/// The elements open after this event; a part that ends with elements still open is cut short, a format error.
+fn open_elements(event: &Event, depth: usize, part: &str) -> Result<usize, ParseError> {
+    match event {
+        Event::Start(_) => Ok(depth + 1),
+        Event::End(_) => Ok(depth.saturating_sub(1)),
+        Event::Eof if depth > 0 => Err(format_error(format!("The workbook's {part} ends before its elements close."))),
+        _ => Ok(depth),
+    }
+}
+
+fn place(cells: &mut Vec<String>, column: usize, text: String) {
+    if column < MAX_COLUMNS {
+        if cells.len() <= column {
+            cells.resize(column + 1, String::new());
+        }
+        cells[column] = text;
+    }
+}
+
+/// The zero-based column of a cell reference ("C12" is 2).
+fn cell_column(reference: &str) -> Option<usize> {
+    let (mut column, mut letters) = (0usize, 0usize);
+    for c in reference.chars() {
+        if !c.is_ascii_uppercase() {
+            break;
+        }
+        letters += 1;
+        if letters > 3 {
+            return Some(MAX_COLUMNS);
+        }
+        column = column * 26 + (c as usize - 'A' as usize + 1);
+    }
+    (letters > 0).then(|| column - 1)
+}
+
+/// An Excel date (days since 1899-12-30, the 1900 date system); None when the value isn't one.
+pub fn excel_date(value: Option<&str>) -> Option<chrono::NaiveDate> {
+    let serial: f64 = value?.trim().parse().ok()?;
+    if !(1.0..2958466.0).contains(&serial) {
+        return None;
+    }
+    chrono::NaiveDate::from_ymd_opt(1899, 12, 30)?.checked_add_days(chrono::Days::new(serial.floor() as u64))
+}
+
+pub const NEW_ZEALAND_SHEET: &str = "Russia Sanctions Register";
+pub const NEW_ZEALAND_PROGRAMME: &str = "Russia Sanctions Act 2022";
+
+/// New Zealand's Russia Sanctions Register (XLSX): NewZealandParser in the reference.
+pub fn parse_new_zealand(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
+    let rows = xlsx_rows(input, NEW_ZEALAND_SHEET)?;
+    let is_cell = |cell: &str, name: &str| cell.trim().eq_ignore_ascii_case(name);
+    let header_at = rows
+        .iter()
+        .position(|row| row.len() > 1 && is_cell(&row[0], "Type") && is_cell(&row[1], "Unique Identifier"))
+        .ok_or_else(|| format_error("No header row (Type, Unique Identifier, …) in New Zealand's register."))?;
+    let header = &rows[header_at];
+    let find = |name: &str| header.iter().position(|cell| is_cell(cell, name));
+    let required = |name: &str| find(name).ok_or_else(|| format_error(format!("New Zealand's register has no \"{name}\" column.")));
+    let (kind_column, identifier, first, last, alias, address, status, sanctioned) = (
+        required("Type")?,
+        required("Unique Identifier")?,
+        required("First name")?,
+        required("Last name")?,
+        required("Alias/Alternate Spellings")?,
+        required("Address")?,
+        required("Sanction Status")?,
+        required("Date of Sanction")?,
+    );
+    let (middle, title, rationale) = (find("Middle name(s)"), find("Title"), find("General Rationale for Sanction"));
+
+    let mut out = Vec::new();
+    for row in &rows[header_at + 1..] {
+        let cell = |index: Option<usize>| index.and_then(|i| row.get(i)).and_then(|v| clean(Some(v)));
+        let kind_text = cell(Some(kind_column));
+        let kind = match kind_text.as_deref().map(str::to_uppercase).as_deref() {
+            Some("INDIVIDUAL") => Some(SubjectType::Individual),
+            Some("ENTITY" | "BANK") => Some(SubjectType::Entity),
+            Some("ASSET" | "TOTAL" | "SHIP" | "AIRCRAFT") => None,
+            None => cell(Some(identifier)).map(|_| SubjectType::Unknown),
+            Some(_) => Some(SubjectType::Unknown),
+        };
+        let gone = cell(Some(status)).is_some_and(|s| {
+            let lower = s.to_lowercase();
+            ["revoked", "delisted", "removed"].iter().any(|word| lower.contains(word))
+        });
+        let Some(kind) = kind.filter(|_| !gone) else { continue };
+        let id = cell(Some(identifier)).ok_or_else(|| {
+            format_error(format!("A {} row in New Zealand's register has no Unique Identifier.", kind_text.clone().unwrap_or_default()))
+        })?;
+        let mut b = Builder::new(&id, kind);
+        b.programmes = Some(NEW_ZEALAND_PROGRAMME.to_string());
+        let date = cell(Some(sanctioned));
+        b.listed_on = excel_date(date.as_deref()).or_else(|| parse_date(date.as_deref(), "%d/%m/%Y"));
+        b.remarks = join("; ", &[cell(title), cell(rationale)]);
+        let primary = if kind == SubjectType::Individual {
+            join(" ", &[cell(Some(first)), cell(middle), cell(Some(last))])
+        } else {
+            cell(Some(first)).or_else(|| cell(Some(last)))
+        };
+        b.add_name(primary.as_deref(), false, true);
+        if let Some(aliases) = cell(Some(alias)) {
+            for name in aliases.split(';') {
+                b.add_name(Some(name), false, false);
+            }
+        }
+        b.add_address(cell(Some(address)).as_deref(), None);
+        out.extend(b.build());
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
 
-    use super::{dutch_surname, ods_rows, parse_date};
+    use super::{dutch_surname, ods_rows, parse_date, xlsx_rows};
 
     const NAMESPACES: &str = r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0""#;
 
@@ -359,6 +660,91 @@ mod tests {
         assert!(ods(&content).is_err());
     }
 
+    const WORKBOOK: &str = r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Register" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+    const RELATIONSHIPS: &str = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#;
+    const MAIN: &str = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+
+    /// A workbook of one sheet, "Register", written as given, with these shared strings.
+    fn workbook(sheet: &str, shared_strings: &str) -> Result<Vec<Vec<String>>, super::ParseError> {
+        workbook_parts(WORKBOOK, RELATIONSHIPS, sheet, shared_strings)
+    }
+
+    fn workbook_parts(
+        workbook: &str,
+        relationships: &str,
+        sheet: &str,
+        shared_strings: &str,
+    ) -> Result<Vec<Vec<String>>, super::ParseError> {
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            for (name, content) in [
+                ("xl/workbook.xml", workbook),
+                ("xl/_rels/workbook.xml.rels", relationships),
+                ("xl/sharedStrings.xml", shared_strings),
+                ("xl/worksheets/sheet1.xml", sheet),
+            ] {
+                zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+                zip.write_all(content.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        xlsx_rows(&mut std::io::Cursor::new(buffer.into_inner()), "Register")
+    }
+
+    #[test]
+    fn a_workbook_or_relationships_cut_short_after_whats_looked_for_is_a_format_error() {
+        let sheet = format!(r#"<worksheet xmlns="{MAIN}"><sheetData/></worksheet>"#);
+        let shared = format!(r#"<sst xmlns="{MAIN}"/>"#);
+        let workbook = &WORKBOOK[..WORKBOOK.find("</sheets>").unwrap()];
+        let relationships = &RELATIONSHIPS[..RELATIONSHIPS.find("</Relationships>").unwrap()];
+        assert!(workbook_parts(workbook, RELATIONSHIPS, &sheet, &shared).is_err());
+        assert!(workbook_parts(WORKBOOK, relationships, &sheet, &shared).is_err());
+    }
+
+    #[test]
+    fn a_shared_or_inline_string_longer_than_the_limit_is_a_format_error() {
+        let text = "x".repeat(super::MAX_CELL_TEXT + 1);
+        let sheet =
+            format!(r#"<worksheet xmlns="{MAIN}"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>"#);
+        let inline = format!(
+            r#"<worksheet xmlns="{MAIN}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>"#
+        );
+        assert!(workbook(&sheet, &format!(r#"<sst xmlns="{MAIN}"><si><t>{text}</t></si></sst>"#)).is_err());
+        assert!(workbook(&inline, &format!(r#"<sst xmlns="{MAIN}"/>"#)).is_err());
+    }
+
+    #[test]
+    fn cdata_in_values_and_inline_strings_is_read() {
+        let sheet = format!(
+            r#"<worksheet xmlns="{MAIN}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t><![CDATA[Northwind Trading]]></t></is></c><c r="B1"><v><![CDATA[44638]]></v></c></row></sheetData></worksheet>"#
+        );
+        assert_eq!(workbook(&sheet, &format!(r#"<sst xmlns="{MAIN}"/>"#)).unwrap(), vec![vec!["Northwind Trading", "44638"]]);
+    }
+
+    #[test]
+    fn a_workbook_whose_sheet_or_shared_strings_are_cut_short_is_a_format_error() {
+        let sheet = r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row>"#;
+        let strings = r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>a</t></si>"#;
+        assert!(workbook(sheet, &format!("{strings}</sst>")).is_err());
+        assert!(workbook(&format!("{sheet}</sheetData></worksheet>"), strings).is_err());
+    }
+
+    #[test]
+    fn a_shared_string_used_past_the_limit_is_a_format_error() {
+        // One shared string of 16 KiB in 20,000 cells: about 320 MB of text from under a megabyte.
+        let row = format!("<row>{}</row>", r#"<c t="s"><v>0</v></c>"#.repeat(200));
+        let sheet = format!(
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{}</sheetData></worksheet>"#,
+            row.repeat(100)
+        );
+        let shared = format!(
+            r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>{}</t></si></sst>"#,
+            "x".repeat(16 * 1024)
+        );
+        assert!(workbook(&sheet, &shared).is_err());
+    }
+
     #[test]
     fn sparse_rows_repeated_past_the_limit_are_a_format_error() {
         // A thousand rows of 255 empty cells and an "x", each repeated a thousand times: little text, a million rows.
@@ -368,6 +754,16 @@ mod tests {
             row.repeat(1000)
         );
         assert!(ods(&content).is_err());
+    }
+
+    #[test]
+    fn sparse_rows_opening_cells_past_the_limit_are_a_format_error() {
+        // 40,000 rows of one cell in the 256th column: little XML, ten million cell slots.
+        let rows: String = (1..=40_000).map(|r| format!(r#"<row><c r="IV{r}" t="inlineStr"><is><t>x</t></is></c></row>"#)).collect();
+        let sheet = format!(
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{rows}</sheetData></worksheet>"#
+        );
+        assert!(workbook(&sheet, r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#).is_err());
     }
 
     #[test]

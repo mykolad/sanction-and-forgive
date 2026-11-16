@@ -87,6 +87,257 @@ public static class Spreadsheets
         return rows;
     }
 
+    private const string XlsxMain = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+    private const string XlsxRelationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private const string PackageRelationships = "http://schemas.openxmlformats.org/package/2006/relationships";
+
+    /// <summary>The rows of an Office Open XML workbook's sheet named <paramref name="sheetName"/>: found through the
+    /// workbook and its relationships, cells placed by their reference (<c>C12</c>), shared strings resolved (phonetic
+    /// runs left out), numbers as written (a date is a serial number: <see cref="ExcelDate"/>). Every part read is
+    /// read to its end, so one cut short or broken is refused. Each shared string, and each cell (a shared string's
+    /// text each time a cell uses it), counts against the expansion limit, and no text may be longer than
+    /// <see cref="MaxCellText"/>, checked as it's read.</summary>
+    public static List<IReadOnlyList<string>> XlsxRows(Stream stream, string sheetName, CancellationToken cancellationToken)
+    {
+        using var zip = OpenZip(stream);
+        try
+        {
+            var relationshipId = SheetRelationship(zip, sheetName);
+            var target = RelationshipTarget(zip, relationshipId);
+            var expanded = new Expansion();
+            var shared = zip.GetEntry("xl/sharedStrings.xml") is null ? [] : SharedStrings(zip, expanded);
+
+            using var sheet = OpenPart(zip, target);
+            using var reader = XmlReader.Create(sheet, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+            var rows = new List<IReadOnlyList<string>>();
+            while (reader.Read())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "row" && reader.NamespaceURI == XlsxMain && !reader.IsEmptyElement)
+                {
+                    var row = XlsxRow(reader, shared, expanded);
+                    if (row.Count > 0)
+                    {
+                        rows.Add(row);
+                    }
+                }
+            }
+
+            return rows;
+        }
+        catch (XmlException exception)
+        {
+            throw new ListFormatException($"The workbook isn't valid XML: {exception.Message}");
+        }
+    }
+
+    /// <summary>An Excel date (days since 1899-12-30, the 1900 date system) as a date; null when it isn't one.</summary>
+    public static DateOnly? ExcelDate(string? value) =>
+        double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var serial) && serial is >= 1 and < 2958466
+            ? new DateOnly(1899, 12, 30).AddDays((int)Math.Floor(serial))
+            : null;
+
+    private static string SheetRelationship(ZipArchive zip, string sheetName)
+    {
+        using var workbook = OpenPart(zip, "xl/workbook.xml");
+        using var reader = XmlReader.Create(workbook, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+        string? found = null;
+
+        // Read to the end, so a part cut short after the sheet is refused too.
+        while (reader.Read())
+        {
+            if (found is null && reader.NodeType == XmlNodeType.Element && reader.LocalName == "sheet" && reader.NamespaceURI == XlsxMain
+                && reader.GetAttribute("name") == sheetName && reader.GetAttribute("id", XlsxRelationships) is { } id)
+            {
+                found = id;
+            }
+        }
+
+        return found ?? throw new ListFormatException($"The workbook has no sheet named \"{sheetName}\".");
+    }
+
+    private static string RelationshipTarget(ZipArchive zip, string id)
+    {
+        using var relationships = OpenPart(zip, "xl/_rels/workbook.xml.rels");
+        using var reader = XmlReader.Create(relationships, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+        string? found = null;
+
+        // Read to the end, so a part cut short after the relationship is refused too.
+        while (reader.Read())
+        {
+            if (found is null && reader.NodeType == XmlNodeType.Element && reader.LocalName == "Relationship" && reader.NamespaceURI == PackageRelationships
+                && reader.GetAttribute("Id") == id && reader.GetAttribute("Target") is { } target)
+            {
+                found = target.StartsWith('/') ? target[1..] : "xl/" + target;
+            }
+        }
+
+        return found ?? throw new ListFormatException($"The workbook's relationship {id} has no target.");
+    }
+
+    /// <summary>Each shared string's text: its <c>t</c> elements, but not those of a phonetic run (<c>rPh</c>). Each
+    /// entry and its text count against <paramref name="expanded"/>.</summary>
+    private static List<string> SharedStrings(ZipArchive zip, Expansion expanded)
+    {
+        using var part = OpenPart(zip, "xl/sharedStrings.xml");
+        using var reader = XmlReader.Create(part, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+        var strings = new List<string>();
+        var current = new System.Text.StringBuilder();
+        var phonetic = 0;
+        var inT = false;
+        while (reader.Read())
+        {
+            switch (reader.NodeType)
+            {
+                case XmlNodeType.Element when reader.NamespaceURI == XlsxMain && reader.LocalName == "si":
+                    current.Clear();
+                    if (reader.IsEmptyElement)
+                    {
+                        expanded.Add(CellBytes);
+                        strings.Add(string.Empty);
+                    }
+
+                    break;
+                case XmlNodeType.EndElement when reader.NamespaceURI == XlsxMain && reader.LocalName == "si":
+                    expanded.Add(CellBytes + current.Length);
+                    strings.Add(current.ToString());
+                    break;
+                case XmlNodeType.Element when reader.NamespaceURI == XlsxMain && reader.LocalName == "rPh" && !reader.IsEmptyElement:
+                    phonetic++;
+                    break;
+                case XmlNodeType.EndElement when reader.NamespaceURI == XlsxMain && reader.LocalName == "rPh":
+                    phonetic--;
+                    break;
+                case XmlNodeType.Element when reader.NamespaceURI == XlsxMain && reader.LocalName == "t" && !reader.IsEmptyElement:
+                    inT = true;
+                    break;
+                case XmlNodeType.EndElement when reader.NamespaceURI == XlsxMain && reader.LocalName == "t":
+                    inT = false;
+                    break;
+                case XmlNodeType.Text or XmlNodeType.SignificantWhitespace or XmlNodeType.Whitespace or XmlNodeType.CDATA when inT && phonetic == 0:
+                    current.Append(reader.Value);
+                    CheckCellText(current.Length);
+                    break;
+            }
+        }
+
+        return strings;
+    }
+
+    private static List<string> XlsxRow(XmlReader reader, List<string> shared, Expansion expanded)
+    {
+        var cells = new List<string>();
+        var rowDepth = reader.Depth;
+        while (reader.Read() && !(reader.NodeType == XmlNodeType.EndElement && reader.Depth == rowDepth))
+        {
+            if (reader.NodeType != XmlNodeType.Element || reader.LocalName != "c" || reader.NamespaceURI != XlsxMain)
+            {
+                continue;
+            }
+
+            var column = Column(reader.GetAttribute("r")) ?? cells.Count;
+            var type = reader.GetAttribute("t");
+            var text = reader.IsEmptyElement ? string.Empty : XlsxCellText(reader, type, shared);
+            if (column >= MaxColumns)
+            {
+                continue;
+            }
+
+            while (cells.Count <= column)
+            {
+                expanded.Add(CellBytes);
+                cells.Add(string.Empty);
+            }
+
+            expanded.Add(text.Length);
+            cells[column] = text;
+        }
+
+        return Trimmed(cells);
+    }
+
+    /// <summary>A cell's text, read to its end: its value (<c>v</c>), a shared string's text, or an inline string's
+    /// <c>t</c> elements (phonetic runs left out).</summary>
+    private static string XlsxCellText(XmlReader reader, string? type, List<string> shared)
+    {
+        var cellDepth = reader.Depth;
+        var value = new System.Text.StringBuilder();
+        var inline = new System.Text.StringBuilder();
+        var phonetic = 0;
+        string? element = null;
+        while (reader.Read() && !(reader.NodeType == XmlNodeType.EndElement && reader.Depth == cellDepth))
+        {
+            switch (reader.NodeType)
+            {
+                case XmlNodeType.Element when reader.NamespaceURI == XlsxMain && reader.LocalName == "rPh" && !reader.IsEmptyElement:
+                    phonetic++;
+                    break;
+                case XmlNodeType.EndElement when reader.NamespaceURI == XlsxMain && reader.LocalName == "rPh":
+                    phonetic--;
+                    break;
+                case XmlNodeType.Element when reader.NamespaceURI == XlsxMain && reader.LocalName is "v" or "t" && !reader.IsEmptyElement:
+                    element = reader.LocalName;
+                    break;
+                case XmlNodeType.EndElement when reader.NamespaceURI == XlsxMain && reader.LocalName is "v" or "t":
+                    element = null;
+                    break;
+                case XmlNodeType.Text or XmlNodeType.SignificantWhitespace or XmlNodeType.Whitespace or XmlNodeType.CDATA when element == "v":
+                    value.Append(reader.Value);
+                    CheckCellText(value.Length);
+                    break;
+                case XmlNodeType.Text or XmlNodeType.SignificantWhitespace or XmlNodeType.Whitespace or XmlNodeType.CDATA when element == "t" && phonetic == 0:
+                    inline.Append(reader.Value);
+                    CheckCellText(inline.Length);
+                    break;
+            }
+        }
+
+        return type switch
+        {
+            "s" => int.TryParse(value.ToString(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var index) && index < shared.Count
+                ? shared[index]
+                : throw new ListFormatException($"A cell refers to shared string {value}, which the workbook doesn't have."),
+            "inlineStr" => inline.ToString(),
+            _ => value.ToString(),
+        };
+    }
+
+    private static void CheckCellText(long length)
+    {
+        if (length > MaxCellText)
+        {
+            throw new ListFormatException($"A cell of the spreadsheet is longer than {MaxCellText:N0} characters.");
+        }
+    }
+
+    /// <summary>The zero-based column of a cell reference (<c>C12</c> is 2); null without one.</summary>
+    private static int? Column(string? reference)
+    {
+        if (string.IsNullOrEmpty(reference))
+        {
+            return null;
+        }
+
+        var column = 0;
+        var letters = 0;
+        foreach (var c in reference)
+        {
+            if (c is < 'A' or > 'Z')
+            {
+                break;
+            }
+
+            if (++letters > 3)
+            {
+                return MaxColumns;
+            }
+
+            column = (column * 26) + (c - 'A' + 1);
+        }
+
+        return letters == 0 ? null : column - 1;
+    }
+
     /// <summary>What a cell costs besides its text, for <see cref="Expansion"/>: about a string slot and its share of
     /// the row, so a sheet of empty cells repeated is counted too.</summary>
     private const int CellBytes = 32;

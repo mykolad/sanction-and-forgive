@@ -25,6 +25,7 @@ pub fn parser_for(code: &str) -> Option<Parser> {
         "ua-sfms" => parse_sfms,
         "fr-tresor" => parse_france,
         "nl-terrorism" => super::spreadsheets::parse_netherlands,
+        "nz-mfat" => super::spreadsheets::parse_new_zealand,
         _ => return None,
     })
 }
