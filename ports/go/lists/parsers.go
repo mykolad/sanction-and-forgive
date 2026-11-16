@@ -836,6 +836,10 @@ func parseFrance(reader io.Reader) ([]ParsedSubject, error) {
 			return &s
 		}
 
+		// Every entry has its name: one without is a broken file, not an entry to search by its aliases or to drop.
+		if Clean(record.Nom) == nil {
+			return nil, formatError("Register entry %s has no Nom.", *id)
+		}
 		b := newBuilder(*id, kind)
 		var labels, motifs []*string
 		for _, value := range values("FONDEMENT_JURIDIQUE") {

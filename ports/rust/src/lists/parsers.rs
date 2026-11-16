@@ -635,7 +635,11 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
         b.remarks = join(" ", &values("MOTIFS").iter().map(|v| json_str(v, "Motifs")).collect::<Vec<_>>());
         b.source_url = Some(format!("{FRANCE_RECORD_URL}{}", escape_data(&id)));
 
-        let surname = json_str(record, "Nom");
+        // Every entry has its name: one without is a broken file, not an entry to search by its aliases or to drop.
+        let surname = super::parse::clean(json_str(record, "Nom").as_deref());
+        if surname.is_none() {
+            return Err(format_error(format!("Register entry {id} has no Nom.")));
+        }
         let given =
             values("PRENOM").iter().map(|v| json_str(v, "Prenom")).find(|name| super::parse::clean(name.as_deref()).is_some()).flatten();
         let primary = if kind == SubjectType::Individual { join(" ", &[given, surname]) } else { surname };
@@ -666,6 +670,8 @@ mod tests {
             r#"{"Publications": {"PublicationDetail": [{"Nature": "Personne morale", "Nom": "A"}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}, 7]}}"#,
             r#"{"Publications": {}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale"}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne physique", "Nom": " ", "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}]}]}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": {"TypeChamp": "ALIAS"}}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": {"Alias": "B"}}]}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"Valeur": [{"Alias": "B"}]}]}]}}"#,

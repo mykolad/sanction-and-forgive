@@ -123,7 +123,8 @@ public sealed class FranceParser : IListParser
             SourceUrl = RecordUrl + Uri.EscapeDataString(id),
         };
 
-        var surname = String(record, "Nom");
+        // Every entry has its name: one without is a broken file, not an entry to search by its aliases or to drop.
+        var surname = Text.Clean(String(record, "Nom")) ?? throw new ListFormatException($"Register entry {id} has no Nom.");
         var givenNames = Values("PRENOM").Select(value => Required(value, "Prenom", id)).FirstOrDefault(name => Text.Clean(name) is not null);
         builder.AddName(type == SubjectType.Individual ? Text.Join(" ", givenNames, surname) : surname, isWeak: false, isPrimary: true);
         foreach (var alias in Values("ALIAS"))
