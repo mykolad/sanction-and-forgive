@@ -92,6 +92,24 @@
       "historyCount": "*"
     },
     {
+      "code": "jp-mof",
+      "name": "Japan asset-freeze list (Ministry of Finance)",
+      "state": "Current",
+      "status": "Active",
+      "reason": null,
+      "recordCount": 60,
+      "version": "*",
+      "lastCheckedAt": "*",
+      "updatedAt": "*",
+      "maxAgeHours": 72,
+      "homepage": "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",
+      "fileUrl": "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",
+      "termsUrl": "https://www.mof.go.jp/about_mof/notice/index.html",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
+    },
+    {
       "code": "nl-terrorism",
       "name": "Netherlands national terrorism list",
       "state": "Current",

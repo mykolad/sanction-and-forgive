@@ -502,7 +502,7 @@ public static class FeedFiles
     /// row per party with its category and number, the notice date (some with an amendment after it), people as the
     /// list writes them (family name first) with a katakana reading, aliases separated by semicolons (some full width),
     /// a weak alias, addresses as a city and a country (some noted as at the time of listing, some only in Japanese, some
-    /// with more countries than cities), an empty row, and a party that is neither a person nor a group.</summary>
+    /// with more countries than cities), an empty row, and some groups marked neither a person nor a group.</summary>
     private static string Japan(IReadOnlyList<FixtureSubject> subjects)
     {
         static string Csv(IEnumerable<string> cells) => string.Join(',', cells.Select(cell => $"\"{cell.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
@@ -520,7 +520,7 @@ public static class FeedFiles
                 ("番号", $"{category:000}-{subject.Number:000000}"),
                 ("告示日付", subject.Number % 3 == 0 ? $"{Date(subject.ListedOn)} {Date(subject.ListedOn.AddDays(400))}改訂" : Date(subject.ListedOn)),
                 ("告示番号", (subject.Number % 97).ToString(CultureInfo.InvariantCulture)),
-                ("個人・団体", subject.Person ? "個人" : "団体"),
+                ("個人・団体", subject.Person ? "個人" : subject.Number % 11 == 0 ? "その他" : "団体"),
                 ("氏名（英語）", subject.Person ? $"{subject.Family} {subject.Given}" : subject.Family),
                 ("別名・別称（英語）", string.Join(subject.Number % 4 == 0 ? "；" : "; ", subject.Aliases)),
                 ("その他の情報", "Fictional listing (conformance)"),
@@ -554,7 +554,6 @@ public static class FeedFiles
         }
 
         lines.Add(Csv(JapanHeader.Select(_ => string.Empty)));
-        lines.Add(Row(("区分", "44"), ("番号", "044-999999"), ("告示日付", "2025.8.13"), ("個人・団体", "その他"), ("氏名（英語）", "Fictional Gang Coalition")));
         return string.Join("\r\n", lines) + "\r\n";
     }
 
