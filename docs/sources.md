@@ -20,6 +20,7 @@ left out of the counts and the import, since the MVP doesn't screen them.
 | `ua-nsdc` | Ukraine NSDC State Register of Sanctions | JSON API | not fetched | | | **NeedsAccess** |
 | `ua-sfms` | Ukraine SFMS terrorism list | XML, 1.8 MB | 1,014 (724 / 290 / 0) | 3,893 (627, 99, 0) | 771 | Active |
 | `fr-tresor` | France national asset-freeze register (DG Trésor), from 2026-11-16 | JSON API, 15.0 MB | 8,187 (5,462 / 2,725 / 0) | 20,311 (134, 4,758, 438) | 3,491 | Active |
+| `nl-terrorism` | Netherlands national terrorism list (Ministry of Foreign Affairs), from 2026-11-16 | ODS, 14 KB | 117 (114 / 3 / 0) | 120 (0, 0, 0) | 0 | Active |
 | **All fetched** | | 246 MB | **50,107** | **147,997** (7,062 weak, 20,175 Cyrillic) | 44,519 | |
 
 The handover estimated 60-90k subjects. Without Australia and NSDC there are about 50k. NSDC is probably the
@@ -61,6 +62,14 @@ largest list, so the total is likely to land inside that range once it's added.
   the UN's listings as well as France's own, so most of it is on the EU list too; it's answered separately like
   every list. Each entry's page, `https://gels-avoirs.dgtresor.gouv.fr/Gels/RegistreDetail?idRegistre=<id>`, is its
   official record. Users have reported the API down at times (data.gouv.fr discussions): the download retries apply.
+- **Netherlands (`nl-terrorism`, 2026-11-16):** the Ministry of Foreign Affairs' `eng-terrorismelijst.ods`, linked from
+  [the national terrorism list page](https://www.government.nl/documents/2016/01/15/national-terrorism-list): one sheet,
+  a title row, then `Surname`, `First name(s)`, `Alias`, `Date of Birth`, `Place of Birth`, `Date of ministerial
+  decision` and `Link official notification` (`Stcrt 2015, 26627`, the Government Gazette notice). Columns are found by
+  their header. Organisations have no first name and a place `n/a: established in …`. There is no id column: the
+  notification is the id (one per listing). No addresses; the place of birth is kept in the remarks. The notices'
+  pages (zoek.officielebekendmakingen.nl) answer an automated client with an error, so no record is linked.
+  The file is read by `Spreadsheets.OdsRows` (zip and XML only).
 
 ## Terms of reuse
 
@@ -80,6 +89,7 @@ resell the lists.
 | NSDC | Unknown: the site refuses automated fetches. | | |
 | SFMS | Unknown: the site refuses automated fetches. The file downloads. | | |
 | France | Yes: Licence Ouverte 2.0 (Etalab), the dataset's licence on data.gouv.fr (read 2026-11-16). | Name the source and its date. The website's footer: "France: Registre national des gels, Direction générale du Trésor, reused under the Licence Ouverte 2.0." | [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/) |
+| Netherlands | Yes: government.nl declares CC0 1.0 for its content (read 2026-11-16). | None required. | [government.nl copyright](https://www.government.nl/copyright) |
 
 The UN's listings are also on the EU and UK lists, which implement them. Leaving out the UN row loses its own as-of
 date in the result, not coverage.
