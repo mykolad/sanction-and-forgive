@@ -710,6 +710,12 @@ type franceRecord struct {
 	RegistreDetail json.RawMessage `json:"RegistreDetail"`
 }
 
+// franceRequired: the text each kind of field's values always has.
+var franceRequired = map[string][]string{
+	"ALIAS": {"Alias"}, "PRENOM": {"Prenom"}, "ADRESSE_PM": {"Adresse", "Pays"}, "ADRESSE_PP": {"Adresse", "Pays"},
+	"MOTIFS": {"Motifs"}, "FONDEMENT_JURIDIQUE": {"FondementJuridiqueLabel"},
+}
+
 type franceField struct {
 	kind   string
 	values []map[string]json.RawMessage
@@ -796,6 +802,13 @@ func parseFrance(reader io.Reader) ([]ParsedSubject, error) {
 					var value map[string]json.RawMessage
 					if !isJSON(rawValue, '{') || json.Unmarshal(rawValue, &value) != nil {
 						return nil, formatError("Register entry %s: a %s value isn't an object.", *id, kind)
+					}
+					// A value the register always gives as text (a name, an address, a legal basis): missing or not text
+					// is a format error, never a name or an address quietly lost.
+					for _, key := range franceRequired[kind] {
+						if raw, ok := value[key]; !ok || !isJSON(raw, '"') {
+							return nil, formatError("Register entry %s: a value has no text %q.", *id, key)
+						}
 					}
 					parsed.values = append(parsed.values, value)
 				}

@@ -605,6 +605,21 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
                     if values.iter().any(|v| !v.is_object()) {
                         return Err(format_error(format!("Register entry {id}: a {kind} value isn't an object.")));
                     }
+                    // A value the register always gives as text (a name, an address, a legal basis): missing or not text
+                    // is a format error, never a name or an address quietly lost.
+                    let required: &[&str] = match kind {
+                        "ALIAS" => &["Alias"],
+                        "PRENOM" => &["Prenom"],
+                        "ADRESSE_PM" | "ADRESSE_PP" => &["Adresse", "Pays"],
+                        "MOTIFS" => &["Motifs"],
+                        "FONDEMENT_JURIDIQUE" => &["FondementJuridiqueLabel"],
+                        _ => &[],
+                    };
+                    for key in required {
+                        if values.iter().any(|v| !v.get(*key).is_some_and(Value::is_string)) {
+                            return Err(format_error(format!("Register entry {id}: a value has no text \"{key}\".")));
+                        }
+                    }
                     fields.push((kind, values));
                 }
             }
@@ -656,6 +671,8 @@ mod tests {
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"Valeur": [{"Alias": "B"}]}]}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": ["B"]}]}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": ["ALIAS"]}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": [{"Alias": 7}]}]}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ADRESSE_PM", "Valeur": [{"Pays": "FRANCE"}]}]}]}}"#,
         ] {
             let error = parse_france(&mut document.as_bytes()).expect_err(document);
             assert!(error.downcast_ref::<super::super::parse::FormatError>().is_some(), "{document}: {error}");

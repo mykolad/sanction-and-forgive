@@ -118,27 +118,32 @@ public sealed class FranceParser : IListParser
 
         var builder = new SubjectBuilder(id, type.Value)
         {
-            Programmes = Text.Join("; ", Values("FONDEMENT_JURIDIQUE").Select(value => String(value, "FondementJuridiqueLabel"))),
-            Remarks = Text.Join(" ", Values("MOTIFS").Select(value => String(value, "Motifs"))),
+            Programmes = Text.Join("; ", Values("FONDEMENT_JURIDIQUE").Select(value => Required(value, "FondementJuridiqueLabel", id))),
+            Remarks = Text.Join(" ", Values("MOTIFS").Select(value => Required(value, "Motifs", id))),
             SourceUrl = RecordUrl + Uri.EscapeDataString(id),
         };
 
         var surname = String(record, "Nom");
-        var givenNames = Values("PRENOM").Select(value => String(value, "Prenom")).FirstOrDefault(name => Text.Clean(name) is not null);
+        var givenNames = Values("PRENOM").Select(value => Required(value, "Prenom", id)).FirstOrDefault(name => Text.Clean(name) is not null);
         builder.AddName(type == SubjectType.Individual ? Text.Join(" ", givenNames, surname) : surname, isWeak: false, isPrimary: true);
         foreach (var alias in Values("ALIAS"))
         {
             var comment = String(alias, "Commentaire");
-            builder.AddName(String(alias, "Alias"), isWeak: comment?.Contains("alias faible", StringComparison.OrdinalIgnoreCase) == true, isPrimary: false);
+            builder.AddName(Required(alias, "Alias", id), isWeak: comment?.Contains("alias faible", StringComparison.OrdinalIgnoreCase) == true, isPrimary: false);
         }
 
         foreach (var address in Values("ADRESSE_PM").Concat(Values("ADRESSE_PP")))
         {
-            builder.AddAddress(Text.Join(", ", String(address, "Adresse"), String(address, "Pays")), countryCode: null);
+            builder.AddAddress(Text.Join(", ", Required(address, "Adresse", id), Required(address, "Pays", id)), countryCode: null);
         }
 
         return builder.Build();
     }
+
+    /// <summary>A value's text that the register always gives (a name, an address, a legal basis): missing or not text
+    /// is a format error, never a name or an address quietly lost.</summary>
+    private static string Required(JsonElement value, string name, string id) =>
+        String(value, name) ?? throw new ListFormatException($"Register entry {id}: a value has no text \"{name}\".");
 
     private static string? String(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
