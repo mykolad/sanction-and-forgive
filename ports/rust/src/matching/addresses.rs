@@ -71,12 +71,28 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
     let mut places = Vec::new();
     let (mut named_country, mut implied_country) = (String::new(), String::new());
     let (mut remaining, mut numbers) = (Vec::new(), Vec::new());
+    let add_word = |token: &TokenRef, remaining: &mut Vec<TokenRef>, numbers: &mut Vec<TokenRef>| {
+        if token.is_number {
+            numbers.push(token.clone());
+        } else if !data.address_words.contains(&token.text)
+            && !token.forms.iter().any(|f| data.address_words.contains(f))
+            && token.len() > 1
+        {
+            remaining.push(token.clone());
+        }
+    };
     let mut i = 0;
     while i < tokens.len() {
-        if let Some((code, length)) =
-            lookup(&tokens, i, data.max_country_words, &data.countries).filter(|_| !names_a_street(data, &tokens, i))
-        {
-            named_country = code.clone();
+        if let Some((code, length)) = lookup(&tokens, i, data.max_country_words, &data.countries) {
+            if names_a_street(data, &tokens, i) {
+                // The whole name is the street's: no country or place within it ("rue de la République démocratique du
+                // Congo" is neither the DRC nor the Congo).
+                for token in &tokens[i..i + length] {
+                    add_word(token, &mut remaining, &mut numbers);
+                }
+            } else {
+                named_country = code.clone();
+            }
             i += length;
             continue;
         }
@@ -88,15 +104,7 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
             i += length;
             continue;
         }
-        let token = &tokens[i];
-        if token.is_number {
-            numbers.push(token.clone());
-        } else if !data.address_words.contains(&token.text)
-            && !token.forms.iter().any(|f| data.address_words.contains(f))
-            && token.len() > 1
-        {
-            remaining.push(token.clone());
-        }
+        add_word(&tokens[i], &mut remaining, &mut numbers);
         i += 1;
     }
     let mut distinct_places: Vec<usize> = Vec::new();

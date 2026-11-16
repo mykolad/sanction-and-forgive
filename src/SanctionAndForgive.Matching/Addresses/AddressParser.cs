@@ -34,9 +34,22 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         var numbers = new List<Token>();
         for (var i = 0; i < tokens.Count; i++)
         {
-            if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch && !NamesAStreet(tokens, i))
+            if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch)
             {
-                namedCountry = countryMatch.Value;
+                if (NamesAStreet(tokens, i))
+                {
+                    // The whole name is the street's: no country or place within it ("rue de la République
+                    // démocratique du Congo" is neither the DRC nor the Congo).
+                    for (var k = i; k < i + countryMatch.Length; k++)
+                    {
+                        AddWord(tokens[k]);
+                    }
+                }
+                else
+                {
+                    namedCountry = countryMatch.Value;
+                }
+
                 i += countryMatch.Length - 1;
                 continue;
             }
@@ -49,7 +62,11 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
                 continue;
             }
 
-            var token = tokens[i];
+            AddWord(tokens[i]);
+        }
+
+        void AddWord(Token token)
+        {
             if (token.IsNumber)
             {
                 numbers.Add(token);

@@ -12,9 +12,9 @@
     "square", "sq", "building", "bldg", "floor", "fl", "office", "suite", "ste", "apt", "apartment", "room", "rm", "unit",
     "no", "nr", "number", "po", "box", "district", "province", "region", "oblast", "city", "village", "town", "area",
     "deliver", "delivery", "to", "in", "at", "for", "via", "c/o", "co", "the", "of", "and", "warehouse", "address",
-    "rue", "bd", "allée", "chemin", "quai", "impasse", "route", "cours", "cedex"
+    "rue", "bd", "allée", "allee", "chemin", "quai", "impasse", "route", "cours", "cedex"
   ],
-  "streetWords": ["rue", "avenue", "av", "boulevard", "bd", "place", "allée", "chemin", "quai", "impasse", "route", "cours",
+  "streetWords": ["rue", "avenue", "av", "boulevard", "bd", "place", "allée", "allee", "chemin", "quai", "impasse", "route", "cours",
     "passage", "square", "voie", "esplanade", "promenade", "faubourg"],
   "streetParticles": ["de", "du", "des", "la", "le"]
 }

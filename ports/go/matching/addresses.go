@@ -71,9 +71,24 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	var places []int
 	namedCountry, impliedCountry := "", ""
 	var remaining, numbers []*Token
+	addWord := func(token *Token) {
+		if token.IsNumber {
+			numbers = append(numbers, token)
+		} else if !p.data.AddressWords[token.Text] && !anyIn(token.Forms, p.data.AddressWords) && token.Len() > 1 {
+			remaining = append(remaining, token)
+		}
+	}
 	for i := 0; i < len(tokens); i++ {
-		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok && !p.namesAStreet(tokens, i) {
-			namedCountry = code
+		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok {
+			if p.namesAStreet(tokens, i) {
+				// The whole name is the street's: no country or place within it ("rue de la République
+				// démocratique du Congo" is neither the DRC nor the Congo).
+				for k := i; k < i+length; k++ {
+					addWord(tokens[k])
+				}
+			} else {
+				namedCountry = code
+			}
 			i += length - 1
 			continue
 		}
@@ -85,12 +100,7 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 			i += length - 1
 			continue
 		}
-		token := tokens[i]
-		if token.IsNumber {
-			numbers = append(numbers, token)
-		} else if !p.data.AddressWords[token.Text] && !anyIn(token.Forms, p.data.AddressWords) && token.Len() > 1 {
-			remaining = append(remaining, token)
-		}
+		addWord(tokens[i])
 	}
 	var distinctPlaces []int
 	for _, id := range places {

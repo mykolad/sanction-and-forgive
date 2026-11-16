@@ -25,6 +25,8 @@ public class EdgeCaseTests
     [Theory]
     [InlineData("12 rue de Malte, Paris", "Rue de Malte 12, Paris, FR")]
     [InlineData("3 avenue de la Grèce, Lyon, France", "Lyon, FR")]
+    [InlineData("12 rue de la République démocratique du Congo, Paris", "Paris, FR")]
+    [InlineData("4 allee de Malte, Paris", "Paris, FR")]
     [InlineData("Lenina 5, Moscou, RUSSIE", "Moscow, RU")]
     [InlineData("Sheikh Zayed Road, UAE", "Dubai, AE")]
     [InlineData("Office 4, Some Road, Malta", "Valletta, MT")]
