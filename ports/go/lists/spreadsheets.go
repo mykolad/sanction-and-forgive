@@ -19,8 +19,12 @@ import (
 const (
 	maxPartBytes = 256 << 20
 	maxColumns   = 256
-	odsTable     = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
-	odsText      = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+	// maxCellText is the longest text one cell may have, paragraphs and their line breaks included, checked as it's
+	// read (a few bytes of text:s stand for a hundred spaces): far above any list's cell; spreadsheet programs stop at
+	// 32,767 characters.
+	maxCellText = 1 << 20
+	odsTable    = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+	odsText     = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 )
 
 // openPart opens one part of a zip held in memory, refusing one that unpacks past the limit.
@@ -194,8 +198,12 @@ func odsRow(decoder *xml.Decoder, expanded *expansion) ([]string, error) {
 func odsCellText(decoder *xml.Decoder) (string, error) {
 	var paragraphs []string
 	var current strings.Builder
-	inParagraph, depth := false, 0
+	inParagraph, depth, done := false, 0, 0
 	for {
+		// Each finished paragraph, and its line break; then the one being read.
+		if done+current.Len() > maxCellText {
+			return "", formatError("A cell of the spreadsheet is longer than %d characters.", maxCellText)
+		}
 		token, err := decoder.Token()
 		if err != nil {
 			return "", formatError("The spreadsheet's content.xml ends inside a cell.")
@@ -229,6 +237,8 @@ func odsCellText(decoder *xml.Decoder) (string, error) {
 			depth--
 			if t.Name.Space == odsText && (t.Name.Local == "p" || t.Name.Local == "h") {
 				paragraphs = append(paragraphs, current.String())
+				done += current.Len() + 1
+				current.Reset()
 				inParagraph = false
 			}
 		case xml.CharData:
