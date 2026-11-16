@@ -71,9 +71,24 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	var places []int
 	namedCountry, impliedCountry := "", ""
 	var remaining, numbers []*Token
+	addWord := func(token *Token) {
+		if token.IsNumber {
+			numbers = append(numbers, token)
+		} else if !p.data.AddressWords[token.Text] && !anyIn(token.Forms, p.data.AddressWords) && token.Len() > 1 {
+			remaining = append(remaining, token)
+		}
+	}
 	for i := 0; i < len(tokens); i++ {
 		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok {
-			namedCountry = code
+			if p.namesAStreet(tokens, i) {
+				// The whole name is the street's: no country or place within it ("rue de la République
+				// démocratique du Congo" is neither the DRC nor the Congo).
+				for k := i; k < i+length; k++ {
+					addWord(tokens[k])
+				}
+			} else {
+				namedCountry = code
+			}
 			i += length - 1
 			continue
 		}
@@ -85,12 +100,7 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 			i += length - 1
 			continue
 		}
-		token := tokens[i]
-		if token.IsNumber {
-			numbers = append(numbers, token)
-		} else if !p.data.AddressWords[token.Text] && !anyIn(token.Forms, p.data.AddressWords) && token.Len() > 1 {
-			remaining = append(remaining, token)
-		}
+		addWord(tokens[i])
 	}
 	var distinctPlaces []int
 	for _, id := range places {
@@ -102,6 +112,19 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 		country = namedCountry
 	}
 	return &addressForm{raw, remaining, numbers, distinctPlaces, country, impliedCountry}
+}
+
+// namesAStreet: the country name starting at start follows a street type and one or two particles, so it names the
+// street ("12 rue de Malte, Paris" is in France). A particle is required: commas are gone, and "Sheikh Zayed Road,
+// UAE" must still name its country.
+func (p *addressParser) namesAStreet(tokens []*Token, start int) bool {
+	is := func(token *Token, words map[string]bool) bool { return words[token.Text] || anyIn(token.Forms, words) }
+	i, particles := start-1, 0
+	for i >= 0 && particles < 2 && is(tokens[i], p.data.StreetParticles) {
+		i--
+		particles++
+	}
+	return particles > 0 && i >= 0 && is(tokens[i], p.data.StreetWords)
 }
 
 func anyIn(values []string, set map[string]bool) bool {

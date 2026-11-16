@@ -15,6 +15,36 @@ public class EdgeCaseTests
     private static Cell AddressCell(string address, ListedSubject subject) =>
         Screener.Screen(new ScreeningRequest(null, null, address), [List("eu", subject)]).Entries.Single().Cells.Single();
 
+    private static AddressState StateOf(string entered, string listed)
+    {
+        var subject = Subject("Northwind Shipping LLC", SubjectKind.Entity, listed);
+        var result = Screener.Screen(new ScreeningRequest(null, "Northwind Shipping LLC", entered), [List("eu", subject)]);
+        return result.Entries.First(entry => entry.Kind == EntryKind.Company).Cells.Single().Best!.AddressState;
+    }
+
+    [Theory]
+    [InlineData("12 rue de Malte, Paris", "Rue de Malte 12, Paris, FR")]
+    [InlineData("3 avenue de la Grèce, Lyon, France", "Lyon, FR")]
+    [InlineData("12 rue de la République démocratique du Congo, Paris", "Paris, FR")]
+    [InlineData("4 allee de Malte, Paris", "Paris, FR")]
+    [InlineData("Lenina 5, Moscou, RUSSIE", "Moscow, RU")]
+    [InlineData("Sheikh Zayed Road, UAE", "Dubai, AE")]
+    [InlineData("Office 4, Some Road, Malta", "Valletta, MT")]
+    public void AStreetNamedAfterACountry_IsAStreet_ButACountryNamedAfterAStreetIsStillTheCountry(string entered, string listed)
+    {
+        // French streets are often named after countries: "rue de Malte" in Paris is in France. A country name counts as
+        // the street only after a street type and a particle, so "Road, UAE" still names the UAE (commas are gone).
+        Assert.Equal(AddressState.Corroborated, StateOf(entered, listed));
+    }
+
+    [Fact]
+    public void FrenchStreets_DontCorroborateOnTheirParticles()
+    {
+        // "de" and "la" are filler, like "of" and "the": two different streets in the same city don't agree on them.
+        Assert.NotEqual(AddressState.Corroborated, StateOf("5 rue de la Paix", "12 rue de la Gare"));
+        Assert.NotEqual(AddressState.Corroborated, StateOf("2 place Vendome", "9 place Bellecour"));
+    }
+
     [Fact]
     public void PersonNamedLikeALegalForm_KeepsThatName()
     {
