@@ -224,7 +224,9 @@ answers updates the golden files in the same PR (`run.ps1 -Build -UpdateGolden`,
 implementation never rewrites them. **A change to the .NET app is a change to every port** (`ports/go`, `ports/rust`): the CI job
 runs the suite against each, so a behaviour change lands in all of them in the same PR, or the port's job fails.
 The dictionaries and `wwwroot` are copied into the ports at build time; never edit copies. The dictionaries are LF
-in every checkout (`.gitattributes`): their bytes are hashed into the matcher version.
+in every checkout (`.gitattributes`): their bytes are hashed into the matcher version. A dictionary change therefore updates the
+version the ports pin in a test (`ports/go/matching/version_test.go`, `ports/rust/src/matching/mod.rs`) to the one the
+reference computes, in the same PR.
 
 ## Docker
 
