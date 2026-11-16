@@ -155,6 +155,7 @@ fn ods_row(reader: &mut NsReader<&[u8]>, expanded: &mut Expansion) -> Result<Vec
                     if cells.len() >= MAX_COLUMNS {
                         break;
                     }
+                    expanded.add(CELL_BYTES)?;
                     cells.push(String::new());
                 }
             }
@@ -697,6 +698,17 @@ mod tests {
             r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{rows}</sheetData></worksheet>"#
         );
         assert!(workbook(&sheet, r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#).is_err());
+    }
+
+    #[test]
+    fn self_closed_empty_cells_count_against_the_limit_too() {
+        // Rows of 256 self-closed empty cells and nothing else would be dropped as empty, so each ends in an "x".
+        let row = r#"<table:table-row><table:table-cell table:number-columns-repeated="255"/><table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>"#;
+        let content = format!(
+            "<office:document-content {NAMESPACES}><office:body><office:spreadsheet><table:table>{}</table:table></office:spreadsheet></office:body></office:document-content>",
+            row.repeat(40_000)
+        );
+        assert!(ods(&content).is_err());
     }
 
     #[test]
