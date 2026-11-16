@@ -168,6 +168,7 @@ public static class Spreadsheets
                 case XmlNodeType.EndElement when reader.NamespaceURI == OdsText && reader.LocalName is "p" or "h":
                     paragraphs.Add(current.ToString());
                     done += current.Length + 1;
+                    current.Clear();
                     inParagraph = false;
                     break;
                 case XmlNodeType.Element when inParagraph && reader.NamespaceURI == OdsText && reader.LocalName == "s":

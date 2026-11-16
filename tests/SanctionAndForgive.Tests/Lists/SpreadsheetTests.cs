@@ -105,6 +105,15 @@ public class SpreadsheetTests
     }
 
     [Fact]
+    public void Ods_ACellUnderTheLimit_IsReadWhole()
+    {
+        var text = new string('x', 600_000);
+        using var file = Ods(["Title"], [text, "y"]);
+
+        Assert.Equal(text, Spreadsheets.OdsRows(file, CancellationToken.None)[1][0]);
+    }
+
+    [Fact]
     public void Ods_WhoseCellIsLongerThanTheLimit_IsAFormatError_AsItsRead()
     {
         // 20,000 runs of a hundred spaces: 500 kB of XML for 2 million characters in one cell.

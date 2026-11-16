@@ -314,8 +314,9 @@ public static class Suite
     public static async Task<HttpResponseMessage> PostAsync(string path, object body) =>
         await Http.PostAsync(new Uri(path, UriKind.Relative), JsonContent.Create(body, options: Json));
 
-    /// <summary>Times a screening answered 503 busy is tried again, as docs/api.md ("Busy") tells a caller to.</summary>
-    private const int BusyRetries = 3;
+    /// <summary>Times a screening answered 503 busy is tried again, as docs/api.md ("Busy") tells a caller to: enough
+    /// for a CI runner of two cores busy with the golden stream that runs alongside.</summary>
+    private const int BusyRetries = 10;
 
     /// <summary>A screening (the reference added if missing); asserts a 200. A 503 <c>busy</c> is tried again after
     /// its <c>Retry-After</c>, up to <see cref="BusyRetries"/> times, as a real caller would.</summary>
