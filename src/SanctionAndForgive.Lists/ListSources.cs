@@ -125,6 +125,11 @@ public static class ListSources
             TermsUrl = "https://www.mof.go.jp/about_mof/notice/index.html",
             LinkPattern = @"/shisantouketsu[0-9]{8}\.csv$",
         },
+        new("us-uflpa", "US UFLPA Entity List (forced-labour import ban)", "https://www.dhs.gov/uflpa-entity-list", DailyMaxAge, FeedStatus.Active, () => new UflpaParser())
+        {
+            Homepage = "https://www.dhs.gov/uflpa-entity-list",
+            TermsUrl = "https://www.usa.gov/government-copyright",
+        },
         new("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", DailyMaxAge, FeedStatus.Active, () => new SfmsParser())
         {
             Homepage = "https://fiu.gov.ua/",

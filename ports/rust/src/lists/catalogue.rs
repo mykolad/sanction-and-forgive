@@ -58,7 +58,7 @@ const fn source(
 }
 
 /// The catalogue, in the reference's order.
-pub static SOURCES: [ListSource; 15] = [
+pub static SOURCES: [ListSource; 16] = [
     source(
         "eu",
         "EU consolidated financial sanctions",
@@ -188,6 +188,15 @@ pub static SOURCES: [ListSource; 15] = [
             "",
         )
     },
+    source(
+        "us-uflpa",
+        "US UFLPA Entity List (forced-labour import ban)",
+        "https://www.dhs.gov/uflpa-entity-list",
+        FeedStatus::Active,
+        "https://www.dhs.gov/uflpa-entity-list",
+        "https://www.usa.gov/government-copyright",
+        "",
+    ),
     source("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", FeedStatus::Active, "https://fiu.gov.ua/", "", ""),
 ];
 

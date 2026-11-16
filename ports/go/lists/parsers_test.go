@@ -117,3 +117,61 @@ func TestJapanReadsPeopleAndGroupsWeakAliasesAndPairedAddresses(t *testing.T) {
 		t.Fatalf("other = %+v", other)
 	}
 }
+
+// The UFLPA page's shape, as UflpaParser's tests read it in the reference.
+const uflpaPage = `<html><body><main><h1>UFLPA Entity List</h1>
+<p>A list of entities that mine or produce goods with forced labor</p><p><strong>Section 2(d)(2)(B)(i)</strong></p>
+<table><thead><tr><th>Name of Entity</th><th>Effective Date</th></tr></thead><tbody>
+<tr><td>Northwind Silicon (Shanshan) Co., Ltd (including one alias: Northwind Silicon (Shanshan) Co.) and subsidiaries</td><td>June 21, 2022</td></tr>
+<tr><td>Contoso&nbsp;Cotton Corps (including three aliases: CCC; Contoso Corps; and Kongtuo) and its subordinate and affiliated entities</td><td>June 21, 2022</td></tr>
+</tbody></table>
+<p>Section 2(d)(2)(B)(ii)</p>
+<table><tr><th>Entity Name</th><th>Effective Date</th></tr>
+<tr><td>Fabrikam Textiles Co., Ltd. (also known as Fabrikam Spinning; and Fab Yarn Co., Ltd.)</td><td>January 15, 2025</td></tr>
+<tr><td>Tailspin Trading Co., Ltd. (formerly known as Tailspin Toys &amp; Trading Co., Ltd.)</td><td>August 3, 2026</td></tr>
+<tr><td>Contoso Cotton Corps (CCC) and its subordinate and affiliated entities</td><td>May 17, 2024</td></tr>
+<tr><td>Northwind Silicon (Shanshan) Co., Ltd.</td><td>August 9, 2024</td></tr>
+</table></main></body></html>`
+
+func TestUflpaReadsEachSectionsTableAliasesInTheNameOneRecordPerEntity(t *testing.T) {
+	subjects, err := parseUflpa(strings.NewReader(uflpaPage))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, subject := range subjects {
+		var names []string
+		for _, name := range subject.Names {
+			names = append(names, name.FullName)
+		}
+		got = append(got, fmt.Sprintf("%s|%s|%s|%s|%s", subject.ExternalID, strings.Join(names, "/"), deref(subject.Programmes), subject.ListedOn.Format("2006-01-02"), deref(subject.Remarks)))
+	}
+	want := []string{
+		"Northwind Silicon (Shanshan) Co., Ltd|Northwind Silicon (Shanshan) Co., Ltd/Northwind Silicon (Shanshan) Co./Northwind Silicon (Shanshan) Co., Ltd.|" + uflpaProgramme + ", Section 2(d)(2)(B)(i); Section 2(d)(2)(B)(ii)|2022-06-21|and subsidiaries",
+		"Contoso Cotton Corps|Contoso Cotton Corps/CCC/Contoso Corps/Kongtuo|" + uflpaProgramme + ", Section 2(d)(2)(B)(i); Section 2(d)(2)(B)(ii)|2022-06-21|and its subordinate and affiliated entities",
+		"Fabrikam Textiles Co., Ltd.|Fabrikam Textiles Co., Ltd./Fabrikam Spinning/Fab Yarn Co., Ltd.|" + uflpaProgramme + ", Section 2(d)(2)(B)(ii)|2025-01-15|",
+		"Tailspin Trading Co., Ltd.|Tailspin Trading Co., Ltd./Tailspin Toys & Trading Co., Ltd.|" + uflpaProgramme + ", Section 2(d)(2)(B)(ii)|2026-08-03|",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	for _, subject := range subjects {
+		if subject.Type != Entity {
+			t.Fatalf("%s is %v", subject.ExternalID, subject.Type)
+		}
+	}
+}
+
+func TestUflpaRejectsAPageThatIsntTheList(t *testing.T) {
+	for _, page := range []string{
+		`<html><p>No tables here.</p></html>`,
+		`<table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table>`,
+		`<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table>`,
+		`<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table>`,
+	} {
+		var formatErr *FormatError
+		if _, err := parseUflpa(strings.NewReader(page)); !errors.As(err, &formatErr) {
+			t.Fatalf("%q: err = %v, want a format error", page, err)
+		}
+	}
+}

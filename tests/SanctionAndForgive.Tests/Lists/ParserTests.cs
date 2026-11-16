@@ -339,6 +339,51 @@ public class ParserTests
         Assert.Throws<ListFormatException>(() => Parse(new JapanParser(), string.Join(',', JapanHeader) + "\r\n" + JapanRow(("氏名（英語）", "A")) + "\r\n"));
     }
 
+    /// <summary>The UFLPA page's shape: a heading naming the section, then its table; aliases written in the name.</summary>
+    internal const string UflpaPage = """
+        <html><body><main><h1>UFLPA Entity List</h1>
+        <p>A list of entities that mine or produce goods with forced labor</p><p><strong>Section 2(d)(2)(B)(i)</strong></p>
+        <table><thead><tr><th>Name of Entity</th><th>Effective Date</th></tr></thead><tbody>
+        <tr><td>Northwind Silicon (Shanshan) Co., Ltd (including one alias: Northwind Silicon (Shanshan) Co.) and subsidiaries</td><td>June 21, 2022</td></tr>
+        <tr><td>Contoso&nbsp;Cotton Corps (including three aliases: CCC; Contoso Corps; and Kongtuo) and its subordinate and affiliated entities</td><td>June 21, 2022</td></tr>
+        </tbody></table>
+        <p>Section 2(d)(2)(B)(ii)</p>
+        <table><tr><th>Entity Name</th><th>Effective Date</th></tr>
+        <tr><td>Fabrikam Textiles Co., Ltd. (also known as Fabrikam Spinning; and Fab Yarn Co., Ltd.)</td><td>January 15, 2025</td></tr>
+        <tr><td>Tailspin Trading Co., Ltd. (formerly known as Tailspin Toys &amp; Trading Co., Ltd.)</td><td>August 3, 2026</td></tr>
+        <tr><td>Contoso Cotton Corps (CCC) and its subordinate and affiliated entities</td><td>May 17, 2024</td></tr>
+        <tr><td>Northwind Silicon (Shanshan) Co., Ltd.</td><td>August 9, 2024</td></tr>
+        </table></main></body></html>
+        """;
+
+    [Fact]
+    public void Uflpa_ReadsEachSectionsTable_AliasesInTheName_OneRecordPerEntity()
+    {
+        var subjects = Parse(new UflpaParser(), UflpaPage);
+
+        Assert.Equal(["Northwind Silicon (Shanshan) Co., Ltd", "Contoso Cotton Corps", "Fabrikam Textiles Co., Ltd.", "Tailspin Trading Co., Ltd."], subjects.Select(subject => subject.ExternalId));
+        Assert.All(subjects, subject => Assert.Equal(SubjectType.Entity, subject.Type));
+        var silicon = subjects[0];
+        Assert.Equal(["Northwind Silicon (Shanshan) Co., Ltd", "Northwind Silicon (Shanshan) Co.", "Northwind Silicon (Shanshan) Co., Ltd."], silicon.Names.Select(name => name.FullName));
+        Assert.Equal((UflpaParser.Programme + ", Section 2(d)(2)(B)(i); Section 2(d)(2)(B)(ii)", new DateOnly(2022, 6, 21), "and subsidiaries"), (silicon.Programmes, silicon.ListedOn, silicon.Remarks));
+        var corps = subjects[1];
+        Assert.Equal(["Contoso Cotton Corps", "CCC", "Contoso Corps", "Kongtuo"], corps.Names.Select(name => name.FullName));
+        Assert.Equal((new DateOnly(2022, 6, 21), "and its subordinate and affiliated entities"), (corps.ListedOn, corps.Remarks));
+        Assert.Equal(["Fabrikam Textiles Co., Ltd.", "Fabrikam Spinning", "Fab Yarn Co., Ltd."], subjects[2].Names.Select(name => name.FullName));
+        Assert.Equal(["Tailspin Trading Co., Ltd.", "Tailspin Toys & Trading Co., Ltd."], subjects[3].Names.Select(name => name.FullName));
+        Assert.Equal(UflpaParser.Programme + ", Section 2(d)(2)(B)(ii)", subjects[3].Programmes);
+    }
+
+    [Theory]
+    [InlineData("<html><p>No tables here.</p></html>")]
+    [InlineData("<table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table>")]
+    [InlineData("<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table>")]
+    [InlineData("<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table>")]
+    public void Uflpa_RejectsAPageThatIsntTheList(string html)
+    {
+        Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), html));
+    }
+
     [Theory]
     [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}, null]}""")]
     [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}]""")]

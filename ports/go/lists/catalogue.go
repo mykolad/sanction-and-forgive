@@ -89,6 +89,9 @@ var Sources = []ListSource{
 		Homepage:    "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",
 		TermsURL:    "https://www.mof.go.jp/about_mof/notice/index.html",
 		LinkPattern: `/shisantouketsu[0-9]{8}\.csv$`},
+	{Code: "us-uflpa", Name: "US UFLPA Entity List (forced-labour import ban)", URL: "https://www.dhs.gov/uflpa-entity-list", MaxAgeHours: dailyMaxAge, Status: Active,
+		Homepage: "https://www.dhs.gov/uflpa-entity-list",
+		TermsURL: "https://www.usa.gov/government-copyright"},
 	{Code: "ua-sfms", Name: "Ukraine SFMS terrorism list", URL: "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://fiu.gov.ua/"},
 }

@@ -23,6 +23,7 @@ left out of the counts and the import, since the MVP doesn't screen them.
 | `nl-terrorism` | Netherlands national terrorism list (Ministry of Foreign Affairs), from 2026-11-16 | ODS, 14 KB | 117 (114 / 3 / 0) | 120 (0, 0, 0) | 0 | Active |
 | `nz-mfat` | New Zealand Russia Sanctions Register (MFAT), from 2026-11-16 | XLSX, 21.6 MB | 1,918 (1,389 / 529 / 0) | 2,896 (0, 0, 0) | 124 | Active |
 | `jp-mof` | Japan asset-freeze list (Ministry of Finance), from 2026-11-16 | CSV, 3.2 MB | 2,897 (2,028 / 869 / 0) | 15,034 (345, 0, 6,648) | 1,707 | Active |
+| `us-uflpa` | US UFLPA Entity List (DHS), from 2026-11-16 | HTML page, 138 KB | 192 (0 / 192 / 0) | 325 (0, 0, 0) | 0 | Active |
 | **All fetched** | | 246 MB | **50,107** | **147,997** (7,062 weak, 20,175 Cyrillic) | 44,519 | |
 
 The handover estimated 60-90k subjects. Without Australia and NSDC there are about 50k. NSDC is probably the
@@ -95,6 +96,18 @@ largest list, so the total is likely to land inside that range once it's added.
   "(リスト掲載時点)" (at the time of listing) is dropped. Listed on is the notice date (`告示日付`, `2002.3.1`, amendments
   after it). The programme is the category number (`区分`, 1 to 44), which only the list page names. No per-record
   page. The 6,648 names in other scripts are the Japanese ones, mostly katakana, which no table transliterates yet.
+- **US UFLPA Entity List (`us-uflpa`, 2026-11-16):** entities whose goods are presumed made with forced labour and
+  barred from US import under the Uyghur Forced Labor Prevention Act, kept by DHS's Forced Labor Enforcement Task
+  Force. Not in the Consolidated Screening List (its `source` values, checked 2026-11-16, have no UFLPA records), and
+  published only as [the list page](https://www.dhs.gov/uflpa-entity-list) itself: three HTML tables, one per section
+  of the Act (`Section 2(d)(2)(B)(i)`, `(ii)`, `(v)`, written before each), of a name and an effective date (`June 21,
+  2022`), 210 rows. `HtmlTables` reads them with regular expressions (no HTML library). Aliases are written in the
+  name: `(also known as A; B; and C)`, `(formerly known as …)`, `(including three aliases: …)`, `(and two aliases:
+  …)`, or an acronym alone (`(XPCC)`); other parentheses are part of the name (`(Shanshan)`, `(Group)`). A trailing
+  "and subsidiaries" or "and its subordinate and affiliated entities" goes to the remarks. 15 entities are listed
+  under two sections, and two more differ only by a final full stop: one record each, 192 in all, with every section
+  and the earliest date. No identifiers and no per-record page: the id is the name. A page whose tables lose their
+  header, or a row that isn't a name and a date, fails the import.
 
 ## Terms of reuse
 
@@ -117,6 +130,7 @@ resell the lists.
 | Netherlands | Yes: government.nl declares CC0 1.0 for its content (read 2026-11-16). | None required. | [government.nl copyright](https://www.government.nl/copyright) |
 | New Zealand | Yes: MFAT's site content is Crown copyright, licensed under CC BY 4.0 (read 2026-11-16). | Credit the Ministry. The website's footer: "New Zealand: Russia Sanctions Register, Ministry of Foreign Affairs and Trade, licensed under CC BY 4.0." | [MFAT copyright](https://www.mfat.govt.nz/en/copyright) |
 | Japan | Yes: the Ministry of Finance's content is under the Public Data License 1.0 (PDL1.0) unless marked otherwise (its copyright page, read 2026-11-16). | Name the source; say if it was edited. The website's footer: "Japan: 資産凍結等対象者一覧 (list of parties subject to asset freezes), Ministry of Finance (財務省), used under the Public Data License 1.0; names and addresses are read for matching, not changed." | [MOF copyright and links](https://www.mof.go.jp/about_mof/notice/index.html), [PDL 1.0](https://www.digital.go.jp/resources/open_data/public_data_license_v1.0) |
+| US UFLPA | Yes: a work of the US federal government, not subject to copyright in the US (17 U.S.C. 105). | None required. | [USA.gov: government works](https://www.usa.gov/government-copyright) |
 
 The UN's listings are also on the EU and UK lists, which implement them. Leaving out the UN row loses its own as-of
 date in the result, not coverage.
