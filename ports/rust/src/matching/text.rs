@@ -182,7 +182,7 @@ static LETTERS: std::sync::LazyLock<LetterTables> = std::sync::LazyLock::new(|| 
 });
 
 /// A Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds (letters.json) apply
-/// first, then the marks decomposition leaves are dropped.
+/// first, then again to what decomposition leaves (ǿ is ø with an acute), and the marks are dropped.
 pub fn strip_diacritics(value: &str) -> String {
     let mut folded = String::with_capacity(value.len() + 4);
     for c in value.chars() {
@@ -193,8 +193,12 @@ pub fn strip_diacritics(value: &str) -> String {
     }
     let mut out = String::with_capacity(folded.len());
     for c in folded.nfd() {
-        if !is_category(c, GeneralCategory::NonspacingMark) {
-            out.push(c);
+        if is_category(c, GeneralCategory::NonspacingMark) {
+            continue;
+        }
+        match LETTERS.folds.get(&c) {
+            Some(fold) => out.push_str(fold),
+            None => out.push(c),
         }
     }
     out.nfc().collect()

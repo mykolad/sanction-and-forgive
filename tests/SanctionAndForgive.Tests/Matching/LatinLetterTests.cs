@@ -30,6 +30,10 @@ public class LatinLetterTests
         { "Oeuvre Logistique SARL", "Œuvre Logistique SARL", SubjectKind.Entity, Outcome.Match },
         { "Broendby Shipping ApS", "Brøndby Shipping ApS", SubjectKind.Entity, Outcome.Match },
 
+        // A folded letter with an accent on it decomposes to the letter and its mark: ǿ is ø, ǽ is æ.
+        { "Orn Hansen", "Ǿrn Hansen", SubjectKind.Individual, Outcome.Match },
+        { "Aegir Hansen", "Ǽgir Hansen", SubjectKind.Individual, Outcome.Match },
+
         // A second spelling is a reading of the same letter, not a licence for any vowel pair.
         { "Jaergen Hansen", "Jørgen Hansen", SubjectKind.Individual, Outcome.Review },
         { "Lukasz Kowal", "Łukasz Nowak", SubjectKind.Individual, Outcome.NoMatch },

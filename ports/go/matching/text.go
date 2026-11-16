@@ -156,7 +156,7 @@ var letters = sync.OnceValue(func() letterTables {
 })
 
 // StripDiacritics returns a Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds
-// (letters.json) apply first, then the marks decomposition leaves are dropped.
+// (letters.json) apply first, then again to what decomposition leaves (ǿ is ø with an acute), and the marks are dropped.
 func StripDiacritics(value string) string {
 	folds := letters().folds
 	var folded strings.Builder
@@ -169,7 +169,12 @@ func StripDiacritics(value string) string {
 	}
 	var b strings.Builder
 	for _, c := range norm.NFD.String(folded.String()) {
-		if !Is(unicode.Mn, c) {
+		if Is(unicode.Mn, c) {
+			continue
+		}
+		if fold, ok := folds[c]; ok {
+			b.WriteString(fold)
+		} else {
 			b.WriteRune(c)
 		}
 	}

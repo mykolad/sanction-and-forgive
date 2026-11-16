@@ -46,7 +46,8 @@ internal static class Normalizer
     }
 
     /// <summary>A Latin word without diacritics: <c>Ştefan</c> → <c>stefan</c>, <c>straße</c> → <c>strasse</c>,
-    /// <c>þór</c> → <c>thor</c>. The folds (letters.json) apply first, then the marks decomposition leaves are dropped.</summary>
+    /// <c>þór</c> → <c>thor</c>, <c>ǿrn</c> → <c>orn</c>. The folds (letters.json) apply first, then again to what
+    /// decomposition leaves (ǿ is ø with an acute), and the marks are dropped.</summary>
     public static string StripDiacritics(string value)
     {
         var folded = new StringBuilder(value.Length + 4);
@@ -66,7 +67,16 @@ internal static class Normalizer
         var builder = new StringBuilder(decomposed.Length);
         foreach (var c in decomposed)
         {
-            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+            {
+                continue;
+            }
+
+            if (Letters.Folds.TryGetValue(c, out var fold))
+            {
+                builder.Append(fold);
+            }
+            else
             {
                 builder.Append(c);
             }
