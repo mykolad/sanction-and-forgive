@@ -144,8 +144,9 @@ What it says:
   fewer than 20 names together: not worth a table yet. The EU's "Russian or unmarked" includes its own Bulgarian
   translations of organisation names (`Египетски Al-Jihad`).
 - **Arabic script is 2.6%** (4,827 names, OFAC SDN, EU, UK, SECO, UN): the largest group with no table (#92).
-- **Japanese kana (6,419) are all `jp-mof`'s Japanese renderings of names the same record also gives in English**:
-  no table needed for screening.
+- **Japanese kana: 6,411 of the 6,419 names are `jp-mof`'s Japanese renderings of names the same record also gives
+  in English**, so that list needs no table for screening. The other 8 (UK 1, France 7) are those lists' own aliases,
+  each screened on its own: whether those parties also have a Latin name there is a separate check.
 - **Han is 1,122 names, half of them OFAC SDN's** (#93); Hangul 183, Greek 363 (almost all the EU's Greek translations
   of organisation names, written with the micro sign for μ, which the measurement reads as Greek), Hebrew 80; the rest together under 70.
 - About 3,500 names (3,474) mix Latin with another script: mostly the EU's and SECO's translations around a Latin name
