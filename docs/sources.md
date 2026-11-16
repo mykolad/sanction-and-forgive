@@ -19,6 +19,7 @@ left out of the counts and the import, since the MVP doesn't screen them.
 | `au-dfat` | Australia consolidated list | XLSX | not fetched | | | **NeedsAccess** |
 | `ua-nsdc` | Ukraine NSDC State Register of Sanctions | JSON API | not fetched | | | **NeedsAccess** |
 | `ua-sfms` | Ukraine SFMS terrorism list | XML, 1.8 MB | 1,014 (724 / 290 / 0) | 3,893 (627, 99, 0) | 771 | Active |
+| `fr-tresor` | France national asset-freeze register (DG Trésor), from 2026-11-16 | JSON API, 15.0 MB | 8,187 (5,462 / 2,725 / 0) | 20,311 (134, 4,758, 438) | 3,491 | Active |
 | **All fetched** | | 246 MB | **50,107** | **147,997** (7,062 weak, 20,175 Cyrillic) | 44,519 | |
 
 The handover estimated 60-90k subjects. Without Australia and NSDC there are about 50k. NSDC is probably the
@@ -50,6 +51,17 @@ largest list, so the total is likely to land inside that range once it's added.
   (`x-cota-public-api-key` header or `cotaApiKey` query) for every data endpoint. `GET /v2/subjects?subjectType=…`
   returns the full list. Registration is at `https://drs.nsdc.gov.ua/`, which refuses automated fetches.
 
+- **France (`fr-tresor`, 2026-11-16):** `GET https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json`
+  (an XML twin, a JSON schema and a Swagger page are listed on [data.gouv.fr](https://www.data.gouv.fr/datasets/registre-national-des-gels)).
+  `{"Publications": {"DatePublication", "PublicationDetail": [...]}}`: each entry an `IdRegistre`, a `Nature`
+  (`Personne physique`, `Personne morale`, `Navire`: the 39 vessels are left out), a `Nom`, and typed fields
+  (`RegistreDetail`: `PRENOM`, `ALIAS` with a comment, `alias faible` for a weak one, `ADRESSE_PM` and `ADRESSE_PP`
+  with the country in French, `FONDEMENT_JURIDIQUE`, `MOTIFS`, `NATIONALITE`, `DATE_DE_NAISSANCE`, identifiers).
+  Countries are French names (`RUSSIE`, `ÉMIRATS ARABES UNIS`), which countries.json reads. It implements the EU's and
+  the UN's listings as well as France's own, so most of it is on the EU list too; it's answered separately like
+  every list. Each entry's page, `https://gels-avoirs.dgtresor.gouv.fr/Gels/RegistreDetail?idRegistre=<id>`, is its
+  official record. Users have reported the API down at times (data.gouv.fr discussions): the download retries apply.
+
 ## Terms of reuse
 
 Read on 2026-11-06. Not legal advice. The demo shows matches to a company, which is commercial use. It doesn't
@@ -67,6 +79,7 @@ resell the lists.
 | Australia | Unknown: the site couldn't be reached. DFAT content is often CC BY 4.0. | | |
 | NSDC | Unknown: the site refuses automated fetches. | | |
 | SFMS | Unknown: the site refuses automated fetches. The file downloads. | | |
+| France | Yes: Licence Ouverte 2.0 (Etalab), the dataset's licence on data.gouv.fr (read 2026-11-16). | Name the source and its date. The website's footer: "France: Registre national des gels, Direction générale du Trésor, reused under the Licence Ouverte 2.0." | [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/) |
 
 The UN's listings are also on the EU and UK lists, which implement them. Leaving out the UN row loses its own as-of
 date in the result, not coverage.
