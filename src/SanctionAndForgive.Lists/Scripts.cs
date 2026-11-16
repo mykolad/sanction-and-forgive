@@ -34,7 +34,8 @@ public static class Scripts
     /// <summary>The script of a letter, or "Other" for one in no block above.</summary>
     public static string Of(Rune letter)
     {
-        var value = letter.Value;
+        // The micro sign is Greek mu by compatibility (NFKC folds it): the EU's Greek names write μ with it.
+        var value = letter.Value == 0xB5 ? 0x3BC : letter.Value;
         foreach (var (first, last, script) in Ranges)
         {
             if (value >= first && value <= last)

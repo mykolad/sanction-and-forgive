@@ -15,6 +15,7 @@ public class ScriptsTests
     [InlineData("中国ガス", "Han+Katakana")]
     [InlineData("김정은", "Hangul")]
     [InlineData("Οργάνωση Abu Nidal", "Greek+Latin")]
+    [InlineData("Εργατικό Κόµµα του Κουρδιστάν", "Greek")]
     [InlineData("12-34", "None")]
     public void ANamesScripts_AreItsLettersScripts_InAlphabeticalOrder(string name, string expected) =>
         Assert.Equal(expected, Scripts.InName(name));

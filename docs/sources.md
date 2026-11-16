@@ -147,8 +147,8 @@ What it says:
 - **Japanese kana (6,419) are all `jp-mof`'s Japanese renderings of names the same record also gives in English**:
   no table needed for screening.
 - **Han is 1,122 names, half of them OFAC SDN's** (#93); Hangul 183, Greek 363 (almost all the EU's Greek translations
-  of organisation names, written with the micro sign for μ), Hebrew 80; the rest together under 70.
-- About 3,500 names mix Latin with another script: mostly the EU's and SECO's translations around a Latin name
+  of organisation names, written with the micro sign for μ, which the measurement reads as Greek), Hebrew 80; the rest together under 70.
+- About 3,500 names (3,474) mix Latin with another script: mostly the EU's and SECO's translations around a Latin name
   (`Οργάνωση Abu Nidal`) and Cyrillic company names with a Latin word.
 
 How such a name behaves when entered today is recorded in `tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
