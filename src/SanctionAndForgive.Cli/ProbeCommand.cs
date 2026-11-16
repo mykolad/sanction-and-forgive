@@ -70,7 +70,7 @@ internal sealed class ProbeCommand(FeedDownloader downloader, string euToken, Te
                 // The file's own extension where its address (or the pattern that finds it) names one, else by what it holds.
                 var address = source.LinkPattern ?? source.Url!;
                 var extension = KeptExtensions.FirstOrDefault(known => address.Contains(known, StringComparison.OrdinalIgnoreCase))
-                    ?? (root == "{json}" ? ".json" : root == "?" ? ".html" : ".xml");
+                    ?? (root == "{json}" ? ".json" : root is "?" || root.Equals("html", StringComparison.OrdinalIgnoreCase) ? ".html" : ".xml");
                 File.Copy(path, Path.Combine(keepDirectory, source.Code + extension), overwrite: true);
             }
 
