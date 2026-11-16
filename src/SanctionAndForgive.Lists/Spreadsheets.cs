@@ -93,9 +93,10 @@ public static class Spreadsheets
 
     /// <summary>The rows of an Office Open XML workbook's sheet named <paramref name="sheetName"/>: found through the
     /// workbook and its relationships, cells placed by their reference (<c>C12</c>), shared strings resolved (phonetic
-    /// runs left out), numbers as written (a date is a serial number: <see cref="ExcelDate"/>). The sheet and the
-    /// shared strings are read to their ends, so one cut short or broken is refused; a shared string's text counts
-    /// against the expansion limit each time a cell uses it.</summary>
+    /// runs left out), numbers as written (a date is a serial number: <see cref="ExcelDate"/>). Every part read is
+    /// read to its end, so one cut short or broken is refused. Each shared string, and each cell (a shared string's
+    /// text each time a cell uses it), counts against the expansion limit, and no text may be longer than
+    /// <see cref="MaxCellText"/>, checked as it's read.</summary>
     public static List<IReadOnlyList<string>> XlsxRows(Stream stream, string sheetName, CancellationToken cancellationToken)
     {
         using var zip = OpenZip(stream);
@@ -103,12 +104,12 @@ public static class Spreadsheets
         {
             var relationshipId = SheetRelationship(zip, sheetName);
             var target = RelationshipTarget(zip, relationshipId);
-            var shared = zip.GetEntry("xl/sharedStrings.xml") is null ? [] : SharedStrings(zip);
+            var expanded = new Expansion();
+            var shared = zip.GetEntry("xl/sharedStrings.xml") is null ? [] : SharedStrings(zip, expanded);
 
             using var sheet = OpenPart(zip, target);
             using var reader = XmlReader.Create(sheet, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
             var rows = new List<IReadOnlyList<string>>();
-            var expanded = new Expansion();
             while (reader.Read())
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -140,36 +141,43 @@ public static class Spreadsheets
     {
         using var workbook = OpenPart(zip, "xl/workbook.xml");
         using var reader = XmlReader.Create(workbook, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+        string? found = null;
+
+        // Read to the end, so a part cut short after the sheet is refused too.
         while (reader.Read())
         {
-            if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "sheet" && reader.NamespaceURI == XlsxMain
+            if (found is null && reader.NodeType == XmlNodeType.Element && reader.LocalName == "sheet" && reader.NamespaceURI == XlsxMain
                 && reader.GetAttribute("name") == sheetName && reader.GetAttribute("id", XlsxRelationships) is { } id)
             {
-                return id;
+                found = id;
             }
         }
 
-        throw new ListFormatException($"The workbook has no sheet named \"{sheetName}\".");
+        return found ?? throw new ListFormatException($"The workbook has no sheet named \"{sheetName}\".");
     }
 
     private static string RelationshipTarget(ZipArchive zip, string id)
     {
         using var relationships = OpenPart(zip, "xl/_rels/workbook.xml.rels");
         using var reader = XmlReader.Create(relationships, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+        string? found = null;
+
+        // Read to the end, so a part cut short after the relationship is refused too.
         while (reader.Read())
         {
-            if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "Relationship" && reader.NamespaceURI == PackageRelationships
+            if (found is null && reader.NodeType == XmlNodeType.Element && reader.LocalName == "Relationship" && reader.NamespaceURI == PackageRelationships
                 && reader.GetAttribute("Id") == id && reader.GetAttribute("Target") is { } target)
             {
-                return target.StartsWith('/') ? target[1..] : "xl/" + target;
+                found = target.StartsWith('/') ? target[1..] : "xl/" + target;
             }
         }
 
-        throw new ListFormatException($"The workbook's relationship {id} has no target.");
+        return found ?? throw new ListFormatException($"The workbook's relationship {id} has no target.");
     }
 
-    /// <summary>Each shared string's text: its <c>t</c> elements, but not those of a phonetic run (<c>rPh</c>).</summary>
-    private static List<string> SharedStrings(ZipArchive zip)
+    /// <summary>Each shared string's text: its <c>t</c> elements, but not those of a phonetic run (<c>rPh</c>). Each
+    /// entry and its text count against <paramref name="expanded"/>.</summary>
+    private static List<string> SharedStrings(ZipArchive zip, Expansion expanded)
     {
         using var part = OpenPart(zip, "xl/sharedStrings.xml");
         using var reader = XmlReader.Create(part, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
@@ -185,11 +193,13 @@ public static class Spreadsheets
                     current.Clear();
                     if (reader.IsEmptyElement)
                     {
+                        expanded.Add(CellBytes);
                         strings.Add(string.Empty);
                     }
 
                     break;
                 case XmlNodeType.EndElement when reader.NamespaceURI == XlsxMain && reader.LocalName == "si":
+                    expanded.Add(CellBytes + current.Length);
                     strings.Add(current.ToString());
                     break;
                 case XmlNodeType.Element when reader.NamespaceURI == XlsxMain && reader.LocalName == "rPh" && !reader.IsEmptyElement:
@@ -206,6 +216,7 @@ public static class Spreadsheets
                     break;
                 case XmlNodeType.Text or XmlNodeType.SignificantWhitespace or XmlNodeType.Whitespace or XmlNodeType.CDATA when inT && phonetic == 0:
                     current.Append(reader.Value);
+                    CheckCellText(current.Length);
                     break;
             }
         }
@@ -272,9 +283,11 @@ public static class Spreadsheets
                     break;
                 case XmlNodeType.Text or XmlNodeType.SignificantWhitespace or XmlNodeType.Whitespace or XmlNodeType.CDATA when element == "v":
                     value.Append(reader.Value);
+                    CheckCellText(value.Length);
                     break;
                 case XmlNodeType.Text or XmlNodeType.SignificantWhitespace or XmlNodeType.Whitespace or XmlNodeType.CDATA when element == "t" && phonetic == 0:
                     inline.Append(reader.Value);
+                    CheckCellText(inline.Length);
                     break;
             }
         }
@@ -287,6 +300,14 @@ public static class Spreadsheets
             "inlineStr" => inline.ToString(),
             _ => value.ToString(),
         };
+    }
+
+    private static void CheckCellText(long length)
+    {
+        if (length > MaxCellText)
+        {
+            throw new ListFormatException($"A cell of the spreadsheet is longer than {MaxCellText:N0} characters.");
+        }
     }
 
     /// <summary>The zero-based column of a cell reference (<c>C12</c> is 2); null without one.</summary>

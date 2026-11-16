@@ -261,10 +261,56 @@ public class SpreadsheetTests
         Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(file, "Register", CancellationToken.None));
     }
 
+    [Fact]
+    public void Xlsx_WhoseWorkbookOrRelationshipsAreCutShort_AfterWhatsLookedFor_IsAFormatError()
+    {
+        const string sheet = "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData/></worksheet>";
+        const string strings = "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"/>";
+        var workbook = WorkbookXml[..WorkbookXml.IndexOf("</sheets>", StringComparison.Ordinal)];
+        var relationships = RelationshipsXml[..RelationshipsXml.IndexOf("</Relationships>", StringComparison.Ordinal)];
+
+        foreach (var (workbookXml, relationshipsXml) in new[] { (workbook, RelationshipsXml), (WorkbookXml, relationships) })
+        {
+            using var file = Workbook(workbookXml, relationshipsXml, sheet, strings);
+            Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(file, "Register", CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    public void Xlsx_WhoseSharedOrInlineStringIsLongerThanTheLimit_IsAFormatError()
+    {
+        const string main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var text = new string('x', Spreadsheets.MaxCellText + 1);
+        var sheet = $"<worksheet xmlns=\"{main}\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c></row></sheetData></worksheet>";
+        var inline = $"<worksheet xmlns=\"{main}\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>{text}</t></is></c></row></sheetData></worksheet>";
+
+        using var long1 = Workbook(sheet, $"<sst xmlns=\"{main}\"><si><t>{text}</t></si></sst>");
+        using var long2 = Workbook(inline, $"<sst xmlns=\"{main}\"/>");
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(long1, "Register", CancellationToken.None));
+        Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(long2, "Register", CancellationToken.None));
+    }
+
+    [Fact]
+    public void Xlsx_ReadsCdataInValuesAndInlineStrings()
+    {
+        const string main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var sheet = $"<worksheet xmlns=\"{main}\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t><![CDATA[Northwind Trading]]></t></is></c><c r=\"B1\"><v><![CDATA[44638]]></v></c></row></sheetData></worksheet>";
+        using var file = Workbook(sheet, $"<sst xmlns=\"{main}\"/>");
+
+        Assert.Equal(["Northwind Trading", "44638"], Assert.Single(Spreadsheets.XlsxRows(file, "Register", CancellationToken.None)));
+    }
+
+    private const string WorkbookXml = "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Register\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>";
+
+    private const string RelationshipsXml = "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>";
+
     /// <summary>A workbook of one sheet, "Register", written as given, with these shared strings.</summary>
-    private static MemoryStream Workbook(string sheet, string sharedStrings) => Zip(
-        ("xl/workbook.xml", "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Register\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"),
-        ("xl/_rels/workbook.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>"),
+    private static MemoryStream Workbook(string sheet, string sharedStrings) => Workbook(WorkbookXml, RelationshipsXml, sheet, sharedStrings);
+
+    private static MemoryStream Workbook(string workbook, string relationships, string sheet, string sharedStrings) => Zip(
+        ("xl/workbook.xml", workbook),
+        ("xl/_rels/workbook.xml.rels", relationships),
         ("xl/sharedStrings.xml", sharedStrings),
         ("xl/worksheets/sheet1.xml", sheet));
 

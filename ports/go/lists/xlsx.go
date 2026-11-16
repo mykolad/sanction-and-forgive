@@ -48,13 +48,15 @@ func attr(element xml.StartElement, space, local string) (string, bool) {
 	return "", false
 }
 
-// eachElement decodes a part, calling visit for every token; a decoding error is a format error.
+// eachToken decodes a part to its end, calling visit for every token until it says it's done (the rest is still
+// decoded, so a part cut short or broken after what was looked for is refused); a decoding error is a format error.
 func eachToken(data []byte, name string, visit func(xml.Token) (bool, error)) error {
 	part, err := openPart(data, name)
 	if err != nil {
 		return err
 	}
 	decoder := xml.NewDecoder(part)
+	finished := false
 	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
@@ -67,10 +69,14 @@ func eachToken(data []byte, name string, visit func(xml.Token) (bool, error)) er
 			}
 			return formatError("The workbook's %s isn't valid XML: %s", name, err.Error())
 		}
+		if finished {
+			continue
+		}
 		done, err := visit(token)
-		if err != nil || done {
+		if err != nil {
 			return err
 		}
+		finished = done
 	}
 }
 
@@ -128,6 +134,7 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 	}
 
 	var shared []string
+	expanded := &expansion{}
 	if hasPart(archive, "xl/sharedStrings.xml") {
 		var current strings.Builder
 		phonetic, inT := 0, false
@@ -151,6 +158,9 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 				}
 				switch t.Name.Local {
 				case "si":
+					if err := expanded.add(current.Len() + cellBytes); err != nil {
+						return false, err
+					}
 					shared = append(shared, current.String())
 				case "rPh":
 					phonetic--
@@ -160,6 +170,9 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 			case xml.CharData:
 				if inT && phonetic == 0 {
 					current.Write(t)
+					if current.Len() > maxCellText {
+						return false, cellTooLong()
+					}
 				}
 			}
 			return false, nil
@@ -171,7 +184,6 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 
 	var rows [][]string
 	var cells []string
-	expanded := &expansion{}
 	inRow, column, cellType := false, 0, ""
 	var value, inline strings.Builder
 	element, phonetic := "", 0
@@ -244,6 +256,9 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 			} else if element == "t" && phonetic == 0 {
 				inline.Write(t)
 			}
+			if value.Len() > maxCellText || inline.Len() > maxCellText {
+				return false, cellTooLong()
+			}
 		}
 		return false, nil
 	})
@@ -251,6 +266,10 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 		return nil, err
 	}
 	return rows, nil
+}
+
+func cellTooLong() error {
+	return formatError("A cell of the spreadsheet is longer than %d characters.", maxCellText)
 }
 
 // cellColumn is the zero-based column of a cell reference ("C12" is 2).
