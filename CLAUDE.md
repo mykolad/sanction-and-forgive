@@ -82,7 +82,8 @@ reference. The pipeline:
   (a new language is a new table plus golden rows; register it in `MatcherData.TableFiles`), `legal-forms.json`
   (classes, ambiguous spellings, multi-word phrases), `generic.json`, `words.json` (stop words, honorifics, address
   words), `spelling-pairs.json`, `cognates.json`, `countries.json` (244 countries: English variants as the feeds write
-  them, Russian, Ukrainian, native names from ICU), `places.json` (exonyms with their country). Keys are normalised like
+  them, Russian, Ukrainian, native names from ICU, French from CLDR as France's register writes them, without Maurice,
+  Dominique and Grenade, which are first names and words), `places.json` (exonyms with their country). Keys are normalised like
   the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`.
 - **Text** (`Text/`): `Normalizer.Words` (NFKC, lower case, apostrophes inside words deleted, punctuation as
   separators, `&` → and); `Tokenizer` (legal phrases → short form, single-letter runs joined, letters kept as
