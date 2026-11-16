@@ -62,3 +62,14 @@ func TestOdsRowsWhoseRepeatsExpandPastTheLimitIsAFormatError(t *testing.T) {
 		t.Fatalf("err = %v, want a format error", err)
 	}
 }
+
+func TestOdsRowsWhoseSparseRowsRepeatPastTheLimitIsAFormatError(t *testing.T) {
+	// A thousand rows of 255 empty cells and an "x", each repeated a thousand times: little text, a million rows.
+	row := `<table:table-row table:number-rows-repeated="1000"><table:table-cell table:number-columns-repeated="255"/><table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>`
+	content := `<office:document-content ` + odsNamespaces + `><office:body><office:spreadsheet><table:table>` + strings.Repeat(row, 1000) +
+		`</table:table></office:spreadsheet></office:body></office:document-content>`
+	var formatErr *FormatError
+	if _, err := OdsRows(zipOf(t, "content.xml", content)); !errors.As(err, &formatErr) {
+		t.Fatalf("err = %v, want a format error", err)
+	}
+}

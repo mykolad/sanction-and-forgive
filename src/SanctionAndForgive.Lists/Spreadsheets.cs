@@ -58,7 +58,7 @@ public static class Spreadsheets
                         // A filled row repeated is rare; an empty one repeated to the sheet's end is common, and skipped.
                         for (var i = 1; i < Math.Min(repeat, 1000); i++)
                         {
-                            expanded.Add(row.Sum(cell => (long)cell.Length));
+                            expanded.Add(row.Sum(cell => (long)cell.Length + CellBytes));
                         }
 
                         for (var i = 0; i < Math.Min(repeat, 1000); i++)
@@ -82,18 +82,23 @@ public static class Spreadsheets
         return rows;
     }
 
-    /// <summary>The text a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a row
-    /// and the row a thousand times, so it's counted against the same limit as a part.</summary>
+    /// <summary>What a cell costs besides its text, for <see cref="Expansion"/>: about a string slot and its share of
+    /// the row, so a sheet of empty cells repeated is counted too.</summary>
+    private const int CellBytes = 32;
+
+    /// <summary>What a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a row and
+    /// the row a thousand times, so every cell slot (<see cref="CellBytes"/>) and its text are counted against the same
+    /// limit as a part.</summary>
     private sealed class Expansion
     {
         private long total;
 
-        public void Add(long characters)
+        public void Add(long bytes)
         {
-            total += characters;
+            total += bytes;
             if (total > MaxPartBytes)
             {
-                throw new ListFormatException($"The spreadsheet's rows expand to more than {MaxPartBytes:N0} characters.");
+                throw new ListFormatException($"The spreadsheet's rows expand to more than {MaxPartBytes:N0} bytes.");
             }
         }
     }
@@ -118,7 +123,7 @@ public static class Spreadsheets
             var text = reader.IsEmptyElement ? string.Empty : OdsCellText(reader);
             for (var i = 0; i < repeat && cells.Count < MaxColumns; i++)
             {
-                expanded.Add(text.Length);
+                expanded.Add(text.Length + CellBytes);
                 cells.Add(text);
             }
         }

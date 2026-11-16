@@ -93,6 +93,18 @@ public class SpreadsheetTests
     }
 
     [Fact]
+    public void Ods_WhoseSparseRowsRepeatPastTheLimit_IsAFormatError()
+    {
+        // A thousand rows of 255 empty cells and an "x", each repeated a thousand times: little text, a million rows.
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        var row = "<table:table-row table:number-rows-repeated=\"1000\"><table:table-cell table:number-columns-repeated=\"255\"/><table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>";
+        var content = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table>{string.Concat(Enumerable.Repeat(row, 1000))}</table:table></office:spreadsheet></office:body></office:document-content>";
+        using var file = Zip(("content.xml", content));
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.OdsRows(file, CancellationToken.None));
+    }
+
+    [Fact]
     public void Ods_ThatIsntAZip_OrHasNoContent_IsAFormatError()
     {
         using var notZip = new MemoryStream(Encoding.UTF8.GetBytes("Surname,First name"));
