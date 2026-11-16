@@ -496,15 +496,22 @@ public static class FeedFiles
     /// <summary>The UFLPA page (HTML): a heading naming each section of the Act, then its table of names and effective
     /// dates. Aliases are written in the name in each of the page's phrasings, or as an acronym; some names end with
     /// "and subsidiaries" or "and its subordinate and affiliated entities", one has a no-break space, and every tenth
-    /// entity is listed under both sections (one record).</summary>
+    /// entity is listed under both sections (one record). The page has no identifiers, so a name the pool repeats
+    /// (homonyms) is told apart by a place in parentheses, as the real page does ("(Shanshan)").</summary>
     private static string Uflpa(IReadOnlyList<FixtureSubject> subjects)
     {
         static string Date(DateOnly date) => date.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture);
         static string Encode(string text) => System.Net.WebUtility.HtmlEncode(text);
         static string Count(int n) => n switch { 1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five", _ => n.ToString(CultureInfo.InvariantCulture) };
-        static string Row(FixtureSubject subject)
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var written = subjects.ToDictionary(subject => subject.Number, subject =>
         {
-            var name = Encode(subject.LatinName);
+            var times = seen[subject.LatinName] = seen.GetValueOrDefault(subject.LatinName) + 1;
+            return times == 1 ? subject.LatinName : $"{subject.LatinName} (Branch {times})";
+        });
+        string Row(FixtureSubject subject)
+        {
+            var name = Encode(written[subject.Number]);
             if (subject.Number % 9 == 0 && name.IndexOf(' ', StringComparison.Ordinal) is var space and > 0)
             {
                 name = name[..space] + "&nbsp;" + name[(space + 1)..];
@@ -512,7 +519,7 @@ public static class FeedFiles
 
             var aliases = subject.Aliases.Select(Encode).ToList();
             var acronym = string.Concat(subject.LatinName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(word => char.ToUpperInvariant(word[0])).Where(char.IsAsciiLetterUpper));
-            var written = (subject.Number % 4, aliases.Count) switch
+            var cell = (subject.Number % 4, aliases.Count) switch
             {
                 (3, _) when acronym.Length is >= 2 and <= 12 => $"{name} ({acronym})",
                 (_, 0) => name,
@@ -521,8 +528,8 @@ public static class FeedFiles
                 (1, _) => $"{name} (formerly known as {string.Join("; ", aliases)})",
                 _ => $"{name} (including {Count(aliases.Count)} alias{(aliases.Count == 1 ? string.Empty : "es")}: {string.Join("; ", aliases)})",
             };
-            written += subject.Number % 7 == 0 ? " and subsidiaries" : subject.Number % 11 == 0 ? " and its subordinate and affiliated entities" : string.Empty;
-            return $"<tr><td>{written}</td><td>{Date(subject.ListedOn)}</td></tr>";
+            cell += subject.Number % 7 == 0 ? " and subsidiaries" : subject.Number % 11 == 0 ? " and its subordinate and affiliated entities" : string.Empty;
+            return $"<tr><td>{cell}</td><td>{Date(subject.ListedOn)}</td></tr>";
         }
 
         var page = new StringBuilder("<!DOCTYPE html><html lang=\"en\"><head><title>UFLPA Entity List | Homeland Security</title></head><body><main>");

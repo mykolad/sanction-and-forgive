@@ -128,6 +128,15 @@
       "version": "*",
       "recordCount": 120,
       "url": "https://data.trade.gov/downloadable_consolidated_screening_list/v1/consolidated.json"
+    },
+    {
+      "code": "us-uflpa",
+      "name": "US UFLPA Entity List (forced-labour import ban)",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 50,
+      "url": "https://www.dhs.gov/uflpa-entity-list"
     }
   ]
 }
