@@ -77,7 +77,7 @@ public static class ManualCsvReader
     }
 
     /// <summary>RFC 4180 rows: commas, quoted fields with "" for a quote, line breaks inside quotes.</summary>
-    private static IEnumerable<List<string>> Rows(TextReader reader)
+    internal static IEnumerable<List<string>> Rows(TextReader reader)
     {
         var row = new List<string>();
         var field = new StringBuilder();

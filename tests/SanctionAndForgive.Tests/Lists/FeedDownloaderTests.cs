@@ -17,6 +17,34 @@ public sealed class FeedDownloaderTests : IDisposable
         new(new HttpClient(server), TimeSpan.FromMinutes(10), DownloadRetry.Default, time, log);
 
     [Fact]
+    public void ALinkedFile_IsTheNewestMatchingLink_OnThePagesOwnHost()
+    {
+        var page = new Uri("https://www.example.go.jp/sanctions/list.html");
+        const string html = """
+            <a href="./list20261001.csv">October</a> <a HREF='list20261105.csv'>November</a>
+            <a href="https://elsewhere.example/sanctions/list20991231.csv">a copy</a> <a href="./list20261201.xlsx">Excel</a>
+            <a href="/sanctions/list20261231.csv?download=1&amp;x=2">with a query</a> <a href = "./list20261104.csv">again</a>
+            <a href="zarchive/list20261001.csv">filed elsewhere, older</a>
+            """;
+
+        var link = FeedDownloader.FindLink(page, html, "/list[0-9]{8}\\.csv$");
+
+        Assert.Equal("https://www.example.go.jp/sanctions/list20261105.csv", link.AbsoluteUri);
+        Assert.Throws<ListFormatException>(() => FeedDownloader.FindLink(page, "<a href=\"list.pdf\">PDF</a>", "/list[0-9]{8}\\.csv$"));
+    }
+
+    [Fact]
+    public async Task APublishersPage_IsRefused_AsSoonAsItPassesItsLimit_WithoutTryingAgain()
+    {
+        var server = new FakeServer(time, HttpStatusCode.OK) { Body = () => new StreamContent(new EndlessStream()) };
+        var source = new ListSource("jp", "A dated list", "https://feeds.example/list.html", 72, FeedStatus.Active, null) { LinkPattern = @"/list[0-9]{8}\.csv$" };
+
+        await Assert.ThrowsAsync<ListFormatException>(() => Downloader(server).DownloadAsync(source, "token", CancellationToken.None));
+
+        Assert.Equal(1, server.Requests);
+    }
+
+    [Fact]
     public async Task AServerError_IsTriedAgain_WithBackoff_UntilItAnswers()
     {
         var server = new FakeServer(time, HttpStatusCode.InternalServerError, HttpStatusCode.ServiceUnavailable, HttpStatusCode.OK);
@@ -110,14 +138,47 @@ public sealed class FeedDownloaderTests : IDisposable
 
         public TimeSpan Takes { get; init; } = TimeSpan.Zero;
 
+        /// <summary>The body of a 200, if not the default.</summary>
+        public Func<HttpContent>? Body { get; init; }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var answer = answers[Requests++];
             time.Pass(Takes);
             return answer is { } status
-                ? Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(status == HttpStatusCode.OK ? "<list />" : "error") })
+                ? Task.FromResult(new HttpResponseMessage(status) { Content = status == HttpStatusCode.OK && Body is { } body ? body() : new StringContent(status == HttpStatusCode.OK ? "<list />" : "error") })
                 : throw new HttpRequestException("The connection was reset.");
         }
+    }
+
+    /// <summary>A body that never ends.</summary>
+    private sealed class EndlessStream : Stream
+    {
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            Array.Fill(buffer, (byte)'a', offset, count);
+            return count;
+        }
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     /// <summary>A clock whose timers fire at once, moving the time on by what they waited.</summary>

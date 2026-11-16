@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::time::{Duration, Instant};
 
+use super::catalogue::ListSource;
 use super::parse::{clean, detect_script, format_error, parse_date, ParseError, ParsedAddress, ParsedName, ParsedSubject, SubjectType};
 use crate::matching::text::{lower_invariant, upper_invariant};
 
@@ -87,7 +88,7 @@ pub fn read_manual_csv(text: &str) -> Result<Vec<ParsedSubject>, ParseError> {
     Ok(subjects)
 }
 
-fn csv_rows(text: &str) -> Result<Vec<Vec<String>>, ParseError> {
+pub(crate) fn csv_rows(text: &str) -> Result<Vec<Vec<String>>, ParseError> {
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut row: Vec<String> = Vec::new();
     let mut field = String::new();
@@ -190,12 +191,96 @@ impl Fault {
     }
 }
 
+/// The largest publisher's page read for a link (ListSource::link_pattern).
+pub const MAX_PAGE_BYTES: u64 = 4 << 20;
+
+/// The file a page links, for a feed published under a dated name: of the page's links (href, entities decoded,
+/// resolved against the page) on the page's own host and scheme, those whose address matches the pattern; of those, the
+/// one whose matched part (the dated name) is last in byte order, so the newest date wherever it's filed, the whole
+/// address breaking a tie. A format error when none does: the import fails rather than guess.
+pub fn find_link(page: &str, document: &str, link_pattern: &str) -> Result<String, ParseError> {
+    let base = reqwest::Url::parse(page).map_err(|e| format_error(format!("The page's address isn't valid: {e}")))?;
+    let pattern = regex::Regex::new(link_pattern).map_err(|e| format_error(format!("The link pattern isn't valid: {e}")))?;
+    let href = regex::Regex::new(r#"(?i)href\s*=\s*["']([^"']*)["']"#).expect("a valid pattern");
+    let mut found: Option<(String, String)> = None;
+    for link in href.captures_iter(document) {
+        let Ok(target) = base.join(decode_entities(&link[1]).trim()) else { continue };
+        let same_host = target.host_str().zip(base.host_str()).is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
+        let Some(key) = pattern.find(target.as_str()).map(|m| m.as_str().to_string()) else { continue };
+        if target.scheme() != base.scheme() || !same_host {
+            continue;
+        }
+        let candidate = (key, target.to_string());
+        if found.as_ref().is_none_or(|f| candidate > *f) {
+            found = Some(candidate);
+        }
+    }
+    found.map(|(_, address)| address).ok_or_else(|| format_error(format!("The publisher's page has no link matching {link_pattern}.")))
+}
+
+/// HTML's character references in an attribute: the five named ones and numeric ones (all a link needs).
+fn decode_entities(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let decoded = rest.find(';').filter(|end| *end <= 10).and_then(|end| {
+            let entity = &rest[1..end];
+            let c = match entity {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                _ => entity
+                    .strip_prefix("#x")
+                    .or_else(|| entity.strip_prefix("#X"))
+                    .map(|hex| u32::from_str_radix(hex, 16))
+                    .or_else(|| entity.strip_prefix('#').map(|dec| dec.parse::<u32>()))
+                    .and_then(|n| n.ok())
+                    .and_then(char::from_u32),
+            };
+            c.map(|c| (c, end))
+        });
+        match decoded {
+            Some((c, end)) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 impl Downloader {
+    /// A catalogued feed's file: its URL with the EU token in place of {token}, or, for a feed with a link pattern,
+    /// the file its page links today. The page and the file are each tried again as download says.
+    pub async fn download_feed(&self, source: &ListSource, eu_token: &str) -> Result<tempfile_path::TempPath, ParseError> {
+        let mut address = source.url.replace("{token}", eu_token);
+        if !source.link_pattern.is_empty() {
+            let page = self.download_limited(source.code, &address, Some(MAX_PAGE_BYTES)).await?;
+            let document = String::from_utf8_lossy(&std::fs::read(page.path())?).into_owned();
+            address = find_link(&address, &document, source.link_pattern)?;
+        }
+        self.download(source.code, &address).await
+    }
+
     pub async fn download(&self, source: &str, url: &str) -> Result<tempfile_path::TempPath, ParseError> {
+        self.download_limited(source, url, None).await
+    }
+
+    /// download, stopping as soon as the body passes max_bytes (when given): an error not tried again.
+    async fn download_limited(&self, source: &str, url: &str, max_bytes: Option<u64>) -> Result<tempfile_path::TempPath, ParseError> {
         let started = Instant::now();
         let mut attempt = 1;
         loop {
-            let fault = match self.attempt(url).await {
+            let fault = match self.attempt(url, max_bytes).await {
                 Ok(path) => return Ok(path),
                 Err(fault) => fault,
             };
@@ -222,7 +307,7 @@ impl Downloader {
         }
     }
 
-    async fn attempt(&self, url: &str) -> Result<tempfile_path::TempPath, Fault> {
+    async fn attempt(&self, url: &str, max_bytes: Option<u64>) -> Result<tempfile_path::TempPath, Fault> {
         let work = async {
             let response = self
                 .client
@@ -240,8 +325,13 @@ impl Downloader {
             let mut stream = response.bytes_stream();
             use futures_util::StreamExt;
             use tokio::io::AsyncWriteExt;
+            let mut written = 0u64;
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(|e| Fault::Other(e.to_string(), true))?;
+                written += chunk.len() as u64;
+                if let Some(limit) = max_bytes.filter(|limit| written > *limit) {
+                    return Err(Fault::Other(format!("The publisher's page is larger than {limit} bytes."), false));
+                }
                 file.write_all(&chunk).await.map_err(|e| Fault::Other(e.to_string(), false))?;
             }
             file.flush().await.map_err(|e| Fault::Other(e.to_string(), false))?;
@@ -285,5 +375,21 @@ pub mod tempfile_path {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::find_link;
+
+    #[test]
+    fn a_linked_file_is_the_newest_matching_link_on_the_pages_own_host() {
+        let document = r#"<a href="./list20261001.csv">October</a> <a HREF='list20261105.csv'>November</a>
+            <a href="https://elsewhere.example/sanctions/list20991231.csv">a copy</a> <a href="./list20261201.xlsx">Excel</a>
+            <a href="/sanctions/list20261231.csv?download=1&amp;x=2">with a query</a> <a href = "./list20261104.csv">again</a>
+            <a href="zarchive/list20261001.csv">filed elsewhere, older</a>"#;
+        let page = "https://www.example.go.jp/sanctions/list.html";
+        assert_eq!(find_link(page, document, r"/list[0-9]{8}\.csv$").unwrap(), "https://www.example.go.jp/sanctions/list20261105.csv");
+        assert!(find_link(page, r#"<a href="list.pdf">PDF</a>"#, r"/list[0-9]{8}\.csv$").is_err());
     }
 }

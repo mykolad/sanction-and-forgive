@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -196,10 +199,76 @@ func (e *statusError) Error() string {
 	return fmt.Sprintf("Response status code does not indicate success: %d", e.code)
 }
 
+// MaxPageBytes is the largest publisher's page read for a link (ListSource.LinkPattern).
+const MaxPageBytes = 4 << 20
+
+var hrefPattern = regexp.MustCompile(`(?i)href\s*=\s*["']([^"']*)["']`)
+
+// DownloadFeed downloads a catalogued feed's file: its URL with the EU token in place of {token}, or, for a feed with
+// a LinkPattern, the file its page links today. The page and the file are each tried again as Download says.
+func (d *Downloader) DownloadFeed(ctx context.Context, source *ListSource, euToken string) (string, error) {
+	address := strings.ReplaceAll(source.URL, "{token}", euToken)
+	if source.LinkPattern != "" {
+		page, err := d.download(ctx, source.Code, address, MaxPageBytes)
+		if err != nil {
+			return "", err
+		}
+		data, err := os.ReadFile(page)
+		os.Remove(page)
+		if err != nil {
+			return "", err
+		}
+		if address, err = FindLink(address, string(data), source.LinkPattern); err != nil {
+			return "", err
+		}
+	}
+	return d.Download(ctx, source.Code, address)
+}
+
+// FindLink is the file a page links, for a feed published under a dated name: of the page's links (href, entities
+// decoded, resolved against the page) on the page's own host and scheme, those whose address matches the pattern; of
+// those, the one whose matched part (the dated name) is last in byte order, so the newest date wherever it's filed,
+// the whole address breaking a tie. A format error when none does: the import fails rather than guess.
+func FindLink(page, document, linkPattern string) (string, error) {
+	base, err := url.Parse(page)
+	if err != nil {
+		return "", err
+	}
+	pattern, err := regexp.Compile(linkPattern)
+	if err != nil {
+		return "", err
+	}
+	found, foundKey := "", ""
+	for _, match := range hrefPattern.FindAllStringSubmatch(document, -1) {
+		reference, err := url.Parse(strings.TrimSpace(html.UnescapeString(match[1])))
+		if err != nil {
+			continue
+		}
+		target := base.ResolveReference(reference)
+		address := target.String()
+		key := pattern.FindString(address)
+		if target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) || !pattern.MatchString(address) {
+			continue
+		}
+		if found == "" || key > foundKey || (key == foundKey && address > found) {
+			found, foundKey = address, key
+		}
+	}
+	if found == "" {
+		return "", formatError("The publisher's page has no link matching %s.", linkPattern)
+	}
+	return found, nil
+}
+
 func (d *Downloader) Download(ctx context.Context, source, url string) (string, error) {
+	return d.download(ctx, source, url, 0)
+}
+
+// download is Download, stopping as soon as the body passes maxBytes (when above 0): a format error, not tried again.
+func (d *Downloader) download(ctx context.Context, source, url string, maxBytes int64) (string, error) {
 	started := time.Now()
 	for attempt := 1; ; attempt++ {
-		path, err := d.attempt(ctx, url)
+		path, err := d.attempt(ctx, url, maxBytes)
 		if err == nil {
 			return path, nil
 		}
@@ -223,7 +292,7 @@ func (d *Downloader) Download(ctx context.Context, source, url string) (string, 
 	}
 }
 
-func (d *Downloader) attempt(ctx context.Context, url string) (string, error) {
+func (d *Downloader) attempt(ctx context.Context, url string, maxBytes int64) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, d.Timeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -243,7 +312,15 @@ func (d *Downloader) attempt(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(file, response.Body); err != nil {
+	body := io.Reader(response.Body)
+	if maxBytes > 0 {
+		body = io.LimitReader(response.Body, maxBytes+1)
+	}
+	written, err := io.Copy(file, body)
+	if err == nil && maxBytes > 0 && written > maxBytes {
+		err = formatError("The publisher's page is larger than %d bytes.", maxBytes)
+	}
+	if err != nil {
 		file.Close()
 		os.Remove(file.Name())
 		return "", err

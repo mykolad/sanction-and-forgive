@@ -4,7 +4,7 @@
     "receiverName": null,
     "companyName": "Baltic Engineering PJSC",
     "address": null,
-    "list": "eu"
+    "list": "jp-mof"
   },
   {
     "label": "In Cyrillic",
@@ -16,15 +16,15 @@
   {
     "label": "With an address",
     "receiverName": null,
-    "companyName": "Dnipro Group Ltd",
-    "address": "Abay Avenue 15, Almaty, KAZAKHSTAN",
-    "list": "eu"
+    "companyName": "Zenit Logistics LLC",
+    "address": "Abay Avenue 15, Almaty, Kazakhstan",
+    "list": "jp-mof"
   },
   {
     "label": "With a typo",
     "receiverName": null,
-    "companyName": "Joint Stock Company Nortwind Energy",
+    "companyName": "Baltic Petrleum Limited",
     "address": null,
-    "list": "eu"
+    "list": "jp-mof"
   }
 ]

@@ -22,6 +22,9 @@ type ListSource struct {
 	Homepage    string
 	TermsURL    string
 	Note        string
+	// LinkPattern: for a feed published under a new name each time, URL is the publisher's page and the file is the
+	// link on it whose address matches this (FindLink).
+	LinkPattern string
 }
 
 // EuPublicToken is the EU's published public token for the FSF files.
@@ -82,6 +85,10 @@ var Sources = []ListSource{
 	{Code: "nz-mfat", Name: "New Zealand Russia Sanctions Register (MFAT)", URL: "https://www.mfat.govt.nz/assets/Countries-and-Regions/Europe/Ukraine/Russia-Sanctions-Register.xlsx", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register",
 		TermsURL: "https://www.mfat.govt.nz/en/copyright"},
+	{Code: "jp-mof", Name: "Japan asset-freeze list (Ministry of Finance)", URL: "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html", MaxAgeHours: dailyMaxAge, Status: Active,
+		Homepage:    "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",
+		TermsURL:    "https://www.mof.go.jp/about_mof/notice/index.html",
+		LinkPattern: `/shisantouketsu[0-9]{8}\.csv$`},
 	{Code: "ua-sfms", Name: "Ukraine SFMS terrorism list", URL: "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://fiu.gov.ua/"},
 }

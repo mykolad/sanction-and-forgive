@@ -49,6 +49,15 @@
       "url": "https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json"
     },
     {
+      "code": "jp-mof",
+      "name": "Japan asset-freeze list (Ministry of Finance)",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 60,
+      "url": "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html"
+    },
+    {
       "code": "nl-terrorism",
       "name": "Netherlands national terrorism list",
       "asOf": "*",

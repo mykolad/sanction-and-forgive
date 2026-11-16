@@ -15,7 +15,7 @@ public static class FeedFiles
     public static readonly IReadOnlyList<(string Code, int Count)> Feeds =
     [
         ("eu", 160), ("ofac-sdn", 200), ("ofac-cons", 60), ("un", 80), ("uk", 140), ("us-export", 120),
-        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60),
+        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60), ("jp-mof", 60),
     ];
 
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
@@ -27,7 +27,7 @@ public static class FeedFiles
         Fixtures.For(code, Feeds.Single(feed => feed.Code == code).Count);
 
     /// <summary>The file name for a feed (its extension says the format).</summary>
-    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", "nz-mfat" => "xlsx", _ => "xml" }}";
+    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", "nz-mfat" => "xlsx", "jp-mof" => "csv", _ => "xml" }}";
 
     /// <summary>Writes <paramref name="subjects"/> as <paramref name="code"/>'s feed to <paramref name="path"/>.</summary>
     public static void Write(string code, IReadOnlyList<FixtureSubject> subjects, string path)
@@ -45,6 +45,9 @@ public static class FeedFiles
                 return;
             case "nz-mfat":
                 NewZealand(subjects, path);
+                return;
+            case "jp-mof":
+                File.WriteAllText(path, Japan(subjects), new UTF8Encoding(true));
                 return;
             default:
                 var document = code switch
@@ -487,6 +490,73 @@ public static class FeedFiles
     /// header on row 11, a row per party (people with first, middle and last names; entities and banks named in First
     /// name; aliases joined by semicolons; Excel serial dates), an asset row and a revoked row (both left out), and the
     /// closing Total row. Text as shared strings, one cell as an inline string.</summary>
+    private static readonly string[] JapanHeader =
+    [
+        "区分", "番号", "告示日付", "告示番号", "個人・団体", "氏名（日本語）", "氏名（英語）", "別名・別称（日本語）", "別名・別称（英語）", "旧称（日本語）", "旧称（英語）",
+        "確定に十分でない別名（日本語）", "確定に十分でない別名（英語）", "称号（日本語）", "称号（英語）", "役職（日本語）", "役職（英語）", "生年月日", "出生地（日本語）", "出生地（英語）",
+        "国籍（日本語）", "国籍（英語）", "旅券番号", "身分証番号", "住所・所在地（国）（日本語）", "住所・所在地（都市その他の情報）（日本語）", "住所・所在地（国）（英語）",
+        "住所・所在地（都市その他の情報）（英語）", "国連参照番号", "リスト掲載日", "その他の情報", "外務省告示情報",
+    ];
+
+    /// <summary>Japan's list (CSV, UTF-8 with a byte order mark, CRLF, every field quoted): the 32 Japanese columns, a
+    /// row per party with its category and number, the notice date (some with an amendment after it), people as the
+    /// list writes them (family name first) with a katakana reading, aliases separated by semicolons (some full width),
+    /// a weak alias, addresses as a city and a country (some noted as at the time of listing, some only in Japanese, some
+    /// with more countries than cities), an empty row, and some groups marked neither a person nor a group.</summary>
+    private static string Japan(IReadOnlyList<FixtureSubject> subjects)
+    {
+        static string Csv(IEnumerable<string> cells) => string.Join(',', cells.Select(cell => $"\"{cell.Replace("\"", "\"\"", StringComparison.Ordinal)}\""));
+        string Row(params (string Column, string Value)[] cells) =>
+            Csv(JapanHeader.Select(column => cells.FirstOrDefault(cell => cell.Column == column).Value ?? string.Empty));
+        static string Date(DateOnly date) => date.ToString("yyyy.M.d", CultureInfo.InvariantCulture);
+
+        var lines = new List<string> { Csv(JapanHeader) };
+        foreach (var subject in subjects)
+        {
+            var category = (subject.Number % 44) + 1;
+            var cells = new List<(string Column, string Value)>
+            {
+                ("区分", category.ToString(CultureInfo.InvariantCulture)),
+                ("番号", $"{category:000}-{subject.Number:000000}"),
+                ("告示日付", subject.Number % 3 == 0 ? $"{Date(subject.ListedOn)} {Date(subject.ListedOn.AddDays(400))}改訂" : Date(subject.ListedOn)),
+                ("告示番号", (subject.Number % 97).ToString(CultureInfo.InvariantCulture)),
+                ("個人・団体", subject.Person ? "個人" : subject.Number % 11 == 0 ? "その他" : "団体"),
+                ("氏名（英語）", subject.Person ? $"{subject.Family} {subject.Given}" : subject.Family),
+                ("別名・別称（英語）", string.Join(subject.Number % 4 == 0 ? "；" : "; ", subject.Aliases)),
+                ("その他の情報", "Fictional listing (conformance)"),
+            };
+            if (subject.Person)
+            {
+                cells.Add(("氏名（日本語）", $"サンプル・{subject.Number}"));
+                cells.Add(("生年月日", $"{1950 + (subject.Number % 40)}/{1 + (subject.Number % 12)}/{1 + (subject.Number % 28)}"));
+            }
+
+            if (subject.WeakAlias is { } weak)
+            {
+                cells.Add(("確定に十分でない別名（英語）", weak));
+            }
+
+            if (subject.Address is { } a)
+            {
+                if (subject.Number % 5 == 0)
+                {
+                    cells.Add(("住所・所在地（国）（日本語）", a.Country));
+                    cells.Add(("住所・所在地（都市その他の情報）（日本語）", $"{a.Street}, {a.City}"));
+                }
+                else
+                {
+                    cells.Add(("住所・所在地（国）（英語）", subject.Number % 7 == 0 ? $"{a.Country}(リスト掲載時点)" : subject.Number % 6 == 0 ? $"{a.Country}; {a.Country}" : a.Country));
+                    cells.Add(("住所・所在地（都市その他の情報）（英語）", $"{a.Street}, {a.City},"));
+                }
+            }
+
+            lines.Add(Row([.. cells]));
+        }
+
+        lines.Add(Csv(JapanHeader.Select(_ => string.Empty)));
+        return string.Join("\r\n", lines) + "\r\n";
+    }
+
     private static void NewZealand(IReadOnlyList<FixtureSubject> subjects, string path)
     {
         string[] header =

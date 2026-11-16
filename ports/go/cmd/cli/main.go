@@ -220,7 +220,7 @@ func (c *commands) importOne(ctx context.Context, source *lists.ListSource, file
 		return fail(err)
 	}
 	if path == "" {
-		path, err = c.downloader.Download(ctx, source.Code, strings.ReplaceAll(source.URL, "{token}", c.euToken))
+		path, err = c.downloader.DownloadFeed(ctx, source, c.euToken)
 		if err != nil {
 			return fail(err)
 		}
@@ -577,7 +577,7 @@ func probe(ctx context.Context, downloader *lists.Downloader, euToken, code, fil
 				fmt.Printf("%s %8s  no URL: pass --file\n", prefix, "-")
 				continue
 			}
-			downloaded, err := downloader.Download(ctx, source.Code, strings.ReplaceAll(source.URL, "{token}", euToken))
+			downloaded, err := downloader.DownloadFeed(ctx, source, euToken)
 			if err != nil {
 				fmt.Printf("%s FAILED: %s\n", prefix, err.Error())
 				failed = failed || source.Status == lists.Active

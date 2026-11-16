@@ -28,6 +28,9 @@ pub struct ListSource {
     pub homepage: &'static str,
     pub terms_url: &'static str,
     pub note: &'static str,
+    /// For a feed published under a new name each time: url is the publisher's page, and the file is the link on it
+    /// whose address matches this (manual::find_link).
+    pub link_pattern: &'static str,
 }
 
 /// The EU's published public token for the FSF files.
@@ -51,11 +54,11 @@ const fn source(
     terms_url: &'static str,
     note: &'static str,
 ) -> ListSource {
-    ListSource { code, name, url, max_age_hours: DAILY, status, homepage, terms_url, note }
+    ListSource { code, name, url, max_age_hours: DAILY, status, homepage, terms_url, note, link_pattern: "" }
 }
 
 /// The catalogue, in the reference's order.
-pub static SOURCES: [ListSource; 14] = [
+pub static SOURCES: [ListSource; 15] = [
     source(
         "eu",
         "EU consolidated financial sanctions",
@@ -173,6 +176,18 @@ pub static SOURCES: [ListSource; 14] = [
         "https://www.mfat.govt.nz/en/copyright",
         "",
     ),
+    ListSource {
+        link_pattern: r"/shisantouketsu[0-9]{8}\.csv$",
+        ..source(
+            "jp-mof",
+            "Japan asset-freeze list (Ministry of Finance)",
+            "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",
+            FeedStatus::Active,
+            "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",
+            "https://www.mof.go.jp/about_mof/notice/index.html",
+            "",
+        )
+    },
     source("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", FeedStatus::Active, "https://fiu.gov.ua/", "", ""),
 ];
 

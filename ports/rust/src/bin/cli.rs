@@ -248,7 +248,7 @@ impl Commands {
         };
         let downloaded;
         let path = if file.is_empty() {
-            match self.downloader.download(source.code, &source.url.replace("{token}", &self.eu_token)).await {
+            match self.downloader.download_feed(source, &self.eu_token).await {
                 Ok(p) => {
                     downloaded = p;
                     downloaded.path().to_path_buf()
@@ -560,7 +560,7 @@ async fn probe(downloader: &Downloader, eu_token: &str, code: &str, file: &str) 
                 println!("{prefix} {:>8}  no URL: pass --file", "-");
                 continue;
             }
-            match downloader.download(source.code, &source.url.replace("{token}", eu_token)).await {
+            match downloader.download_feed(source, eu_token).await {
                 Ok(p) => {
                     downloaded = p;
                     downloaded.path().to_path_buf()
