@@ -100,7 +100,8 @@ fn is_mark(c: char) -> bool {
 /// The normalised words of value (NFKC, lower case, apostrophes inside words deleted, punctuation as separators,
 /// & as "and").
 pub fn words(value: &str) -> Vec<String> {
-    let text: Vec<char> = to_lower_invariant(&value.nfkc().collect::<String>()).chars().collect();
+    // Eastern Arabic digits are read as ASCII ones (arabic.json), so a number compares as a number in any script.
+    let text: Vec<char> = to_lower_invariant(&value.nfkc().collect::<String>()).chars().map(ascii_digit).collect();
     let mut words = Vec::new();
     let mut word = String::new();
     for (i, &c) in text.iter().enumerate() {
@@ -277,7 +278,77 @@ fn look_alike(c: char) -> Option<char> {
     })
 }
 
-/// Builds a token: every Latin reading and its fold key. Never strips marks before transliterating.
+/// Arabic-script words compared in their own script (data/arabic.json, #92): the marks dropped and the letters read
+/// as one another. Rust only for now; .NET and Go hash the file and will read it when they follow.
+struct ArabicTable {
+    drop: Vec<(u32, u32)>,
+    letters: HashMap<char, String>,
+}
+
+static ARABIC: std::sync::LazyLock<ArabicTable> = std::sync::LazyLock::new(|| {
+    let bytes = super::data::resource("arabic.json").expect("arabic.json is embedded");
+    let document: serde_json::Value = serde_json::from_slice(bytes).expect("arabic.json is JSON");
+    let hex = |text: &str| u32::from_str_radix(text, 16).unwrap_or_else(|_| panic!("arabic.json: '{text}' isn't hexadecimal"));
+    let drop = document["drop"]
+        .as_array()
+        .expect("arabic.json has drop")
+        .iter()
+        .map(|range| {
+            let range = range.as_str().expect("a range is text");
+            match range.split_once('-') {
+                Some((first, last)) => (hex(first), hex(last)),
+                None => (hex(range), hex(range)),
+            }
+        })
+        .collect();
+    let letters = document["letters"]
+        .as_object()
+        .expect("arabic.json has letters")
+        .iter()
+        .map(|(letter, value)| {
+            let mut chars = letter.chars();
+            let (Some(c), None) = (chars.next(), chars.next()) else { panic!("arabic.json: '{letter}' isn't one letter.") };
+            (c, value.as_str().expect("a letter's reading is text").to_string())
+        })
+        .collect();
+    ArabicTable { drop, letters }
+});
+
+/// An Eastern Arabic digit as its ASCII digit (arabic.json reads ٢ and ۲ as 2); any other character as it is.
+fn ascii_digit(c: char) -> char {
+    if !('\u{0660}'..='\u{06F9}').contains(&c) {
+        return c;
+    }
+    match ARABIC.letters.get(&c).map(String::as_bytes) {
+        Some([digit]) if digit.is_ascii_digit() => *digit as char,
+        _ => c,
+    }
+}
+
+/// A letter of the Arabic script (Arabic, Persian, Urdu and the rest), including the presentation forms.
+pub fn is_arabic(c: char) -> bool {
+    matches!(c as u32, 0x0600..=0x06FF | 0x0750..=0x077F | 0x0870..=0x08FF | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF)
+}
+
+/// An Arabic-script word as it's compared: the marks dropped, the letters read as one another (arabic.json).
+pub fn arabic_form(text: &str) -> String {
+    let table = &*ARABIC;
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        let code = c as u32;
+        if table.drop.iter().any(|&(first, last)| code >= first && code <= last) {
+            continue;
+        }
+        match table.letters.get(&c) {
+            Some(reading) => out.push_str(reading),
+            None => out.push(c),
+        }
+    }
+    out
+}
+
+/// Builds a token: every Latin reading and its fold key. Never strips marks before transliterating. An Arabic-script
+/// word gets its own script's form (arabic_form), so spellings that differ by marks or letter variants align.
 pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token {
     let chars: Vec<char> = text.chars().collect();
     let has_cyrillic = chars.iter().any(|&c| is_cyrillic(c));
@@ -295,6 +366,8 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         for form in forms.iter_mut() {
             *form = strip_diacritics(form);
         }
+    } else if !has_latin && !is_number && chars.iter().any(|&c| is_arabic(c)) {
+        forms.push(arabic_form(text));
     } else if has_latin || is_number {
         forms.push(strip_diacritics(text));
         if text.contains(['ü', 'ö', 'ä']) {
