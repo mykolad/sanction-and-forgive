@@ -24,6 +24,10 @@ static TRAILING: LazyLock<Regex> =
 static TABLE_OPEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<table\b").unwrap());
 static TABLE_CLOSE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</table\s*>").unwrap());
 static DOCUMENT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</html\s*>\s*$").unwrap());
+static ROW_OPEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<tr\b").unwrap());
+static ROW_CLOSE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</tr\s*>").unwrap());
+static CELL_OPEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<t[dh]\b").unwrap());
+static CELL_CLOSE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</t[dh]\s*>").unwrap());
 static SECTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Section\s+\d+\([a-z]\)\(\d+\)\([A-Z]\)\([ivx]+\)").unwrap());
 
 /// A table: the page's text before it (since the previous table), and its rows of cells.
@@ -72,8 +76,11 @@ pub fn parse_uflpa(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseE
         return Err(format_error("The UFLPA page has no entity tables."));
     }
     // A page cut short loses its last rows or tables without a trace: the document must end, and every table close.
-    let complete = TABLE_OPEN.find_iter(document).count() == tables.len()
-        && TABLE_CLOSE.find_iter(document).count() == tables.len()
+    let count = |pattern: &Regex| pattern.find_iter(document).count();
+    let complete = count(&TABLE_OPEN) == tables.len()
+        && count(&TABLE_CLOSE) == tables.len()
+        && count(&ROW_OPEN) == count(&ROW_CLOSE)
+        && count(&CELL_OPEN) == count(&CELL_CLOSE)
         && DOCUMENT_END.is_match(document);
     if !complete {
         return Err(format_error("The UFLPA page is cut short: a table or the document doesn't close."));
@@ -254,6 +261,8 @@ mod tests {
     fn a_page_that_isnt_the_list_is_a_format_error() {
         let in_last_table = &PAGE[..PAGE.rfind("<tr>").unwrap()];
         let after_it = &PAGE[..PAGE.rfind("</table>").unwrap() + "</table>".len()];
+        let last_row_end = PAGE.rfind("</tr>").unwrap();
+        let row_not_closed = format!("{}{}", &PAGE[..last_row_end], &PAGE[last_row_end + "</tr>".len()..]);
         for page in [
             "<html><p>No tables here.</p></html>",
             "<html><table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table></html>",
@@ -263,6 +272,7 @@ mod tests {
             "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td>Summer 2022</td></tr></table></html>",
             in_last_table,
             after_it,
+            &row_not_closed,
         ] {
             assert!(parse_uflpa(&mut page.as_bytes()).is_err(), "{page}");
         }

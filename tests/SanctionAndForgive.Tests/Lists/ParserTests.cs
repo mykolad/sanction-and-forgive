@@ -391,9 +391,11 @@ public class ParserTests
     {
         var inLastTable = UflpaPage[..UflpaPage.LastIndexOf("<tr>", StringComparison.Ordinal)];
         var afterIt = UflpaPage[..(UflpaPage.LastIndexOf("</table>", StringComparison.Ordinal) + "</table>".Length)];
+        var rowNotClosed = UflpaPage.Remove(UflpaPage.LastIndexOf("</tr>", StringComparison.Ordinal), "</tr>".Length);
 
         Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), inLastTable));
         Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), afterIt));
+        Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), rowNotClosed));
     }
 
     [Theory]

@@ -243,9 +243,11 @@ public static partial class HtmlTables
     }
 
     /// <summary>Whether a page holding <paramref name="tables"/> read tables is whole: as many table openings and
-    /// closings as tables read, and the document's closing tag.</summary>
+    /// closings as tables read, every row and cell closed, and the document's closing tag.</summary>
     public static bool IsComplete(string html, int tables) =>
-        TableOpen().Count(html) == tables && TableClose().Count(html) == tables && DocumentEnd().IsMatch(html);
+        TableOpen().Count(html) == tables && TableClose().Count(html) == tables
+        && RowOpen().Count(html) == RowClose().Count(html) && CellOpen().Count(html) == CellClose().Count(html)
+        && DocumentEnd().IsMatch(html);
 
     /// <summary>A fragment's text: tags as spaces, character references decoded, whitespace collapsed.</summary>
     public static string TextOf(string fragment) =>
@@ -271,4 +273,16 @@ public static partial class HtmlTables
 
     [GeneratedRegex(@"</html\s*>\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DocumentEnd();
+
+    [GeneratedRegex(@"<tr\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RowOpen();
+
+    [GeneratedRegex(@"</tr\s*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RowClose();
+
+    [GeneratedRegex(@"<t[dh]\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CellOpen();
+
+    [GeneratedRegex(@"</t[dh]\s*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex CellClose();
 }

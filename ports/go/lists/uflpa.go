@@ -26,6 +26,10 @@ var (
 	htmlTableOpen   = regexp.MustCompile(`(?i)<table\b`)
 	htmlTableClose  = regexp.MustCompile(`(?i)</table\s*>`)
 	htmlDocumentEnd = regexp.MustCompile(`(?i)</html\s*>\s*$`)
+	htmlRowOpen     = regexp.MustCompile(`(?i)<tr\b`)
+	htmlRowClose    = regexp.MustCompile(`(?i)</tr\s*>`)
+	htmlCellOpen    = regexp.MustCompile(`(?i)<t[dh]\b`)
+	htmlCellClose   = regexp.MustCompile(`(?i)</t[dh]\s*>`)
 )
 
 type htmlTableRows struct {
@@ -39,9 +43,11 @@ func htmlTextOf(fragment string) string {
 }
 
 // htmlIsComplete says whether a page holding this many read tables is whole: as many table openings and closings as
-// tables read, and the document's closing tag.
+// tables read, every row and cell closed, and the document's closing tag.
 func htmlIsComplete(document string, tables int) bool {
-	return len(htmlTableOpen.FindAllStringIndex(document, -1)) == tables && len(htmlTableClose.FindAllStringIndex(document, -1)) == tables &&
+	count := func(pattern *regexp.Regexp) int { return len(pattern.FindAllStringIndex(document, -1)) }
+	return count(htmlTableOpen) == tables && count(htmlTableClose) == tables &&
+		count(htmlRowOpen) == count(htmlRowClose) && count(htmlCellOpen) == count(htmlCellClose) &&
 		htmlDocumentEnd.MatchString(document)
 }
 
