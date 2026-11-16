@@ -42,6 +42,7 @@ public class EdgeCaseTests
     {
         // "de" and "la" are filler, like "of" and "the": two different streets in the same city don't agree on them.
         Assert.NotEqual(AddressState.Corroborated, StateOf("5 rue de la Paix", "12 rue de la Gare"));
+        Assert.NotEqual(AddressState.Corroborated, StateOf("2 place Vendome", "9 place Bellecour"));
     }
 
     [Fact]
