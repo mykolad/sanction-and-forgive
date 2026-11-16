@@ -109,6 +109,11 @@ public static class ListSources
             Homepage = "https://www.government.nl/documents/2016/01/15/national-terrorism-list",
             TermsUrl = "https://www.government.nl/copyright",
         },
+        new("nz-mfat", "New Zealand Russia Sanctions Register (MFAT)", "https://www.mfat.govt.nz/assets/Countries-and-Regions/Europe/Ukraine/Russia-Sanctions-Register.xlsx", DailyMaxAge, FeedStatus.Active, () => new NewZealandParser())
+        {
+            Homepage = "https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register",
+            TermsUrl = "https://www.mfat.govt.nz/en/copyright",
+        },
         new("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", DailyMaxAge, FeedStatus.Active, () => new SfmsParser())
         {
             Homepage = "https://fiu.gov.ua/",
