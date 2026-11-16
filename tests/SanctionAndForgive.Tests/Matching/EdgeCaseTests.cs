@@ -38,6 +38,13 @@ public class EdgeCaseTests
     }
 
     [Fact]
+    public void FrenchStreets_DontCorroborateOnTheirParticles()
+    {
+        // "de" and "la" are filler, like "of" and "the": two different streets in the same city don't agree on them.
+        Assert.NotEqual(AddressState.Corroborated, StateOf("5 rue de la Paix", "12 rue de la Gare"));
+    }
+
+    [Fact]
     public void PersonNamedLikeALegalForm_KeepsThatName()
     {
         var patLee = Subject("Pat Lee", SubjectKind.Individual, null);
