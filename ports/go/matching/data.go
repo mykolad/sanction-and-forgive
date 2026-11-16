@@ -44,11 +44,15 @@ type MatcherData struct {
 	// LegalPhrases: multi-word legal forms by first word, longest first.
 	LegalPhrases map[string][]legalPhrase
 	// generic: spelling → canonical word, in the reference's insertion order (NearGeneric takes the first that fits).
-	genericKeys          []string
-	Generic              map[string]string
-	StopWords            map[string]bool
-	Honorifics           map[string]bool
-	AddressWords         map[string]bool
+	genericKeys  []string
+	Generic      map[string]string
+	StopWords    map[string]bool
+	Honorifics   map[string]bool
+	AddressWords map[string]bool
+	// StreetWords and StreetParticles: a country name after a street type and one or two particles names the street
+	// ("rue de Malte"), as in the reference's AddressParser.
+	StreetWords          map[string]bool
+	StreetParticles      map[string]bool
 	SpellingGroups       map[string]int
 	SpellingGroupMembers [][]string
 	CognateGroups        map[string][]int
@@ -274,6 +278,7 @@ func loadData() (*MatcherData, error) {
 		return out
 	}
 	d.StopWords, d.Honorifics, d.AddressWords = set("stop"), set("honorifics"), set("addressWords")
+	d.StreetWords, d.StreetParticles = set("streetWords"), set("streetParticles")
 
 	d.SpellingGroups = map[string]int{}
 	for _, group := range documents["spelling-pairs.json"].(*jsonObject).Values["groups"].([]any) {

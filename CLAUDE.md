@@ -93,7 +93,8 @@ reference. The pipeline:
   ambiguity guard, generic words aside, legal-only flagged) and `Person` (honorifics dropped, initials kept, an
   initials run is never a legal form). `TokenComparer` is section 5.4's table. `NameScorer` aligns (best pairs first),
   weights by IDF, maps to the percentage bands (`Bands`), applies caps, contained names and initials.
-- **Addresses** (`Addresses/`): country (names, or a final capitalised ISO code), places, words and numbers;
+- **Addresses** (`Addresses/`): country (names, or a final capitalised ISO code; a country name after a street type
+  and a particle names the street: `rue de Malte`, words.json `streetWords`), places, words and numbers;
   `NotCompared` / `Corroborated` / `Conflicting`, plus address-only screening.
 - **`ListIndex`**: one per list, built from `ListedSubject`s (`Individual`, `Entity`, or `Unknown`: both readings).
   Interned tokens, document frequencies, aliases by fold key, a trigram index over the fold-key vocabulary (typos

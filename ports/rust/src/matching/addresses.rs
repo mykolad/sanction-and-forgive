@@ -1,7 +1,7 @@
 //! Addresses read as spec section 5.8 says: a country, the places named, the other words and the numbers; compared
 //! with a listed party's, or alone.
 
-use super::HashMap;
+use super::{HashMap, HashSet};
 
 use unicode_general_category::GeneralCategory;
 
@@ -73,7 +73,9 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
     let (mut remaining, mut numbers) = (Vec::new(), Vec::new());
     let mut i = 0;
     while i < tokens.len() {
-        if let Some((code, length)) = lookup(&tokens, i, data.max_country_words, &data.countries) {
+        if let Some((code, length)) =
+            lookup(&tokens, i, data.max_country_words, &data.countries).filter(|_| !names_a_street(data, &tokens, i))
+        {
             named_country = code.clone();
             i += length;
             continue;
@@ -110,6 +112,19 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
 }
 
 /// The longest name starting at start, on the words' own text or one of their Latin readings.
+/// The country name starting at start follows a street type and one or two particles, so it names the street ("12 rue de
+/// Malte, Paris" is in France). A particle is required: commas are gone, and "Sheikh Zayed Road, UAE" must still name
+/// its country.
+fn names_a_street(data: &MatcherData, tokens: &[TokenRef], start: usize) -> bool {
+    let is = |token: &TokenRef, words: &HashSet<String>| words.contains(&token.text) || token.forms.iter().any(|f| words.contains(f));
+    let (mut i, mut particles) = (start, 0);
+    while i > 0 && particles < 2 && is(&tokens[i - 1], &data.street_particles) {
+        i -= 1;
+        particles += 1;
+    }
+    particles > 0 && i > 0 && is(&tokens[i - 1], &data.street_words)
+}
+
 fn lookup<'m, T>(tokens: &[TokenRef], start: usize, max_words: usize, names: &'m HashMap<String, T>) -> Option<(&'m T, usize)> {
     for length in (1..=max_words.min(tokens.len() - start)).rev() {
         let span = &tokens[start..start + length];

@@ -72,7 +72,7 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	namedCountry, impliedCountry := "", ""
 	var remaining, numbers []*Token
 	for i := 0; i < len(tokens); i++ {
-		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok {
+		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok && !p.namesAStreet(tokens, i) {
 			namedCountry = code
 			i += length - 1
 			continue
@@ -102,6 +102,19 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 		country = namedCountry
 	}
 	return &addressForm{raw, remaining, numbers, distinctPlaces, country, impliedCountry}
+}
+
+// namesAStreet: the country name starting at start follows a street type and one or two particles, so it names the
+// street ("12 rue de Malte, Paris" is in France). A particle is required: commas are gone, and "Sheikh Zayed Road,
+// UAE" must still name its country.
+func (p *addressParser) namesAStreet(tokens []*Token, start int) bool {
+	is := func(token *Token, words map[string]bool) bool { return words[token.Text] || anyIn(token.Forms, words) }
+	i, particles := start-1, 0
+	for i >= 0 && particles < 2 && is(tokens[i], p.data.StreetParticles) {
+		i--
+		particles++
+	}
+	return particles > 0 && i >= 0 && is(tokens[i], p.data.StreetWords)
 }
 
 func anyIn(values []string, set map[string]bool) bool {

@@ -34,7 +34,7 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         var numbers = new List<Token>();
         for (var i = 0; i < tokens.Count; i++)
         {
-            if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch)
+            if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch && !NamesAStreet(tokens, i))
             {
                 namedCountry = countryMatch.Value;
                 i += countryMatch.Length - 1;
@@ -62,6 +62,24 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
 
         return new AddressForm(raw, [.. remaining], [.. numbers], [.. places.Distinct()], country ?? namedCountry, impliedCountry);
     }
+
+    /// <summary>Whether the country name starting at <paramref name="start"/> follows a street type and one or two
+    /// particles, so it names the street (<c>12 rue de Malte, Paris</c> is in France, not Malta). A particle is required:
+    /// commas are gone by now, and <c>Sheikh Zayed Road, UAE</c> must still name its country.</summary>
+    private bool NamesAStreet(List<Token> tokens, int start)
+    {
+        var i = start - 1;
+        var particles = 0;
+        while (i >= 0 && particles < 2 && Is(tokens[i], data.StreetParticles))
+        {
+            i--;
+            particles++;
+        }
+
+        return particles > 0 && i >= 0 && Is(tokens[i], data.StreetWords);
+    }
+
+    private static bool Is(Token token, HashSet<string> words) => words.Contains(token.Text) || token.Forms.Any(words.Contains);
 
     /// <summary>The longest name starting at <paramref name="start"/>, matched on the words' own text or on one of
     /// their Latin readings (<c>Таллинн</c> read as <c>tallinn</c>).</summary>
