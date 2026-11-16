@@ -5,7 +5,9 @@
 package matching
 
 import (
+	"encoding/json"
 	"strings"
+	"sync"
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
@@ -120,32 +122,75 @@ func isLetterOrDigit(c rune) bool {
 	return IsLetter(c) || Is(unicode.Nd, c)
 }
 
-// StripDiacritics returns a Latin word without diacritics: Ştefan → stefan, straße → strasse.
-func StripDiacritics(value string) string {
-	var b strings.Builder
-	for _, c := range norm.NFD.String(value) {
-		switch c {
-		case 'ß':
-			b.WriteString("ss")
-		case 'ø':
-			b.WriteRune('o')
-		case 'đ':
-			b.WriteRune('d')
-		case 'ł':
-			b.WriteRune('l')
-		case 'æ':
-			b.WriteString("ae")
-		case 'œ':
-			b.WriteString("oe")
-		case 'ı':
-			b.WriteRune('i')
-		default:
-			if !Is(unicode.Mn, c) {
-				b.WriteRune(c)
+// letterTables are the letters a word's marks don't come off by decomposing (data/letters.json, hashed into the
+// matcher version with the other dictionaries): what each folds to, and the second spellings.
+type letterTables struct {
+	folds       map[rune]string
+	secondForms map[rune]string
+}
+
+var letters = sync.OnceValue(func() letterTables {
+	content, err := dataFiles.ReadFile("data/letters.json")
+	if err != nil {
+		panic("matching: letters.json isn't embedded: " + err.Error())
+	}
+	var document struct {
+		Folds       map[string]string `json:"folds"`
+		SecondForms map[string]string `json:"secondForms"`
+	}
+	if err := json.Unmarshal(content, &document); err != nil {
+		panic("matching: letters.json: " + err.Error())
+	}
+	table := func(entries map[string]string) map[rune]string {
+		out := make(map[rune]string, len(entries))
+		for letter, value := range entries {
+			runes := []rune(letter)
+			if len(runes) != 1 {
+				panic("matching: letters.json: '" + letter + "' isn't one letter.")
 			}
+			out[runes[0]] = value
+		}
+		return out
+	}
+	return letterTables{table(document.Folds), table(document.SecondForms)}
+})
+
+// StripDiacritics returns a Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds
+// (letters.json) apply first, then the marks decomposition leaves are dropped.
+func StripDiacritics(value string) string {
+	folds := letters().folds
+	var folded strings.Builder
+	for _, c := range value {
+		if fold, ok := folds[c]; ok {
+			folded.WriteString(fold)
+		} else {
+			folded.WriteRune(c)
+		}
+	}
+	var b strings.Builder
+	for _, c := range norm.NFD.String(folded.String()) {
+		if !Is(unicode.Mn, c) {
+			b.WriteRune(c)
 		}
 	}
 	return norm.NFC.String(b.String())
+}
+
+// SecondForm is a word's second spelling (letters.json): müller → mueller, jørgen → joergen, đorđe → djordje; false if
+// it has none of those letters.
+func SecondForm(value string) (string, bool) {
+	seconds := letters().secondForms
+	found := false
+	var b strings.Builder
+	for _, c := range value {
+		if second, ok := seconds[c]; ok {
+			b.WriteString(second)
+			found = true
+		} else {
+			b.WriteRune(c)
+		}
+	}
+	return b.String(), found
 }
 
 func IsCyrillic(c rune) bool { return c >= 'Ѐ' && c <= 'ԯ' }
@@ -254,9 +299,8 @@ func (f *tokenFactory) Create(text string) *Token {
 		}
 	} else if hasLatin || isNumber {
 		forms = append(forms, StripDiacritics(text))
-		if strings.ContainsAny(text, "üöä") {
-			replaced := strings.NewReplacer("ü", "ue", "ö", "oe", "ä", "ae").Replace(text)
-			forms = append(forms, StripDiacritics(replaced))
+		if second, ok := SecondForm(text); ok {
+			forms = append(forms, StripDiacritics(second))
 		}
 	}
 

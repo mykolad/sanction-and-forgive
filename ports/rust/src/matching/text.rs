@@ -156,23 +156,57 @@ pub fn to_upper_invariant(s: &str) -> String {
     s.chars().map(upper_invariant).collect()
 }
 
-/// A Latin word without diacritics: Ştefan → stefan, straße → strasse.
+/// The letters a word's marks don't come off by decomposing (data/letters.json, hashed into the matcher version with
+/// the other dictionaries): what each folds to, and the second spellings.
+struct LetterTables {
+    folds: HashMap<char, String>,
+    second_forms: HashMap<char, String>,
+}
+
+static LETTERS: std::sync::LazyLock<LetterTables> = std::sync::LazyLock::new(|| {
+    let bytes = super::data::resource("letters.json").expect("letters.json is embedded");
+    let document: serde_json::Value = serde_json::from_slice(bytes).expect("letters.json is JSON");
+    let table = |key: &str| -> HashMap<char, String> {
+        document[key]
+            .as_object()
+            .unwrap_or_else(|| panic!("letters.json has no {key}"))
+            .iter()
+            .map(|(letter, value)| {
+                let mut chars = letter.chars();
+                let (Some(c), None) = (chars.next(), chars.next()) else { panic!("letters.json: '{letter}' isn't one letter.") };
+                (c, value.as_str().expect("a letter's reading is text").to_string())
+            })
+            .collect()
+    };
+    LetterTables { folds: table("folds"), second_forms: table("secondForms") }
+});
+
+/// A Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds (letters.json) apply
+/// first, then the marks decomposition leaves are dropped.
 pub fn strip_diacritics(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for c in value.nfd() {
-        match c {
-            'ß' => out.push_str("ss"),
-            'ø' => out.push('o'),
-            'đ' => out.push('d'),
-            'ł' => out.push('l'),
-            'æ' => out.push_str("ae"),
-            'œ' => out.push_str("oe"),
-            'ı' => out.push('i'),
-            _ if is_category(c, GeneralCategory::NonspacingMark) => {}
-            _ => out.push(c),
+    let mut folded = String::with_capacity(value.len() + 4);
+    for c in value.chars() {
+        match LETTERS.folds.get(&c) {
+            Some(fold) => folded.push_str(fold),
+            None => folded.push(c),
+        }
+    }
+    let mut out = String::with_capacity(folded.len());
+    for c in folded.nfd() {
+        if !is_category(c, GeneralCategory::NonspacingMark) {
+            out.push(c);
         }
     }
     out.nfc().collect()
+}
+
+/// A word's second spelling (letters.json): müller → mueller, jørgen → joergen, đorđe → djordje; None if it has none
+/// of those letters.
+pub fn second_form(value: &str) -> Option<String> {
+    if !value.chars().any(|c| LETTERS.second_forms.contains_key(&c)) {
+        return None;
+    }
+    Some(value.chars().map(|c| LETTERS.second_forms.get(&c).cloned().unwrap_or_else(|| c.to_string())).collect())
 }
 
 pub fn is_cyrillic(c: char) -> bool {
@@ -297,8 +331,8 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         }
     } else if has_latin || is_number {
         forms.push(strip_diacritics(text));
-        if text.contains(['ü', 'ö', 'ä']) {
-            forms.push(strip_diacritics(&text.replace('ü', "ue").replace('ö', "oe").replace('ä', "ae")));
+        if let Some(second) = second_form(text) {
+            forms.push(strip_diacritics(&second));
         }
     }
 

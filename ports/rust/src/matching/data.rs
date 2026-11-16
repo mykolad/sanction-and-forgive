@@ -14,6 +14,11 @@ mod resources {
     include!(concat!(env!("OUT_DIR"), "/resources.rs"));
 }
 
+/// One embedded dictionary's bytes, by its path under Data ("letters.json", "translit/ru.json").
+pub(crate) fn resource(path: &str) -> Option<&'static [u8]> {
+    resources::DICTIONARIES.iter().find(|(name, _)| *name == path).map(|(_, bytes)| *bytes)
+}
+
 pub use resources::PAGES;
 
 #[derive(Debug, Clone)]

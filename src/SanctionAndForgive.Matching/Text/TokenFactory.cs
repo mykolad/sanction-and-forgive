@@ -35,9 +35,9 @@ internal sealed class TokenFactory(IReadOnlyList<TransliterationTable> tables)
         else if (hasLatin || isNumber)
         {
             forms.Add(Normalizer.StripDiacritics(text));
-            if (text.AsSpan().IndexOfAny("üöä") >= 0)
+            if (Normalizer.SecondForm(text) is { } second)
             {
-                forms.Add(Normalizer.StripDiacritics(new StringBuilder(text).Replace("ü", "ue").Replace("ö", "oe").Replace("ä", "ae").ToString()));
+                forms.Add(Normalizer.StripDiacritics(second));
             }
         }
 
