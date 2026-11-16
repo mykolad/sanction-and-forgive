@@ -113,6 +113,42 @@ public class SpreadsheetTests
     }
 
     [Fact]
+    public void Ods_SpacesTabsAndLineBreaks_ReadAlike_SelfClosedOrNot()
+    {
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        const string content = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>Pieter<text:s/>Willem<text:s></text:s>Jansen<text:tab></text:tab>x<text:line-break></text:line-break>y</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>";
+        using var file = Zip(("content.xml", content));
+
+        Assert.Equal("Pieter Willem Jansen\tx\ny", Assert.Single(Spreadsheets.OdsRows(file, CancellationToken.None))[0]);
+    }
+
+    [Fact]
+    public void Ods_CutShortOrBroken_AfterItsFirstTable_IsAFormatError()
+    {
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        const string start = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>a</text:p></table:table-cell></table:table-row>";
+
+        // Cut short after a complete row, inside the first table; after it; and broken after it.
+        foreach (var content in (string[])[start, start + "</table:table>", start + "</table:table><table:table></office:spreadsheet>"])
+        {
+            using var file = Zip(("content.xml", content));
+            Assert.Throws<ListFormatException>(() => Spreadsheets.OdsRows(file, CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    public void Ods_WhoseRepeatsExpandPastTheLimit_IsAFormatError()
+    {
+        // A cell of 16 KiB repeated across 256 columns, the row a thousand times: about 4 GiB from a few kilobytes.
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        var cell = new string('x', 16 * 1024);
+        var content = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table><table:table-row table:number-rows-repeated=\"1000\"><table:table-cell table:number-columns-repeated=\"256\"><text:p>{cell}</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>";
+        using var file = Zip(("content.xml", content));
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.OdsRows(file, CancellationToken.None));
+    }
+
+    [Fact]
     public void Ods_ThatIsntAZip_OrHasNoContent_IsAFormatError()
     {
         using var notZip = new MemoryStream(Encoding.UTF8.GetBytes("Surname,First name"));
@@ -140,6 +176,48 @@ public class SpreadsheetTests
 
         Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(file, "Another", CancellationToken.None));
     }
+
+    [Fact]
+    public void Xlsx_WhoseSheetOrSharedStringsAreCutShort_IsAFormatError()
+    {
+        const string sheet = "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c></row>";
+        const string strings = "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><si><t>a</t></si>";
+
+        foreach (var (sheetXml, stringsXml) in new[] { (sheet, strings + "</sst>"), (sheet + "</sheetData></worksheet>", strings) })
+        {
+            using var file = Workbook(sheetXml, stringsXml);
+            Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(file, "Register", CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    public void Xlsx_WhoseSharedStringIsUsedPastTheLimit_IsAFormatError()
+    {
+        // One shared string of 16 KiB in 20,000 cells: about 320 MB of text from under a megabyte.
+        var sheet = new StringBuilder("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+        for (var r = 1; r <= 100; r++)
+        {
+            sheet.Append(CultureInfo.InvariantCulture, $"<row r=\"{r}\">");
+            for (var c = 0; c < 200; c++)
+            {
+                sheet.Append("<c t=\"s\"><v>0</v></c>");
+            }
+
+            sheet.Append("</row>");
+        }
+
+        sheet.Append("</sheetData></worksheet>");
+        using var file = Workbook(sheet.ToString(), $"<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><si><t>{new string('x', 16 * 1024)}</t></si></sst>");
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(file, "Register", CancellationToken.None));
+    }
+
+    /// <summary>A workbook of one sheet, "Register", written as given, with these shared strings.</summary>
+    private static MemoryStream Workbook(string sheet, string sharedStrings) => Zip(
+        ("xl/workbook.xml", "<workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Register\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"),
+        ("xl/_rels/workbook.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>"),
+        ("xl/sharedStrings.xml", sharedStrings),
+        ("xl/worksheets/sheet1.xml", sheet));
 
     private static readonly string[] NewZealandHeader =
     [

@@ -13,7 +13,8 @@ import (
 
 // Spreadsheets in the reference: rows of an OpenDocument (.ods) spreadsheet, read from its zip and XML with the
 // standard library. A row is its cells' text, trailing empty cells dropped; empty rows are skipped. A file that isn't
-// the format, or whose part unpacks to more than maxPartBytes, is a format error.
+// the format, whose part unpacks to more than maxPartBytes, whose rows expand (repeated cells and rows) to more text
+// than that, or whose XML is cut short or broken anywhere, is a format error.
 
 const (
 	maxPartBytes = 256 << 20
@@ -71,7 +72,19 @@ func repeatCount(attrs []xml.Attr, local string) int {
 	return 1
 }
 
-// OdsRows reads the rows of an OpenDocument spreadsheet's first table.
+// expansion counts the text a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a
+// row and the row a thousand times, so it's held to the same limit as a part.
+type expansion struct{ total int64 }
+
+func (e *expansion) add(n int) error {
+	if e.total += int64(n); e.total > maxPartBytes {
+		return formatError("The spreadsheet's rows expand to more than %d bytes.", maxPartBytes)
+	}
+	return nil
+}
+
+// OdsRows reads the rows of an OpenDocument spreadsheet's first table. The whole document is read, so one cut short
+// or broken after that table is refused too.
 func OdsRows(reader io.Reader) ([][]string, error) {
 	data, err := io.ReadAll(reader)
 	if err != nil {
@@ -83,8 +96,9 @@ func OdsRows(reader io.Reader) ([][]string, error) {
 	}
 	decoder := xml.NewDecoder(content)
 	var rows [][]string
+	expanded := &expansion{}
 	inTable, tableDone := false, false
-	for !tableDone {
+	for {
 		token, err := decoder.Token()
 		if errors.Is(err, io.EOF) {
 			break
@@ -96,6 +110,9 @@ func OdsRows(reader io.Reader) ([][]string, error) {
 			}
 			return nil, formatError("The spreadsheet's content.xml isn't valid XML: %s", err.Error())
 		}
+		if tableDone {
+			continue
+		}
 		switch t := token.(type) {
 		case xml.StartElement:
 			if t.Name.Space == odsTable && t.Name.Local == "table" {
@@ -106,13 +123,22 @@ func OdsRows(reader io.Reader) ([][]string, error) {
 				inTable = true
 			} else if inTable && t.Name.Space == odsTable && t.Name.Local == "table-row" {
 				repeat := repeatCount(t.Attr, "number-rows-repeated")
-				row, err := odsRow(decoder)
+				row, err := odsRow(decoder, expanded)
 				if err != nil {
 					return nil, err
 				}
 				if len(row) > 0 {
 					// A filled row repeated is rare; an empty one repeated to the sheet's end is common, and skipped.
+					size := 0
+					for _, cell := range row {
+						size += len(cell)
+					}
 					for i := 0; i < min(repeat, 1000); i++ {
+						if i > 0 {
+							if err := expanded.add(size); err != nil {
+								return nil, err
+							}
+						}
 						rows = append(rows, row)
 					}
 				}
@@ -129,7 +155,7 @@ func OdsRows(reader io.Reader) ([][]string, error) {
 	return rows, nil
 }
 
-func odsRow(decoder *xml.Decoder) ([]string, error) {
+func odsRow(decoder *xml.Decoder, expanded *expansion) ([]string, error) {
 	var cells []string
 	for {
 		token, err := decoder.Token()
@@ -145,6 +171,9 @@ func odsRow(decoder *xml.Decoder) ([]string, error) {
 					return nil, err
 				}
 				for i := 0; i < repeat && len(cells) < maxColumns; i++ {
+					if err := expanded.add(len(text)); err != nil {
+						return nil, err
+					}
 					cells = append(cells, text)
 				}
 			}

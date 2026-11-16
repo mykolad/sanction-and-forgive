@@ -74,7 +74,9 @@ func eachToken(data []byte, name string, visit func(xml.Token) (bool, error)) er
 	}
 }
 
-// XlsxRows reads the rows of the workbook's sheet named sheetName.
+// XlsxRows reads the rows of the workbook's sheet named sheetName. The sheet and the shared strings are read to their
+// ends, so one cut short or broken is refused; a shared string's text counts against the expansion limit each time a
+// cell uses it.
 func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 	data, err := io.ReadAll(reader)
 	if err != nil {
@@ -169,6 +171,7 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 
 	var rows [][]string
 	var cells []string
+	expanded := &expansion{}
 	inRow, column, cellType := false, 0, ""
 	var value, inline strings.Builder
 	element, phonetic := "", 0
@@ -221,6 +224,9 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 				if column < maxColumns {
 					for len(cells) <= column {
 						cells = append(cells, "")
+					}
+					if err := expanded.add(len(text)); err != nil {
+						return false, err
 					}
 					cells[column] = text
 				}

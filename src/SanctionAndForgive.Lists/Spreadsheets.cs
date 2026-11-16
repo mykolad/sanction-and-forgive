@@ -5,8 +5,9 @@ namespace SanctionAndForgive.Lists;
 
 /// <summary>Rows of a spreadsheet file, as text: the OpenDocument (<c>.ods</c>) and Office Open XML (<c>.xlsx</c>)
 /// formats some publishers use, read from their zip and XML with nothing but the platform (no spreadsheet library).
-/// A row is its cells' text, trailing empty cells dropped; empty rows are skipped. A file that isn't the format, or
-/// whose parts unpack to more than <see cref="MaxPartBytes"/>, is a <see cref="ListFormatException"/>.</summary>
+/// A row is its cells' text, trailing empty cells dropped; empty rows are skipped. A file that isn't the format, whose
+/// parts unpack to more than <see cref="MaxPartBytes"/>, whose rows expand (repeated cells and rows) to more text than
+/// that, or whose XML is cut short or broken anywhere, is a <see cref="ListFormatException"/>.</summary>
 public static class Spreadsheets
 {
     /// <summary>The most one part of the file may unpack to: far above any list, far below a zip bomb.</summary>
@@ -18,43 +19,59 @@ public static class Spreadsheets
     private const string OdsTable = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
     private const string OdsText = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 
-    /// <summary>The rows of an OpenDocument spreadsheet's first table.</summary>
+    /// <summary>The rows of an OpenDocument spreadsheet's first table. The whole document is read, so one cut short
+    /// or broken after that table is refused too.</summary>
     public static List<IReadOnlyList<string>> OdsRows(Stream stream, CancellationToken cancellationToken)
     {
         using var zip = OpenZip(stream);
         using var content = OpenPart(zip, "content.xml");
         using var reader = XmlReader.Create(content, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, IgnoreWhitespace = false });
         var rows = new List<IReadOnlyList<string>>();
+        var expanded = new Expansion();
         var depth = -1;
-        while (reader.Read())
+        var done = false;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "table" && reader.NamespaceURI == OdsTable)
+            while (reader.Read())
             {
-                if (depth >= 0)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (done)
                 {
-                    break;
+                    continue;
                 }
 
-                depth = reader.Depth;
-            }
-            else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "table" && reader.NamespaceURI == OdsTable && reader.Depth == depth)
-            {
-                return rows;
-            }
-            else if (depth >= 0 && reader.NodeType == XmlNodeType.Element && reader.LocalName == "table-row" && reader.NamespaceURI == OdsTable)
-            {
-                var repeat = Count(reader.GetAttribute("number-rows-repeated", OdsTable));
-                var row = OdsRow(reader);
-                if (row.Count > 0)
+                if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "table" && reader.NamespaceURI == OdsTable)
                 {
-                    // A filled row repeated is rare; an empty one repeated to the sheet's end is common, and skipped.
-                    for (var i = 0; i < Math.Min(repeat, 1000); i++)
+                    done = depth >= 0;
+                    depth = done ? depth : reader.Depth;
+                }
+                else if (reader.NodeType == XmlNodeType.EndElement && reader.LocalName == "table" && reader.NamespaceURI == OdsTable && reader.Depth == depth)
+                {
+                    done = true;
+                }
+                else if (depth >= 0 && reader.NodeType == XmlNodeType.Element && reader.LocalName == "table-row" && reader.NamespaceURI == OdsTable)
+                {
+                    var repeat = Count(reader.GetAttribute("number-rows-repeated", OdsTable));
+                    var row = OdsRow(reader, expanded);
+                    if (row.Count > 0)
                     {
-                        rows.Add(row);
+                        // A filled row repeated is rare; an empty one repeated to the sheet's end is common, and skipped.
+                        for (var i = 1; i < Math.Min(repeat, 1000); i++)
+                        {
+                            expanded.Add(row.Sum(cell => (long)cell.Length));
+                        }
+
+                        for (var i = 0; i < Math.Min(repeat, 1000); i++)
+                        {
+                            rows.Add(row);
+                        }
                     }
                 }
             }
+        }
+        catch (XmlException exception)
+        {
+            throw new ListFormatException($"The spreadsheet's content.xml isn't valid XML: {exception.Message}");
         }
 
         if (depth < 0)
@@ -71,31 +88,41 @@ public static class Spreadsheets
 
     /// <summary>The rows of an Office Open XML workbook's sheet named <paramref name="sheetName"/>: found through the
     /// workbook and its relationships, cells placed by their reference (<c>C12</c>), shared strings resolved (phonetic
-    /// runs left out), numbers as written (a date is a serial number: <see cref="ExcelDate"/>).</summary>
+    /// runs left out), numbers as written (a date is a serial number: <see cref="ExcelDate"/>). The sheet and the
+    /// shared strings are read to their ends, so one cut short or broken is refused; a shared string's text counts
+    /// against the expansion limit each time a cell uses it.</summary>
     public static List<IReadOnlyList<string>> XlsxRows(Stream stream, string sheetName, CancellationToken cancellationToken)
     {
         using var zip = OpenZip(stream);
-        var relationshipId = SheetRelationship(zip, sheetName);
-        var target = RelationshipTarget(zip, relationshipId);
-        var shared = zip.GetEntry("xl/sharedStrings.xml") is null ? [] : SharedStrings(zip);
-
-        using var sheet = OpenPart(zip, target);
-        using var reader = XmlReader.Create(sheet, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
-        var rows = new List<IReadOnlyList<string>>();
-        while (reader.Read())
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "row" && reader.NamespaceURI == XlsxMain && !reader.IsEmptyElement)
+            var relationshipId = SheetRelationship(zip, sheetName);
+            var target = RelationshipTarget(zip, relationshipId);
+            var shared = zip.GetEntry("xl/sharedStrings.xml") is null ? [] : SharedStrings(zip);
+
+            using var sheet = OpenPart(zip, target);
+            using var reader = XmlReader.Create(sheet, new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit });
+            var rows = new List<IReadOnlyList<string>>();
+            var expanded = new Expansion();
+            while (reader.Read())
             {
-                var row = XlsxRow(reader, shared);
-                if (row.Count > 0)
+                cancellationToken.ThrowIfCancellationRequested();
+                if (reader.NodeType == XmlNodeType.Element && reader.LocalName == "row" && reader.NamespaceURI == XlsxMain && !reader.IsEmptyElement)
                 {
-                    rows.Add(row);
+                    var row = XlsxRow(reader, shared, expanded);
+                    if (row.Count > 0)
+                    {
+                        rows.Add(row);
+                    }
                 }
             }
-        }
 
-        return rows;
+            return rows;
+        }
+        catch (XmlException exception)
+        {
+            throw new ListFormatException($"The workbook isn't valid XML: {exception.Message}");
+        }
     }
 
     /// <summary>An Excel date (days since 1899-12-30, the 1900 date system) as a date; null when it isn't one.</summary>
@@ -181,7 +208,7 @@ public static class Spreadsheets
         return strings;
     }
 
-    private static List<string> XlsxRow(XmlReader reader, List<string> shared)
+    private static List<string> XlsxRow(XmlReader reader, List<string> shared, Expansion expanded)
     {
         var cells = new List<string>();
         var rowDepth = reader.Depth;
@@ -205,6 +232,7 @@ public static class Spreadsheets
                 cells.Add(string.Empty);
             }
 
+            expanded.Add(text.Length);
             cells[column] = text;
         }
 
@@ -283,7 +311,23 @@ public static class Spreadsheets
         return letters == 0 ? null : column - 1;
     }
 
-    private static List<string> OdsRow(XmlReader reader)
+    /// <summary>The text a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a row
+    /// and the row a thousand times, so it's counted against the same limit as a part.</summary>
+    private sealed class Expansion
+    {
+        private long total;
+
+        public void Add(long characters)
+        {
+            total += characters;
+            if (total > MaxPartBytes)
+            {
+                throw new ListFormatException($"The spreadsheet's rows expand to more than {MaxPartBytes:N0} characters.");
+            }
+        }
+    }
+
+    private static List<string> OdsRow(XmlReader reader, Expansion expanded)
     {
         var cells = new List<string>();
         if (reader.IsEmptyElement)
@@ -303,6 +347,7 @@ public static class Spreadsheets
             var text = reader.IsEmptyElement ? string.Empty : OdsCellText(reader);
             for (var i = 0; i < repeat && cells.Count < MaxColumns; i++)
             {
+                expanded.Add(text.Length);
                 cells.Add(text);
             }
         }
