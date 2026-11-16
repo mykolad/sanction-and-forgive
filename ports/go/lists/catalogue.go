@@ -76,6 +76,9 @@ var Sources = []ListSource{
 	{Code: "fr-tresor", Name: "France national asset-freeze register (DG Trésor)", URL: "https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://gels-avoirs.dgtresor.gouv.fr/",
 		TermsURL: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/"},
+	{Code: "nl-terrorism", Name: "Netherlands national terrorism list", URL: "https://www.government.nl/site/binaries/site-content/collections/documents/2016/01/15/national-terrorism-list/eng-terrorismelijst.ods", MaxAgeHours: dailyMaxAge, Status: Active,
+		Homepage: "https://www.government.nl/documents/2016/01/15/national-terrorism-list",
+		TermsURL: "https://www.government.nl/copyright"},
 	{Code: "ua-sfms", Name: "Ukraine SFMS terrorism list", URL: "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://fiu.gov.ua/"},
 }

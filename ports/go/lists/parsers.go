@@ -36,6 +36,8 @@ func ParserFor(code string) Parser {
 		return parseSfms
 	case "fr-tresor":
 		return parseFrance
+	case "nl-terrorism":
+		return parseNetherlands
 	}
 	return nil
 }

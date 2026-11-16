@@ -24,6 +24,7 @@ pub fn parser_for(code: &str) -> Option<Parser> {
         "ca-sema" => parse_canada,
         "ua-sfms" => parse_sfms,
         "fr-tresor" => parse_france,
+        "nl-terrorism" => super::spreadsheets::parse_netherlands,
         _ => return None,
     })
 }
