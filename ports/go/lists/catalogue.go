@@ -79,6 +79,9 @@ var Sources = []ListSource{
 	{Code: "nl-terrorism", Name: "Netherlands national terrorism list", URL: "https://www.government.nl/site/binaries/site-content/collections/documents/2016/01/15/national-terrorism-list/eng-terrorismelijst.ods", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://www.government.nl/documents/2016/01/15/national-terrorism-list",
 		TermsURL: "https://www.government.nl/copyright"},
+	{Code: "nz-mfat", Name: "New Zealand Russia Sanctions Register (MFAT)", URL: "https://www.mfat.govt.nz/assets/Countries-and-Regions/Europe/Ukraine/Russia-Sanctions-Register.xlsx", MaxAgeHours: dailyMaxAge, Status: Active,
+		Homepage: "https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register",
+		TermsURL: "https://www.mfat.govt.nz/en/copyright"},
 	{Code: "ua-sfms", Name: "Ukraine SFMS terrorism list", URL: "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://fiu.gov.ua/"},
 }

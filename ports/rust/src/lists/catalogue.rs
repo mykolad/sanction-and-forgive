@@ -55,7 +55,7 @@ const fn source(
 }
 
 /// The catalogue, in the reference's order.
-pub static SOURCES: [ListSource; 13] = [
+pub static SOURCES: [ListSource; 14] = [
     source(
         "eu",
         "EU consolidated financial sanctions",
@@ -162,6 +162,15 @@ pub static SOURCES: [ListSource; 13] = [
         FeedStatus::Active,
         "https://www.government.nl/documents/2016/01/15/national-terrorism-list",
         "https://www.government.nl/copyright",
+        "",
+    ),
+    source(
+        "nz-mfat",
+        "New Zealand Russia Sanctions Register (MFAT)",
+        "https://www.mfat.govt.nz/assets/Countries-and-Regions/Europe/Ukraine/Russia-Sanctions-Register.xlsx",
+        FeedStatus::Active,
+        "https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register",
+        "https://www.mfat.govt.nz/en/copyright",
         "",
     ),
     source("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", FeedStatus::Active, "https://fiu.gov.ua/", "", ""),
