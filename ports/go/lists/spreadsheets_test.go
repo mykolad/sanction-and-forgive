@@ -192,3 +192,15 @@ func TestOdsRowsWhoseCellIsLongerThanTheLimitIsAFormatErrorAsItsRead(t *testing.
 		t.Fatalf("err = %v, want a format error", err)
 	}
 }
+
+func TestExcelDateIsNilForWhatIsntADate(t *testing.T) {
+	for _, value := range []string{"NaN", "nan", "Inf", "-1", "0", "2958466", "x"} {
+		if date := ExcelDate(&value); date != nil {
+			t.Fatalf("%q: date = %v, want nil", value, date)
+		}
+	}
+	value := "44638.5"
+	if date := ExcelDate(&value); date == nil || date.Format("2006-01-02") != "2022-03-18" {
+		t.Fatalf("44638.5: date = %v", date)
+	}
+}

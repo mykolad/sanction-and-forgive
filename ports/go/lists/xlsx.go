@@ -297,7 +297,8 @@ func ExcelDate(value *string) *time.Time {
 		return nil
 	}
 	serial, err := strconv.ParseFloat(strings.TrimSpace(*value), 64)
-	if err != nil || serial < 1 || serial >= 2958466 {
+	// Written so NaN fails too, as in the reference.
+	if err != nil || !(serial >= 1 && serial < 2958466) {
 		return nil
 	}
 	date := time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(math.Floor(serial)))
