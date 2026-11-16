@@ -92,6 +92,24 @@
       "historyCount": "*"
     },
     {
+      "code": "nl-terrorism",
+      "name": "Netherlands national terrorism list",
+      "state": "Current",
+      "status": "Active",
+      "reason": null,
+      "recordCount": 40,
+      "version": "*",
+      "lastCheckedAt": "*",
+      "updatedAt": "*",
+      "maxAgeHours": 72,
+      "homepage": "https://www.government.nl/documents/2016/01/15/national-terrorism-list",
+      "fileUrl": "https://www.government.nl/site/binaries/site-content/collections/documents/2016/01/15/national-terrorism-list/eng-terrorismelijst.ods",
+      "termsUrl": "https://www.government.nl/copyright",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
+    },
+    {
       "code": "ofac-cons",
       "name": "OFAC consolidated (non-SDN)",
       "state": "Current",
