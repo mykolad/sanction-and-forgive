@@ -15,7 +15,7 @@ public static class FeedFiles
     public static readonly IReadOnlyList<(string Code, int Count)> Feeds =
     [
         ("eu", 160), ("ofac-sdn", 200), ("ofac-cons", 60), ("un", 80), ("uk", 140), ("us-export", 120),
-        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60), ("jp-mof", 60),
+        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60), ("jp-mof", 60), ("us-uflpa", 50),
     ];
 
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
@@ -27,7 +27,7 @@ public static class FeedFiles
         Fixtures.For(code, Feeds.Single(feed => feed.Code == code).Count);
 
     /// <summary>The file name for a feed (its extension says the format).</summary>
-    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", "nz-mfat" => "xlsx", "jp-mof" => "csv", _ => "xml" }}";
+    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", "nz-mfat" => "xlsx", "jp-mof" => "csv", "us-uflpa" => "html", _ => "xml" }}";
 
     /// <summary>Writes <paramref name="subjects"/> as <paramref name="code"/>'s feed to <paramref name="path"/>.</summary>
     public static void Write(string code, IReadOnlyList<FixtureSubject> subjects, string path)
@@ -45,6 +45,9 @@ public static class FeedFiles
                 return;
             case "nz-mfat":
                 NewZealand(subjects, path);
+                return;
+            case "us-uflpa":
+                File.WriteAllText(path, Uflpa(subjects), new UTF8Encoding(false));
                 return;
             case "jp-mof":
                 File.WriteAllText(path, Japan(subjects), new UTF8Encoding(true));
@@ -490,6 +493,64 @@ public static class FeedFiles
     /// header on row 11, a row per party (people with first, middle and last names; entities and banks named in First
     /// name; aliases joined by semicolons; Excel serial dates), an asset row and a revoked row (both left out), and the
     /// closing Total row. Text as shared strings, one cell as an inline string.</summary>
+    /// <summary>The UFLPA page (HTML): a heading naming each section of the Act, then its table of names and effective
+    /// dates. Aliases are written in the name in each of the page's phrasings, or as an acronym; some names end with
+    /// "and subsidiaries" or "and its subordinate and affiliated entities", one has a no-break space, and every tenth
+    /// entity is listed under both sections (one record). The page has no identifiers, so a name the pool repeats
+    /// (homonyms) is told apart by a place in parentheses, as the real page does ("(Shanshan)").</summary>
+    private static string Uflpa(IReadOnlyList<FixtureSubject> subjects)
+    {
+        static string Date(DateOnly date) => date.ToString("MMMM d, yyyy", CultureInfo.InvariantCulture);
+        static string Encode(string text) => System.Net.WebUtility.HtmlEncode(text);
+        static string Count(int n) => n switch { 1 => "one", 2 => "two", 3 => "three", 4 => "four", 5 => "five", _ => n.ToString(CultureInfo.InvariantCulture) };
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var written = subjects.ToDictionary(subject => subject.Number, subject =>
+        {
+            var times = seen[subject.LatinName] = seen.GetValueOrDefault(subject.LatinName) + 1;
+            return times == 1 ? subject.LatinName : $"{subject.LatinName} (Branch {times})";
+        });
+        string Row(FixtureSubject subject)
+        {
+            var name = Encode(written[subject.Number]);
+            if (subject.Number % 9 == 0 && name.IndexOf(' ', StringComparison.Ordinal) is var space and > 0)
+            {
+                name = name[..space] + "&nbsp;" + name[(space + 1)..];
+            }
+
+            var aliases = subject.Aliases.Select(Encode).ToList();
+            var acronym = string.Concat(subject.LatinName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Select(word => char.ToUpperInvariant(word[0])).Where(char.IsAsciiLetterUpper));
+            var cell = (subject.Number % 4, aliases.Count) switch
+            {
+                (3, _) when acronym.Length is >= 2 and <= 12 => $"{name} ({acronym})",
+                (_, 0) => name,
+                (0, 1) => $"{name} (also known as {aliases[0]})",
+                (0, _) => $"{name} (also known as {string.Join("; ", aliases[..^1])}; and {aliases[^1]})",
+                (1, _) => $"{name} (formerly known as {string.Join("; ", aliases)})",
+                _ => $"{name} (including {Count(aliases.Count)} alias{(aliases.Count == 1 ? string.Empty : "es")}: {string.Join("; ", aliases)})",
+            };
+            cell += subject.Number % 7 == 0 ? " and subsidiaries" : subject.Number % 11 == 0 ? " and its subordinate and affiliated entities" : string.Empty;
+            return $"<tr><td>{cell}</td><td>{Date(subject.ListedOn)}</td></tr>";
+        }
+
+        var page = new StringBuilder("<!DOCTYPE html><html lang=\"en\"><head><title>UFLPA Entity List | Homeland Security</title></head><body><main>");
+        page.Append("<h1>UFLPA Entity List</h1><p>A list of entities in Xinjiang that mine, produce, or manufacture goods with forced labor (fictional, for conformance)</p>");
+        page.Append("<p><strong>Section 2(d)(2)(B)(i)</strong></p><table><thead><tr><th>Name of Entity</th><th>Effective Date</th></tr></thead><tbody>");
+        foreach (var subject in subjects.Where(subject => subject.Number % 2 == 0))
+        {
+            page.Append(Row(subject));
+        }
+
+        page.Append("</tbody></table><p>A list of entities working with the government of Xinjiang (fictional)</p><p>Section 2(d)(2)(B)(ii)</p>");
+        page.Append("<table><tr><th>Entity Name</th><th>Effective Date</th></tr>");
+        foreach (var subject in subjects.Where(subject => subject.Number % 2 != 0 || subject.Number % 10 == 0))
+        {
+            page.Append(Row(subject));
+        }
+
+        page.Append("</table><p>Last Updated: 10/28/2026</p></main></body></html>");
+        return page.ToString();
+    }
+
     private static readonly string[] JapanHeader =
     [
         "区分", "番号", "告示日付", "告示番号", "個人・団体", "氏名（日本語）", "氏名（英語）", "別名・別称（日本語）", "別名・別称（英語）", "旧称（日本語）", "旧称（英語）",

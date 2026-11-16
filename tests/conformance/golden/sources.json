@@ -254,6 +254,24 @@
       "historyCount": "*"
     },
     {
+      "code": "us-uflpa",
+      "name": "US UFLPA Entity List (forced-labour import ban)",
+      "state": "Current",
+      "status": "Active",
+      "reason": null,
+      "recordCount": 50,
+      "version": "*",
+      "lastCheckedAt": "*",
+      "updatedAt": "*",
+      "maxAgeHours": 72,
+      "homepage": "https://www.dhs.gov/uflpa-entity-list",
+      "fileUrl": "https://www.dhs.gov/uflpa-entity-list",
+      "termsUrl": "https://www.usa.gov/government-copyright",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
+    },
+    {
       "code": "au-dfat",
       "name": "Australia consolidated list",
       "state": "NotImported",
