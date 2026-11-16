@@ -110,6 +110,24 @@
       "historyCount": "*"
     },
     {
+      "code": "nz-mfat",
+      "name": "New Zealand Russia Sanctions Register (MFAT)",
+      "state": "Current",
+      "status": "Active",
+      "reason": null,
+      "recordCount": 60,
+      "version": "*",
+      "lastCheckedAt": "*",
+      "updatedAt": "*",
+      "maxAgeHours": 72,
+      "homepage": "https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register",
+      "fileUrl": "https://www.mfat.govt.nz/assets/Countries-and-Regions/Europe/Ukraine/Russia-Sanctions-Register.xlsx",
+      "termsUrl": "https://www.mfat.govt.nz/en/copyright",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
+    },
+    {
       "code": "ofac-cons",
       "name": "OFAC consolidated (non-SDN)",
       "state": "Current",
