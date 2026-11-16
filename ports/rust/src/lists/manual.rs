@@ -195,24 +195,27 @@ impl Fault {
 pub const MAX_PAGE_BYTES: u64 = 4 << 20;
 
 /// The file a page links, for a feed published under a dated name: of the page's links (href, entities decoded,
-/// resolved against the page) on the page's own host and scheme, those whose address matches the pattern; the last of
-/// them in byte order, so the newest date. A format error when none does: the import fails rather than guess.
+/// resolved against the page) on the page's own host and scheme, those whose address matches the pattern; of those, the
+/// one whose matched part (the dated name) is last in byte order, so the newest date wherever it's filed, the whole
+/// address breaking a tie. A format error when none does: the import fails rather than guess.
 pub fn find_link(page: &str, document: &str, link_pattern: &str) -> Result<String, ParseError> {
     let base = reqwest::Url::parse(page).map_err(|e| format_error(format!("The page's address isn't valid: {e}")))?;
     let pattern = regex::Regex::new(link_pattern).map_err(|e| format_error(format!("The link pattern isn't valid: {e}")))?;
     let href = regex::Regex::new(r#"(?i)href\s*=\s*["']([^"']*)["']"#).expect("a valid pattern");
-    let mut found: Option<String> = None;
+    let mut found: Option<(String, String)> = None;
     for link in href.captures_iter(document) {
         let Ok(target) = base.join(decode_entities(&link[1]).trim()) else { continue };
         let same_host = target.host_str().zip(base.host_str()).is_some_and(|(a, b)| a.eq_ignore_ascii_case(b));
-        if target.scheme() != base.scheme() || !same_host || !pattern.is_match(target.as_str()) {
+        let Some(key) = pattern.find(target.as_str()).map(|m| m.as_str().to_string()) else { continue };
+        if target.scheme() != base.scheme() || !same_host {
             continue;
         }
-        if found.as_deref().is_none_or(|f| target.as_str() > f) {
-            found = Some(target.to_string());
+        let candidate = (key, target.to_string());
+        if found.as_ref().is_none_or(|f| candidate > *f) {
+            found = Some(candidate);
         }
     }
-    found.ok_or_else(|| format_error(format!("The publisher's page has no link matching {link_pattern}.")))
+    found.map(|(_, address)| address).ok_or_else(|| format_error(format!("The publisher's page has no link matching {link_pattern}.")))
 }
 
 /// HTML's character references in an attribute: the five named ones and numeric ones (all a link needs).
@@ -383,7 +386,8 @@ mod link_tests {
     fn a_linked_file_is_the_newest_matching_link_on_the_pages_own_host() {
         let document = r#"<a href="./list20261001.csv">October</a> <a HREF='list20261105.csv'>November</a>
             <a href="https://elsewhere.example/sanctions/list20991231.csv">a copy</a> <a href="./list20261201.xlsx">Excel</a>
-            <a href="/sanctions/list20261231.csv?download=1&amp;x=2">with a query</a> <a href = "./list20261104.csv">again</a>"#;
+            <a href="/sanctions/list20261231.csv?download=1&amp;x=2">with a query</a> <a href = "./list20261104.csv">again</a>
+            <a href="zarchive/list20261001.csv">filed elsewhere, older</a>"#;
         let page = "https://www.example.go.jp/sanctions/list.html";
         assert_eq!(find_link(page, document, r"/list[0-9]{8}\.csv$").unwrap(), "https://www.example.go.jp/sanctions/list20261105.csv");
         assert!(find_link(page, r#"<a href="list.pdf">PDF</a>"#, r"/list[0-9]{8}\.csv$").is_err());

@@ -226,8 +226,9 @@ func (d *Downloader) DownloadFeed(ctx context.Context, source *ListSource, euTok
 }
 
 // FindLink is the file a page links, for a feed published under a dated name: of the page's links (href, entities
-// decoded, resolved against the page) on the page's own host and scheme, those whose address matches the pattern; the
-// last of them in byte order, so the newest date. A format error when none does: the import fails rather than guess.
+// decoded, resolved against the page) on the page's own host and scheme, those whose address matches the pattern; of
+// those, the one whose matched part (the dated name) is last in byte order, so the newest date wherever it's filed,
+// the whole address breaking a tie. A format error when none does: the import fails rather than guess.
 func FindLink(page, document, linkPattern string) (string, error) {
 	base, err := url.Parse(page)
 	if err != nil {
@@ -237,18 +238,20 @@ func FindLink(page, document, linkPattern string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	found := ""
+	found, foundKey := "", ""
 	for _, match := range hrefPattern.FindAllStringSubmatch(document, -1) {
 		reference, err := url.Parse(strings.TrimSpace(html.UnescapeString(match[1])))
 		if err != nil {
 			continue
 		}
 		target := base.ResolveReference(reference)
-		if target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) || !pattern.MatchString(target.String()) {
+		address := target.String()
+		key := pattern.FindString(address)
+		if target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) || !pattern.MatchString(address) {
 			continue
 		}
-		if address := target.String(); address > found {
-			found = address
+		if found == "" || key > foundKey || (key == foundKey && address > found) {
+			found, foundKey = address, key
 		}
 	}
 	if found == "" {

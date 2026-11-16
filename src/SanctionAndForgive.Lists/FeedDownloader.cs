@@ -62,24 +62,27 @@ public sealed partial class FeedDownloader(HttpClient httpClient, TimeSpan timeo
 
     /// <summary>The file a page links, for a feed published under a dated name: of the page's links (<c>href</c>,
     /// entities decoded, resolved against <paramref name="page"/>) on the page's own host and scheme, those whose
-    /// address matches <paramref name="linkPattern"/>; the last of them in ordinal order, so the newest date. A
+    /// address matches <paramref name="linkPattern"/>; of those, the one whose matched part (the dated name) is last in
+    /// ordinal order, so the newest date wherever it's filed, the whole address breaking a tie. A
     /// <see cref="ListFormatException"/> when none does: the page changed, and the import fails rather than guess.</summary>
     public static Uri FindLink(Uri page, string html, string linkPattern)
     {
         var pattern = new Regex(linkPattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
         Uri? found = null;
+        var foundKey = string.Empty;
         foreach (Match link in Href().Matches(html))
         {
             if (!Uri.TryCreate(page, WebUtility.HtmlDecode(link.Groups[1].Value.Trim()), out var target)
                 || target.Scheme != page.Scheme || !string.Equals(target.Host, page.Host, StringComparison.OrdinalIgnoreCase)
-                || !pattern.IsMatch(target.AbsoluteUri))
+                || pattern.Match(target.AbsoluteUri) is not { Success: true } match)
             {
                 continue;
             }
 
-            if (found is null || string.CompareOrdinal(target.AbsoluteUri, found.AbsoluteUri) > 0)
+            var order = found is null ? 1 : string.CompareOrdinal(match.Value, foundKey) is var byName and not 0 ? byName : string.CompareOrdinal(target.AbsoluteUri, found.AbsoluteUri);
+            if (order > 0)
             {
-                found = target;
+                (found, foundKey) = (target, match.Value);
             }
         }
 

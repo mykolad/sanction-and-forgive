@@ -45,7 +45,8 @@ func TestFrance_ReadsAWellFormedEntry(t *testing.T) {
 func TestFindLinkTakesTheNewestMatchingLinkOnThePagesOwnHost(t *testing.T) {
 	document := `<a href="./list20261001.csv">October</a> <a HREF='list20261105.csv'>November</a>
 		<a href="https://elsewhere.example/sanctions/list20991231.csv">a copy</a> <a href="./list20261201.xlsx">Excel</a>
-		<a href="/sanctions/list20261231.csv?download=1&amp;x=2">with a query</a> <a href = "./list20261104.csv">again</a>`
+		<a href="/sanctions/list20261231.csv?download=1&amp;x=2">with a query</a> <a href = "./list20261104.csv">again</a>
+		<a href="zarchive/list20261001.csv">filed elsewhere, older</a>`
 	link, err := FindLink("https://www.example.go.jp/sanctions/list.html", document, `/list[0-9]{8}\.csv$`)
 	if err != nil || link != "https://www.example.go.jp/sanctions/list20261105.csv" {
 		t.Fatalf("link = %q, err = %v", link, err)
