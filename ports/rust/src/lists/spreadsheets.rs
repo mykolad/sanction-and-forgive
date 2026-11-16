@@ -56,8 +56,12 @@ fn xml_error(e: impl std::fmt::Display) -> ParseError {
     format_error(format!("The spreadsheet's content.xml isn't valid XML: {e}"))
 }
 
-/// The text a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a row and the row a
-/// thousand times, so it's held to the same limit as a part.
+/// What a cell costs besides its text: about a string slot and its share of the row, so a sheet of empty cells
+/// repeated is counted too.
+const CELL_BYTES: usize = 32;
+
+/// What a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a row and the row a
+/// thousand times, so every cell slot and its text are held to the same limit as a part.
 struct Expansion(u64);
 
 impl Expansion {
@@ -92,7 +96,7 @@ pub fn ods_rows(input: &mut dyn BufRead) -> Result<Vec<Vec<String>>, ParseError>
                 let row = ods_row(&mut reader, &mut expanded)?;
                 if !row.is_empty() {
                     // A filled row repeated is rare; an empty one repeated to the sheet's end is common, and skipped.
-                    let size = row.iter().map(String::len).sum();
+                    let size = row.iter().map(|cell| cell.len() + CELL_BYTES).sum();
                     for i in 0..repeat.min(1000) {
                         if i > 0 {
                             expanded.add(size)?;
@@ -141,7 +145,7 @@ fn ods_row(reader: &mut NsReader<&[u8]>, expanded: &mut Expansion) -> Result<Vec
                     if cells.len() >= MAX_COLUMNS {
                         break;
                     }
-                    expanded.add(text.len())?;
+                    expanded.add(text.len() + CELL_BYTES)?;
                     cells.push(text.clone());
                 }
             }
@@ -411,6 +415,9 @@ pub fn xlsx_rows(input: &mut dyn BufRead, sheet_name: &str) -> Result<Vec<Vec<St
                 value.clear();
                 inline.clear();
                 if matches!(event, Event::Empty(_)) {
+                    if column < MAX_COLUMNS {
+                        expanded.add(CELL_BYTES * (column + 1).saturating_sub(cells.len()))?;
+                    }
                     place(&mut cells, column, String::new());
                 }
             }
@@ -441,7 +448,7 @@ pub fn xlsx_rows(input: &mut dyn BufRead, sheet_name: &str) -> Result<Vec<Vec<St
                         _ => value.clone(),
                     };
                     if column < MAX_COLUMNS {
-                        expanded.add(text.len())?;
+                        expanded.add(text.len() + CELL_BYTES * (column + 1).saturating_sub(cells.len()))?;
                     }
                     place(&mut cells, column, text);
                 }
@@ -669,6 +676,27 @@ mod tests {
             "x".repeat(16 * 1024)
         );
         assert!(workbook(&sheet, &shared).is_err());
+    }
+
+    #[test]
+    fn sparse_rows_repeated_past_the_limit_are_a_format_error() {
+        // A thousand rows of 255 empty cells and an "x", each repeated a thousand times: little text, a million rows.
+        let row = r#"<table:table-row table:number-rows-repeated="1000"><table:table-cell table:number-columns-repeated="255"/><table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>"#;
+        let content = format!(
+            "<office:document-content {NAMESPACES}><office:body><office:spreadsheet><table:table>{}</table:table></office:spreadsheet></office:body></office:document-content>",
+            row.repeat(1000)
+        );
+        assert!(ods(&content).is_err());
+    }
+
+    #[test]
+    fn sparse_rows_opening_cells_past_the_limit_are_a_format_error() {
+        // 40,000 rows of one cell in the 256th column: little XML, ten million cell slots.
+        let rows: String = (1..=40_000).map(|r| format!(r#"<row><c r="IV{r}" t="inlineStr"><is><t>x</t></is></c></row>"#)).collect();
+        let sheet = format!(
+            r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{rows}</sheetData></worksheet>"#
+        );
+        assert!(workbook(&sheet, r#"<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>"#).is_err());
     }
 
     #[test]

@@ -223,6 +223,9 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 				}
 				if column < maxColumns {
 					for len(cells) <= column {
+						if err := expanded.add(cellBytes); err != nil {
+							return false, err
+						}
 						cells = append(cells, "")
 					}
 					if err := expanded.add(len(text)); err != nil {

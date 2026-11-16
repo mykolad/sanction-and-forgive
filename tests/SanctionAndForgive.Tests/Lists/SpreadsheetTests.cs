@@ -149,6 +149,18 @@ public class SpreadsheetTests
     }
 
     [Fact]
+    public void Ods_WhoseSparseRowsRepeatPastTheLimit_IsAFormatError()
+    {
+        // A thousand rows of 255 empty cells and an "x", each repeated a thousand times: little text, a million rows.
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        var row = "<table:table-row table:number-rows-repeated=\"1000\"><table:table-cell table:number-columns-repeated=\"255\"/><table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>";
+        var content = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table>{string.Concat(Enumerable.Repeat(row, 1000))}</table:table></office:spreadsheet></office:body></office:document-content>";
+        using var file = Zip(("content.xml", content));
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.OdsRows(file, CancellationToken.None));
+    }
+
+    [Fact]
     public void Ods_ThatIsntAZip_OrHasNoContent_IsAFormatError()
     {
         using var notZip = new MemoryStream(Encoding.UTF8.GetBytes("Surname,First name"));
@@ -208,6 +220,22 @@ public class SpreadsheetTests
 
         sheet.Append("</sheetData></worksheet>");
         using var file = Workbook(sheet.ToString(), $"<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><si><t>{new string('x', 16 * 1024)}</t></si></sst>");
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(file, "Register", CancellationToken.None));
+    }
+
+    [Fact]
+    public void Xlsx_WhoseSparseRowsOpenCellsPastTheLimit_IsAFormatError()
+    {
+        // 40,000 rows of one cell in the 256th column: little XML, ten million cell slots.
+        var sheet = new StringBuilder("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+        for (var r = 1; r <= 40_000; r++)
+        {
+            sheet.Append(CultureInfo.InvariantCulture, $"<row><c r=\"IV{r}\" t=\"inlineStr\"><is><t>x</t></is></c></row>");
+        }
+
+        sheet.Append("</sheetData></worksheet>");
+        using var file = Workbook(sheet.ToString(), "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"/>");
 
         Assert.Throws<ListFormatException>(() => Spreadsheets.XlsxRows(file, "Register", CancellationToken.None));
     }
