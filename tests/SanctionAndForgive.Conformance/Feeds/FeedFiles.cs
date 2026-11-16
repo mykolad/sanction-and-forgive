@@ -15,7 +15,7 @@ public static class FeedFiles
     public static readonly IReadOnlyList<(string Code, int Count)> Feeds =
     [
         ("eu", 160), ("ofac-sdn", 200), ("ofac-cons", 60), ("un", 80), ("uk", 140), ("us-export", 120),
-        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100),
+        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40),
     ];
 
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
@@ -27,7 +27,7 @@ public static class FeedFiles
         Fixtures.For(code, Feeds.Single(feed => feed.Code == code).Count);
 
     /// <summary>The file name for a feed (its extension says the format).</summary>
-    public static string FileName(string code, string variant) => $"{code}.{variant}.{(code is "us-export" or "fr-tresor" ? "json" : "xml")}";
+    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", _ => "xml" }}";
 
     /// <summary>Writes <paramref name="subjects"/> as <paramref name="code"/>'s feed to <paramref name="path"/>.</summary>
     public static void Write(string code, IReadOnlyList<FixtureSubject> subjects, string path)
@@ -39,6 +39,9 @@ public static class FeedFiles
                 return;
             case "fr-tresor":
                 File.WriteAllText(path, France(subjects), new UTF8Encoding(false));
+                return;
+            case "nl-terrorism":
+                Netherlands(subjects, path);
                 return;
             default:
                 var document = code switch
@@ -430,6 +433,51 @@ public static class FeedFiles
         }
 
         return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>The Dutch terrorism list (an OpenDocument spreadsheet): a title row, the header, a row per listing
+    /// (organisations without a first name, "n/a: established in" a place), the notification as the id, one surname
+    /// written "Name, van", and the empty cells and rows repeated to the sheet's end, as the real file has them.</summary>
+    private static void Netherlands(IReadOnlyList<FixtureSubject> subjects, string path)
+    {
+        var rows = new List<string[]>
+        {
+            new[] { "Persons and entities whose assets have been frozen (fictional, conformance)" },
+            new[] { "Surname", "First name(s)", "Alias", "Date of Birth(DD-MM-JJJJ)", "Place of Birth", "Date of ministerial decision (DD/MM/JJJJ)", "Link official notification" },
+        };
+        foreach (var subject in subjects)
+        {
+            var city = subject.Address?.City ?? "Utrecht";
+            var surname = subject.Person && subject.Number % 7 == 0 ? $"{subject.Family}, van" : subject.Family;
+            rows.Add(
+            [
+                surname, subject.Person ? subject.Given! : string.Empty, subject.Aliases.Count > 0 ? subject.Aliases[0] : string.Empty,
+                subject.Person ? $"{1 + (subject.Number % 28)}-{1 + (subject.Number % 12)}-{1960 + (subject.Number % 40)}" : string.Empty,
+                subject.Person ? city : $"n/a: established in {city}",
+                Fixtures.Date(subject.ListedOn, "d-M-yyyy"), $"Stcrt {subject.ListedOn.Year}, {7000 + subject.Number}",
+            ]);
+        }
+
+        var content = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?><office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"><office:body><office:spreadsheet><table:table table:name=\"Sheet1\">");
+        foreach (var row in rows)
+        {
+            content.Append("<table:table-row>");
+            foreach (var cell in row)
+            {
+                content.Append(cell.Length == 0 ? "<table:table-cell/>" : $"<table:table-cell office:value-type=\"string\"><text:p>{System.Security.SecurityElement.Escape(cell)}</text:p></table:table-cell>");
+            }
+
+            content.Append("<table:table-cell table:number-columns-repeated=\"1017\"/></table:table-row>");
+        }
+
+        content.Append("<table:table-row table:number-rows-repeated=\"1048000\"><table:table-cell table:number-columns-repeated=\"1024\"/></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>");
+        using var file = File.Create(path);
+        using var zip = new System.IO.Compression.ZipArchive(file, System.IO.Compression.ZipArchiveMode.Create);
+        foreach (var (name, text) in new[] { ("mimetype", "application/vnd.oasis.opendocument.spreadsheet"), ("content.xml", content.ToString()) })
+        {
+            using var entry = zip.CreateEntry(name).Open();
+            entry.Write(Encoding.UTF8.GetBytes(text));
+        }
     }
 
     private static void Field(Utf8JsonWriter json, string type, IEnumerable<(string Name, string Value)[]> values)

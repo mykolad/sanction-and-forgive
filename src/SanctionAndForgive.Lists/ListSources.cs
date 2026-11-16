@@ -104,6 +104,11 @@ public static class ListSources
             Homepage = "https://gels-avoirs.dgtresor.gouv.fr/",
             TermsUrl = "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
         },
+        new("nl-terrorism", "Netherlands national terrorism list", "https://www.government.nl/site/binaries/site-content/collections/documents/2016/01/15/national-terrorism-list/eng-terrorismelijst.ods", DailyMaxAge, FeedStatus.Active, () => new NetherlandsParser())
+        {
+            Homepage = "https://www.government.nl/documents/2016/01/15/national-terrorism-list",
+            TermsUrl = "https://www.government.nl/copyright",
+        },
         new("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", DailyMaxAge, FeedStatus.Active, () => new SfmsParser())
         {
             Homepage = "https://fiu.gov.ua/",

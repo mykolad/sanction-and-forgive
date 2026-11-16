@@ -4,3 +4,4 @@ pub mod catalogue;
 pub mod manual;
 pub mod parse;
 pub mod parsers;
+pub mod spreadsheets;
