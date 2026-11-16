@@ -152,6 +152,7 @@ public sealed class BrowseTests : IDisposable
         Assert.Contains("Open Government Licence v3.0", page, StringComparison.Ordinal);
         Assert.Contains("not endorsed or certified by the International Trade Administration", page, StringComparison.Ordinal);
         Assert.Contains("Licence Ouverte 2.0", page, StringComparison.Ordinal);
+        Assert.Contains("Russia Sanctions Register, Ministry of Foreign Affairs and Trade", page, StringComparison.Ordinal);
         Assert.Contains("href=\"/lists\" aria-current=\"page\"", page, StringComparison.Ordinal);
         Assert.Contains("href=\"/lists\"", home, StringComparison.Ordinal);
     }
