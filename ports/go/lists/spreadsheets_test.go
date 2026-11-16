@@ -139,3 +139,13 @@ func TestXlsxRowsWhoseSparseRowsOpenCellsPastTheLimitIsAFormatError(t *testing.T
 		t.Fatalf("err = %v, want a format error", err)
 	}
 }
+
+func TestOdsRowsWhoseCellIsLongerThanTheLimitIsAFormatErrorAsItsRead(t *testing.T) {
+	// 20,000 runs of a hundred spaces: 500 kB of XML for 2 million characters in one cell.
+	content := `<office:document-content ` + odsNamespaces + `><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>a` +
+		strings.Repeat(`<text:s text:c="100"/>`, 20000) + `b</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>`
+	var formatErr *FormatError
+	if _, err := OdsRows(zipOf(t, "content.xml", content)); !errors.As(err, &formatErr) {
+		t.Fatalf("err = %v, want a format error", err)
+	}
+}
