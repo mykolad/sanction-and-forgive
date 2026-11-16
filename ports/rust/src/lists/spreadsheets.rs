@@ -1,6 +1,7 @@
 //! Spreadsheets in the reference: rows of an OpenDocument (.ods) spreadsheet, read from its zip and XML. A row is its
-//! cells' text, trailing empty cells dropped; empty rows are skipped. A file that isn't the format, or whose part
-//! unpacks to more than MAX_PART_BYTES, is a format error. And the Dutch terrorism list, published as one.
+//! cells' text, trailing empty cells dropped; empty rows are skipped. A file that isn't the format, whose part unpacks
+//! to more than MAX_PART_BYTES, whose rows expand (repeated cells and rows) to more text than that, or whose XML is cut
+//! short or broken anywhere, is a format error. And the Dutch terrorism list, published as one.
 
 use std::collections::HashSet;
 use std::io::{BufRead, Cursor, Read};
@@ -55,7 +56,22 @@ fn xml_error(e: impl std::fmt::Display) -> ParseError {
     format_error(format!("The spreadsheet's content.xml isn't valid XML: {e}"))
 }
 
-/// The rows of an OpenDocument spreadsheet's first table.
+/// The text a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a row and the row a
+/// thousand times, so it's held to the same limit as a part.
+struct Expansion(u64);
+
+impl Expansion {
+    fn add(&mut self, bytes: usize) -> Result<(), ParseError> {
+        self.0 += bytes as u64;
+        if self.0 > MAX_PART_BYTES {
+            return Err(format_error(format!("The spreadsheet's rows expand to more than {MAX_PART_BYTES} bytes.")));
+        }
+        Ok(())
+    }
+}
+
+/// The rows of an OpenDocument spreadsheet's first table. The whole document is read, so one cut short or broken
+/// after that table is refused too.
 pub fn ods_rows(input: &mut dyn BufRead) -> Result<Vec<Vec<String>>, ParseError> {
     let mut data = Vec::new();
     input.read_to_end(&mut data)?;
@@ -63,26 +79,44 @@ pub fn ods_rows(input: &mut dyn BufRead) -> Result<Vec<Vec<String>>, ParseError>
     let mut reader = NsReader::from_reader(content.as_slice());
     reader.config_mut().trim_text(false);
     let mut rows = Vec::new();
-    let mut in_table = false;
+    let mut expanded = Expansion(0);
+    let (mut in_table, mut done, mut depth) = (false, false, 0usize);
     loop {
         let (resolved, event) = reader.read_resolved_event().map_err(xml_error)?;
         match event {
-            Event::Eof => break,
-            Event::Start(e) | Event::Empty(e) if is(&resolved, ODS_TABLE) && e.local_name().as_ref() == b"table" => {
-                if in_table {
-                    break;
-                }
-                in_table = true;
-            }
-            Event::End(e) if in_table && is(&resolved, ODS_TABLE) && e.local_name().as_ref() == b"table" => break,
-            Event::Start(e) if in_table && is(&resolved, ODS_TABLE) && e.local_name().as_ref() == b"table-row" => {
+            Event::Eof if depth == 0 => break,
+            Event::Eof => return Err(format_error("The spreadsheet's content.xml ends before its elements close.")),
+            Event::Start(e) if !done && in_table && is(&resolved, ODS_TABLE) && e.local_name().as_ref() == b"table-row" => {
+                // The row is read to its end here, so the depth doesn't change.
                 let repeat = count(&reader, &e, ODS_TABLE, b"number-rows-repeated");
-                let row = ods_row(&mut reader)?;
+                let row = ods_row(&mut reader, &mut expanded)?;
                 if !row.is_empty() {
                     // A filled row repeated is rare; an empty one repeated to the sheet's end is common, and skipped.
-                    for _ in 0..repeat.min(1000) {
+                    let size = row.iter().map(String::len).sum();
+                    for i in 0..repeat.min(1000) {
+                        if i > 0 {
+                            expanded.add(size)?;
+                        }
                         rows.push(row.clone());
                     }
+                }
+            }
+            Event::Start(e) => {
+                depth += 1;
+                if !done && is(&resolved, ODS_TABLE) && e.local_name().as_ref() == b"table" {
+                    done = in_table;
+                    in_table = true;
+                }
+            }
+            Event::Empty(e) if !done && is(&resolved, ODS_TABLE) && e.local_name().as_ref() == b"table" => {
+                done = in_table;
+                in_table = true;
+            }
+            Event::End(e) => {
+                depth =
+                    depth.checked_sub(1).ok_or_else(|| format_error("The spreadsheet's content.xml closes an element it never opened."))?;
+                if !done && in_table && is(&resolved, ODS_TABLE) && e.local_name().as_ref() == b"table" {
+                    done = true;
                 }
             }
             _ => {}
@@ -94,7 +128,7 @@ pub fn ods_rows(input: &mut dyn BufRead) -> Result<Vec<Vec<String>>, ParseError>
     Ok(rows)
 }
 
-fn ods_row(reader: &mut NsReader<&[u8]>) -> Result<Vec<String>, ParseError> {
+fn ods_row(reader: &mut NsReader<&[u8]>, expanded: &mut Expansion) -> Result<Vec<String>, ParseError> {
     let mut cells: Vec<String> = Vec::new();
     loop {
         let (resolved, event) = reader.read_resolved_event().map_err(xml_error)?;
@@ -107,6 +141,7 @@ fn ods_row(reader: &mut NsReader<&[u8]>) -> Result<Vec<String>, ParseError> {
                     if cells.len() >= MAX_COLUMNS {
                         break;
                     }
+                    expanded.add(text.len())?;
                     cells.push(text.clone());
                 }
             }
@@ -129,7 +164,8 @@ fn ods_row(reader: &mut NsReader<&[u8]>) -> Result<Vec<String>, ParseError> {
     }
 }
 
-/// A cell's paragraphs, one a line; text:s is spaces, text:line-break and text:tab are what they say.
+/// A cell's paragraphs, one a line; text:s is spaces, text:line-break and text:tab are what they say, whether written
+/// self-closed or not.
 fn ods_cell_text(reader: &mut NsReader<&[u8]>) -> Result<String, ParseError> {
     let (mut paragraphs, mut current, mut in_paragraph, mut depth) = (Vec::new(), String::new(), false, 0usize);
     loop {
@@ -138,9 +174,17 @@ fn ods_cell_text(reader: &mut NsReader<&[u8]>) -> Result<String, ParseError> {
             Event::Eof => return Err(format_error("The spreadsheet's content.xml ends inside a cell.")),
             Event::Start(e) => {
                 depth += 1;
-                if is(&resolved, ODS_TEXT) && matches!(e.local_name().as_ref(), b"p" | b"h") {
-                    in_paragraph = true;
-                    current.clear();
+                if is(&resolved, ODS_TEXT) {
+                    match e.local_name().as_ref() {
+                        b"p" | b"h" => {
+                            in_paragraph = true;
+                            current.clear();
+                        }
+                        b"s" if in_paragraph => current.push_str(&" ".repeat(count(reader, &e, ODS_TEXT, b"c").min(100))),
+                        b"line-break" if in_paragraph => current.push('\n'),
+                        b"tab" if in_paragraph => current.push('\t'),
+                        _ => {}
+                    }
                 }
             }
             Event::Empty(e) if is(&resolved, ODS_TEXT) => match e.local_name().as_ref() {
@@ -245,7 +289,58 @@ fn dutch_surname(family: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{dutch_surname, parse_date};
+    use std::io::Write;
+
+    use super::{dutch_surname, ods_rows, parse_date};
+
+    const NAMESPACES: &str = r#"xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0""#;
+
+    fn ods(content: &str) -> Result<Vec<Vec<String>>, super::ParseError> {
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            zip.start_file("content.xml", zip::write::SimpleFileOptions::default()).unwrap();
+            zip.write_all(content.as_bytes()).unwrap();
+            zip.finish().unwrap();
+        }
+        ods_rows(&mut std::io::Cursor::new(buffer.into_inner()))
+    }
+
+    #[test]
+    fn the_first_table_is_read_with_its_separators_self_closed_or_not() {
+        let content = format!(
+            "<office:document-content {NAMESPACES}><office:body><office:spreadsheet><table:table><table:table-row>\
+             <table:table-cell><text:p>Pieter<text:s/>Willem<text:s></text:s>Jansen</text:p></table:table-cell>\
+             <table:table-cell table:number-columns-repeated=\"2\"/><table:table-cell><text:p>c</text:p></table:table-cell></table:table-row>\
+             </table:table><table:table><table:table-row><table:table-cell><text:p>second</text:p></table:table-cell></table:table-row></table:table>\
+             </office:spreadsheet></office:body></office:document-content>"
+        );
+        assert_eq!(ods(&content).unwrap(), vec![vec!["Pieter Willem Jansen", "", "", "c"]]);
+    }
+
+    #[test]
+    fn a_document_cut_short_or_broken_after_its_first_table_is_a_format_error() {
+        let start = format!(
+            "<office:document-content {NAMESPACES}><office:body><office:spreadsheet><table:table><table:table-row>\
+             <table:table-cell><text:p>a</text:p></table:table-cell></table:table-row>"
+        );
+        for content in [start.clone(), format!("{start}</table:table>"), format!("{start}</table:table><table:table></office:spreadsheet>")]
+        {
+            assert!(ods(&content).is_err(), "{content}");
+        }
+    }
+
+    #[test]
+    fn repeats_that_expand_past_the_limit_are_a_format_error() {
+        // A cell of 16 KiB repeated across 256 columns, the row a thousand times: about 4 GiB from a few kilobytes.
+        let content = format!(
+            "<office:document-content {NAMESPACES}><office:body><office:spreadsheet><table:table>\
+             <table:table-row table:number-rows-repeated=\"1000\"><table:table-cell table:number-columns-repeated=\"256\"><text:p>{}</text:p>\
+             </table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>",
+            "x".repeat(16 * 1024)
+        );
+        assert!(ods(&content).is_err());
+    }
 
     #[test]
     fn a_dutch_surname_with_its_particle_after_a_comma_puts_it_first() {

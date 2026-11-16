@@ -57,6 +57,42 @@ public class SpreadsheetTests
     }
 
     [Fact]
+    public void Ods_SpacesTabsAndLineBreaks_ReadAlike_SelfClosedOrNot()
+    {
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        const string content = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>Pieter<text:s/>Willem<text:s></text:s>Jansen<text:tab></text:tab>x<text:line-break></text:line-break>y</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>";
+        using var file = Zip(("content.xml", content));
+
+        Assert.Equal("Pieter Willem Jansen\tx\ny", Assert.Single(Spreadsheets.OdsRows(file, CancellationToken.None))[0]);
+    }
+
+    [Fact]
+    public void Ods_CutShortOrBroken_AfterItsFirstTable_IsAFormatError()
+    {
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        const string start = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>a</text:p></table:table-cell></table:table-row>";
+
+        // Cut short after a complete row, inside the first table; after it; and broken after it.
+        foreach (var content in (string[])[start, start + "</table:table>", start + "</table:table><table:table></office:spreadsheet>"])
+        {
+            using var file = Zip(("content.xml", content));
+            Assert.Throws<ListFormatException>(() => Spreadsheets.OdsRows(file, CancellationToken.None));
+        }
+    }
+
+    [Fact]
+    public void Ods_WhoseRepeatsExpandPastTheLimit_IsAFormatError()
+    {
+        // A cell of 16 KiB repeated across 256 columns, the row a thousand times: about 4 GiB from a few kilobytes.
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        var cell = new string('x', 16 * 1024);
+        var content = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table><table:table-row table:number-rows-repeated=\"1000\"><table:table-cell table:number-columns-repeated=\"256\"><text:p>{cell}</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>";
+        using var file = Zip(("content.xml", content));
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.OdsRows(file, CancellationToken.None));
+    }
+
+    [Fact]
     public void Ods_ThatIsntAZip_OrHasNoContent_IsAFormatError()
     {
         using var notZip = new MemoryStream(Encoding.UTF8.GetBytes("Surname,First name"));
