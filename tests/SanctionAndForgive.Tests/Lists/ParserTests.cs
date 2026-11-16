@@ -268,6 +268,11 @@ public class ParserTests
     [InlineData("""{"Publications": {"PublicationDetail": [{"Nature": "Personne morale", "Nom": "A"}]}}""")]
     [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}, 7]}}""")]
     [InlineData("""{"Publications": {}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": {"TypeChamp": "ALIAS"}}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": {"Alias": "B"}}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"Valeur": [{"Alias": "B"}]}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": ["B"]}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": ["ALIAS"]}]}}""")]
     public void France_RejectsMalformedDocuments(string json)
     {
         Assert.Throws<ListFormatException>(() => Parse(new FranceParser(), json));

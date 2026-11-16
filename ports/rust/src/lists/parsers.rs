@@ -590,18 +590,28 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
             _ => SubjectType::Unknown,
         };
 
-        let fields: Vec<&Value> = record
-            .get("RegistreDetail")
-            .and_then(Value::as_array)
-            .map(|f| f.iter().filter(|f| f.is_object()).collect())
-            .unwrap_or_default();
+        // A field that isn't the shape expected is a format error, never skipped: an update must not lose aliases or
+        // addresses while its record count stays the same.
+        let mut fields: Vec<(&str, &Vec<Value>)> = Vec::new();
+        match record.get("RegistreDetail") {
+            None | Some(Value::Null) => {}
+            Some(Value::Array(detail)) => {
+                for field in detail {
+                    let kind = field.get("TypeChamp").and_then(Value::as_str);
+                    let values = field.get("Valeur").and_then(Value::as_array);
+                    let (Some(kind), Some(values)) = (kind, values) else {
+                        return Err(format_error(format!("Register entry {id}: a field isn't {{\"TypeChamp\": …, \"Valeur\": [...]}}.")));
+                    };
+                    if values.iter().any(|v| !v.is_object()) {
+                        return Err(format_error(format!("Register entry {id}: a {kind} value isn't an object.")));
+                    }
+                    fields.push((kind, values));
+                }
+            }
+            Some(_) => return Err(format_error(format!("Register entry {id}: RegistreDetail isn't a list."))),
+        }
         let values = |field_type: &str| -> Vec<&Value> {
-            fields
-                .iter()
-                .filter(|f| f.get("TypeChamp").and_then(Value::as_str) == Some(field_type))
-                .filter_map(|f| f.get("Valeur").and_then(Value::as_array))
-                .flat_map(|v| v.iter().filter(|v| v.is_object()))
-                .collect()
+            fields.iter().filter(|(kind, _)| *kind == field_type).flat_map(|(_, values)| values.iter()).collect()
         };
 
         let mut b = Builder::new(&id, kind);
@@ -626,4 +636,41 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
         out.extend(b.build());
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_france;
+
+    /// The French register's malformed documents are format errors, never a shorter list (FranceParser's tests in the
+    /// reference): a field or value that isn't the shape expected, as well as a broken document.
+    #[test]
+    fn france_rejects_malformed_documents() {
+        for document in [
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}]}"#,
+            r#"{"Publications": {"PublicationDetail": [{"Nature": "Personne morale", "Nom": "A"}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}, 7]}}"#,
+            r#"{"Publications": {}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": {"TypeChamp": "ALIAS"}}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": {"Alias": "B"}}]}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"Valeur": [{"Alias": "B"}]}]}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": ["B"]}]}]}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": ["ALIAS"]}]}}"#,
+        ] {
+            let error = parse_france(&mut document.as_bytes()).expect_err(document);
+            assert!(error.downcast_ref::<super::super::parse::FormatError>().is_some(), "{document}: {error}");
+        }
+    }
+
+    #[test]
+    fn france_reads_a_well_formed_entry() {
+        let subjects = parse_france(
+            &mut r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 101, "Nature": "Personne physique", "Nom": "SOKOLOV",
+            "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}]}, {"TypeChamp": "ALIAS", "Valeur": [{"Alias": "Vanya", "Commentaire": "alias faible"}]}]}]}}"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((subjects.len(), subjects[0].primary_name.as_str(), subjects[0].names.len()), (1, "Ivan SOKOLOV", 2));
+        assert!(subjects[0].names[1].is_weak);
+    }
 }

@@ -703,16 +703,16 @@ var _ = time.Time{}
 // franceRecordURL is a register entry's page: its official record.
 const franceRecordURL = "https://gels-avoirs.dgtresor.gouv.fr/Gels/RegistreDetail?idRegistre="
 
-type franceField struct {
-	TypeChamp *string           `json:"TypeChamp"`
-	Valeur    []json.RawMessage `json:"Valeur"`
+type franceRecord struct {
+	IDRegistre     json.RawMessage `json:"IdRegistre"`
+	Nature         *string         `json:"Nature"`
+	Nom            *string         `json:"Nom"`
+	RegistreDetail json.RawMessage `json:"RegistreDetail"`
 }
 
-type franceRecord struct {
-	IDRegistre     json.RawMessage   `json:"IdRegistre"`
-	Nature         *string           `json:"Nature"`
-	Nom            *string           `json:"Nom"`
-	RegistreDetail []json.RawMessage `json:"RegistreDetail"`
+type franceField struct {
+	kind   string
+	values []map[string]json.RawMessage
 }
 
 // parseFrance reads France's national asset-freeze register (DG Trésor, JSON): FranceParser in the reference.
@@ -767,24 +767,46 @@ func parseFrance(reader io.Reader) ([]ParsedSubject, error) {
 			continue
 		}
 
+		// A field that isn't the shape expected is a format error, never skipped: an update must not lose aliases or
+		// addresses while its record count stays the same.
 		var fields []franceField
-		for _, rawField := range record.RegistreDetail {
-			var field franceField
-			if isJSON(rawField, '{') && json.Unmarshal(rawField, &field) == nil {
-				fields = append(fields, field)
+		if detail := bytes.TrimSpace(record.RegistreDetail); len(detail) > 0 && !bytes.Equal(detail, []byte("null")) {
+			var rawFields []json.RawMessage
+			if !isJSON(detail, '[') || json.Unmarshal(detail, &rawFields) != nil {
+				return nil, formatError("Register entry %s: RegistreDetail isn't a list.", *id)
+			}
+			for _, rawField := range rawFields {
+				var field map[string]json.RawMessage
+				var kind string
+				var rawValues []json.RawMessage
+				bad := !isJSON(rawField, '{') || json.Unmarshal(rawField, &field) != nil
+				if !bad {
+					raw, ok := field["TypeChamp"]
+					bad = !ok || !isJSON(raw, '"') || json.Unmarshal(raw, &kind) != nil
+				}
+				if !bad {
+					raw, ok := field["Valeur"]
+					bad = !ok || !isJSON(raw, '[') || json.Unmarshal(raw, &rawValues) != nil
+				}
+				if bad {
+					return nil, formatError(`Register entry %s: a field isn't {"TypeChamp": …, "Valeur": [...]}.`, *id)
+				}
+				parsed := franceField{kind: kind}
+				for _, rawValue := range rawValues {
+					var value map[string]json.RawMessage
+					if !isJSON(rawValue, '{') || json.Unmarshal(rawValue, &value) != nil {
+						return nil, formatError("Register entry %s: a %s value isn't an object.", *id, kind)
+					}
+					parsed.values = append(parsed.values, value)
+				}
+				fields = append(fields, parsed)
 			}
 		}
 		values := func(fieldType string) []map[string]json.RawMessage {
 			var found []map[string]json.RawMessage
 			for _, field := range fields {
-				if !eq(field.TypeChamp, fieldType) {
-					continue
-				}
-				for _, rawValue := range field.Valeur {
-					var value map[string]json.RawMessage
-					if isJSON(rawValue, '{') && json.Unmarshal(rawValue, &value) == nil {
-						found = append(found, value)
-					}
+				if field.kind == fieldType {
+					found = append(found, field.values...)
 				}
 			}
 			return found

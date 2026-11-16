@@ -86,13 +86,35 @@ public sealed class FranceParser : IListParser
             return null;
         }
 
-        var fields = record.TryGetProperty("RegistreDetail", out var detail) && detail.ValueKind == JsonValueKind.Array
-            ? detail.EnumerateArray().Where(field => field.ValueKind == JsonValueKind.Object).ToList()
-            : [];
-        IEnumerable<JsonElement> Values(string fieldType) => fields
-            .Where(field => String(field, "TypeChamp") == fieldType && field.TryGetProperty("Valeur", out var values) && values.ValueKind == JsonValueKind.Array)
-            .SelectMany(field => field.GetProperty("Valeur").EnumerateArray())
-            .Where(value => value.ValueKind == JsonValueKind.Object);
+        // A field that isn't the shape expected is a format error, never skipped: an update must not lose aliases or
+        // addresses while its record count stays the same.
+        var fields = new List<(string Type, List<JsonElement> Values)>();
+        if (record.TryGetProperty("RegistreDetail", out var detail) && detail.ValueKind != JsonValueKind.Null)
+        {
+            if (detail.ValueKind != JsonValueKind.Array)
+            {
+                throw new ListFormatException($"Register entry {id}: RegistreDetail isn't a list.");
+            }
+
+            foreach (var field in detail.EnumerateArray())
+            {
+                if (field.ValueKind != JsonValueKind.Object || String(field, "TypeChamp") is not { } fieldType
+                    || !field.TryGetProperty("Valeur", out var values) || values.ValueKind != JsonValueKind.Array)
+                {
+                    throw new ListFormatException($"Register entry {id}: a field isn't {{\"TypeChamp\": …, \"Valeur\": [...]}}.");
+                }
+
+                var items = values.EnumerateArray().ToList();
+                if (items.Any(value => value.ValueKind != JsonValueKind.Object))
+                {
+                    throw new ListFormatException($"Register entry {id}: a {fieldType} value isn't an object.");
+                }
+
+                fields.Add((fieldType, items));
+            }
+        }
+
+        IEnumerable<JsonElement> Values(string fieldType) => fields.Where(field => field.Type == fieldType).SelectMany(field => field.Values);
 
         var builder = new SubjectBuilder(id, type.Value)
         {
