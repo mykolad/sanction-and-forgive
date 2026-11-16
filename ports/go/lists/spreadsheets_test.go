@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -110,6 +111,31 @@ func TestXlsxRowsWhoseSharedStringIsUsedPastTheLimitIsAFormatError(t *testing.T)
 	shared := `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>` + strings.Repeat("x", 16*1024) + `</t></si></sst>`
 	var formatErr *FormatError
 	if _, err := XlsxRows(workbookOf(t, sheet.String(), shared), "Register"); !errors.As(err, &formatErr) {
+		t.Fatalf("err = %v, want a format error", err)
+	}
+}
+
+func TestOdsRowsWhoseSparseRowsRepeatPastTheLimitIsAFormatError(t *testing.T) {
+	// A thousand rows of 255 empty cells and an "x", each repeated a thousand times: little text, a million rows.
+	row := `<table:table-row table:number-rows-repeated="1000"><table:table-cell table:number-columns-repeated="255"/><table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>`
+	content := `<office:document-content ` + odsNamespaces + `><office:body><office:spreadsheet><table:table>` + strings.Repeat(row, 1000) +
+		`</table:table></office:spreadsheet></office:body></office:document-content>`
+	var formatErr *FormatError
+	if _, err := OdsRows(zipOf(t, "content.xml", content)); !errors.As(err, &formatErr) {
+		t.Fatalf("err = %v, want a format error", err)
+	}
+}
+
+func TestXlsxRowsWhoseSparseRowsOpenCellsPastTheLimitIsAFormatError(t *testing.T) {
+	// 40,000 rows of one cell in the 256th column: little XML, ten million cell slots.
+	var sheet strings.Builder
+	sheet.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`)
+	for r := 1; r <= 40000; r++ {
+		fmt.Fprintf(&sheet, `<row><c r="IV%d" t="inlineStr"><is><t>x</t></is></c></row>`, r)
+	}
+	sheet.WriteString(`</sheetData></worksheet>`)
+	var formatErr *FormatError
+	if _, err := XlsxRows(workbookOf(t, sheet.String(), `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>`), "Register"); !errors.As(err, &formatErr) {
 		t.Fatalf("err = %v, want a format error", err)
 	}
 }

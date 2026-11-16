@@ -72,8 +72,12 @@ func repeatCount(attrs []xml.Attr, local string) int {
 	return 1
 }
 
-// expansion counts the text a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a
-// row and the row a thousand times, so it's held to the same limit as a part.
+// cellBytes is what a cell costs besides its text: about a string slot and its share of the row, so a sheet of empty
+// cells repeated is counted too.
+const cellBytes = 32
+
+// expansion counts what a sheet expands to, repeats included: a few bytes of XML can repeat a long cell across a row
+// and the row a thousand times, so every cell slot and its text are held to the same limit as a part.
 type expansion struct{ total int64 }
 
 func (e *expansion) add(n int) error {
@@ -131,7 +135,7 @@ func OdsRows(reader io.Reader) ([][]string, error) {
 					// A filled row repeated is rare; an empty one repeated to the sheet's end is common, and skipped.
 					size := 0
 					for _, cell := range row {
-						size += len(cell)
+						size += len(cell) + cellBytes
 					}
 					for i := 0; i < min(repeat, 1000); i++ {
 						if i > 0 {
@@ -171,7 +175,7 @@ func odsRow(decoder *xml.Decoder, expanded *expansion) ([]string, error) {
 					return nil, err
 				}
 				for i := 0; i < repeat && len(cells) < maxColumns; i++ {
-					if err := expanded.add(len(text)); err != nil {
+					if err := expanded.add(len(text) + cellBytes); err != nil {
 						return nil, err
 					}
 					cells = append(cells, text)
