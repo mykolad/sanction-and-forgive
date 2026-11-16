@@ -64,14 +64,24 @@ func TestOdsRowsWhoseRepeatsExpandPastTheLimitIsAFormatError(t *testing.T) {
 	}
 }
 
+const (
+	workbookXML      = `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Register" sheetId="1" r:id="rId1"/></sheets></workbook>`
+	relationshipsXML = `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`
+	mainNamespace    = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+)
+
 // workbookOf is a workbook of one sheet, "Register", written as given, with these shared strings.
 func workbookOf(t *testing.T, sheet, sharedStrings string) *bytes.Reader {
+	return workbookParts(t, workbookXML, relationshipsXML, sheet, sharedStrings)
+}
+
+func workbookParts(t *testing.T, workbook, relationships, sheet, sharedStrings string) *bytes.Reader {
 	t.Helper()
 	var buffer bytes.Buffer
 	archive := zip.NewWriter(&buffer)
 	for _, part := range [][2]string{
-		{"xl/workbook.xml", `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Register" sheetId="1" r:id="rId1"/></sheets></workbook>`},
-		{"xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`},
+		{"xl/workbook.xml", workbook},
+		{"xl/_rels/workbook.xml.rels", relationships},
 		{"xl/sharedStrings.xml", sharedStrings},
 		{"xl/worksheets/sheet1.xml", sheet},
 	} {
@@ -87,6 +97,39 @@ func workbookOf(t *testing.T, sheet, sharedStrings string) *bytes.Reader {
 		t.Fatal(err)
 	}
 	return bytes.NewReader(buffer.Bytes())
+}
+
+func TestXlsxRowsWhoseWorkbookOrRelationshipsAreCutShortAfterWhatsLookedForIsAFormatError(t *testing.T) {
+	sheet := `<worksheet xmlns="` + mainNamespace + `"><sheetData/></worksheet>`
+	shared := `<sst xmlns="` + mainNamespace + `"/>`
+	workbook := workbookXML[:strings.Index(workbookXML, "</sheets>")]
+	relationships := relationshipsXML[:strings.Index(relationshipsXML, "</Relationships>")]
+	for _, parts := range [][2]string{{workbook, relationshipsXML}, {workbookXML, relationships}} {
+		var formatErr *FormatError
+		if _, err := XlsxRows(workbookParts(t, parts[0], parts[1], sheet, shared), "Register"); !errors.As(err, &formatErr) {
+			t.Fatalf("%q: err = %v, want a format error", parts, err)
+		}
+	}
+}
+
+func TestXlsxRowsWhoseSharedOrInlineStringIsLongerThanTheLimitIsAFormatError(t *testing.T) {
+	text := strings.Repeat("x", maxCellText+1)
+	sheet := `<worksheet xmlns="` + mainNamespace + `"><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>`
+	inline := `<worksheet xmlns="` + mainNamespace + `"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>` + text + `</t></is></c></row></sheetData></worksheet>`
+	for _, parts := range [][2]string{{sheet, `<sst xmlns="` + mainNamespace + `"><si><t>` + text + `</t></si></sst>`}, {inline, `<sst xmlns="` + mainNamespace + `"/>`}} {
+		var formatErr *FormatError
+		if _, err := XlsxRows(workbookOf(t, parts[0], parts[1]), "Register"); !errors.As(err, &formatErr) {
+			t.Fatalf("err = %v, want a format error", err)
+		}
+	}
+}
+
+func TestXlsxRowsReadsCdataInValuesAndInlineStrings(t *testing.T) {
+	sheet := `<worksheet xmlns="` + mainNamespace + `"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t><![CDATA[Northwind Trading]]></t></is></c><c r="B1"><v><![CDATA[44638]]></v></c></row></sheetData></worksheet>`
+	rows, err := XlsxRows(workbookOf(t, sheet, `<sst xmlns="`+mainNamespace+`"/>`), "Register")
+	if err != nil || len(rows) != 1 || strings.Join(rows[0], "|") != "Northwind Trading|44638" {
+		t.Fatalf("rows = %q, err = %v", rows, err)
+	}
 }
 
 func TestXlsxRowsWhoseSheetOrSharedStringsAreCutShortIsAFormatError(t *testing.T) {
@@ -147,5 +190,17 @@ func TestOdsRowsWhoseCellIsLongerThanTheLimitIsAFormatErrorAsItsRead(t *testing.
 	var formatErr *FormatError
 	if _, err := OdsRows(zipOf(t, "content.xml", content)); !errors.As(err, &formatErr) {
 		t.Fatalf("err = %v, want a format error", err)
+	}
+}
+
+func TestExcelDateIsNilForWhatIsntADate(t *testing.T) {
+	for _, value := range []string{"NaN", "nan", "Inf", "-1", "0", "2958466", "x"} {
+		if date := ExcelDate(&value); date != nil {
+			t.Fatalf("%q: date = %v, want nil", value, date)
+		}
+	}
+	value := "44638.5"
+	if date := ExcelDate(&value); date == nil || date.Format("2006-01-02") != "2022-03-18" {
+		t.Fatalf("44638.5: date = %v", date)
 	}
 }
