@@ -17,6 +17,22 @@ public sealed class FeedDownloaderTests : IDisposable
         new(new HttpClient(server), TimeSpan.FromMinutes(10), DownloadRetry.Default, time, log);
 
     [Fact]
+    public void ALinkedFile_IsTheNewestMatchingLink_OnThePagesOwnHost()
+    {
+        var page = new Uri("https://www.example.go.jp/sanctions/list.html");
+        const string html = """
+            <a href="./list20261001.csv">October</a> <a HREF='list20261105.csv'>November</a>
+            <a href="https://elsewhere.example/sanctions/list20991231.csv">a copy</a> <a href="./list20261201.xlsx">Excel</a>
+            <a href="/sanctions/list20261231.csv?download=1&amp;x=2">with a query</a> <a href = "./list20261104.csv">again</a>
+            """;
+
+        var link = FeedDownloader.FindLink(page, html, "/list[0-9]{8}\\.csv$");
+
+        Assert.Equal("https://www.example.go.jp/sanctions/list20261105.csv", link.AbsoluteUri);
+        Assert.Throws<ListFormatException>(() => FeedDownloader.FindLink(page, "<a href=\"list.pdf\">PDF</a>", "/list[0-9]{8}\\.csv$"));
+    }
+
+    [Fact]
     public async Task AServerError_IsTriedAgain_WithBackoff_UntilItAnswers()
     {
         var server = new FakeServer(time, HttpStatusCode.InternalServerError, HttpStatusCode.ServiceUnavailable, HttpStatusCode.OK);

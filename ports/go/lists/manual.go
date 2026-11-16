@@ -5,10 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -194,6 +197,75 @@ type statusError struct{ code int }
 
 func (e *statusError) Error() string {
 	return fmt.Sprintf("Response status code does not indicate success: %d", e.code)
+}
+
+// MaxPageBytes is the largest publisher's page read for a link (ListSource.LinkPattern).
+const MaxPageBytes = 4 << 20
+
+var hrefPattern = regexp.MustCompile(`(?i)href\s*=\s*["']([^"']*)["']`)
+
+// DownloadFeed downloads a catalogued feed's file: its URL with the EU token in place of {token}, or, for a feed with
+// a LinkPattern, the file its page links today. The page and the file are each tried again as Download says.
+func (d *Downloader) DownloadFeed(ctx context.Context, source *ListSource, euToken string) (string, error) {
+	address := strings.ReplaceAll(source.URL, "{token}", euToken)
+	if source.LinkPattern != "" {
+		page, err := d.Download(ctx, source.Code, address)
+		if err != nil {
+			return "", err
+		}
+		data, err := readPage(page)
+		os.Remove(page)
+		if err != nil {
+			return "", err
+		}
+		if address, err = FindLink(address, string(data), source.LinkPattern); err != nil {
+			return "", err
+		}
+	}
+	return d.Download(ctx, source.Code, address)
+}
+
+func readPage(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > MaxPageBytes {
+		return nil, formatError("The publisher's page is larger than %d bytes.", MaxPageBytes)
+	}
+	return os.ReadFile(path)
+}
+
+// FindLink is the file a page links, for a feed published under a dated name: of the page's links (href, entities
+// decoded, resolved against the page) on the page's own host and scheme, those whose address matches the pattern; the
+// last of them in byte order, so the newest date. A format error when none does: the import fails rather than guess.
+func FindLink(page, document, linkPattern string) (string, error) {
+	base, err := url.Parse(page)
+	if err != nil {
+		return "", err
+	}
+	pattern, err := regexp.Compile(linkPattern)
+	if err != nil {
+		return "", err
+	}
+	found := ""
+	for _, match := range hrefPattern.FindAllStringSubmatch(document, -1) {
+		reference, err := url.Parse(strings.TrimSpace(html.UnescapeString(match[1])))
+		if err != nil {
+			continue
+		}
+		target := base.ResolveReference(reference)
+		if target.Scheme != base.Scheme || !strings.EqualFold(target.Host, base.Host) || !pattern.MatchString(target.String()) {
+			continue
+		}
+		if address := target.String(); address > found {
+			found = address
+		}
+	}
+	if found == "" {
+		return "", formatError("The publisher's page has no link matching %s.", linkPattern)
+	}
+	return found, nil
 }
 
 func (d *Downloader) Download(ctx context.Context, source, url string) (string, error) {

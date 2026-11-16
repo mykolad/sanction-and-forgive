@@ -56,7 +56,8 @@ tools/lists.ps1           The script the owner runs to manage lists
 `docs/sources.md` holds each feed's format, real counts, terms of reuse and the sizing. Keep it current.
 
 - `ListSources.All` is the catalogue: code, name, URL, `MaxAgeHours` (72 for the daily feeds), `FeedStatus`, parser.
-  Only `Active` feeds are imported automatically. `TermsUnclear` (un, ch-seco, ca-sema) wait for the owner's
+  Only `Active` feeds are imported automatically. A feed published under a dated name (jp-mof) has the publisher's
+  page as its URL and a `LinkPattern`: `FeedDownloader.DownloadAsync(ListSource, …)` takes the newest matching link. `TermsUnclear` (un, ch-seco, ca-sema) wait for the owner's
   decision, and `NeedsAccess` (au-dfat, ua-nsdc) wait for a file or an API key. The EU URL's `{token}` comes from
   `LISTS_EU_TOKEN` (the public token by default).
 - One `IListParser` per format reduces a file to `ParsedSubject`s: external id, `SubjectType` (`Unknown` when the

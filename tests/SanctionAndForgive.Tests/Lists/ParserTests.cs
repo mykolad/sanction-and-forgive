@@ -283,6 +283,62 @@ public class ParserTests
         Assert.Throws<ListFormatException>(() => Parse(new FranceParser(), json));
     }
 
+    private static readonly string[] JapanHeader =
+    [
+        "区分", "番号", "告示日付", "告示番号", "個人・団体", "氏名（日本語）", "氏名（英語）", "別名・別称（日本語）", "別名・別称（英語）", "旧称（日本語）", "旧称（英語）",
+        "確定に十分でない別名（日本語）", "確定に十分でない別名（英語）", "称号（日本語）", "称号（英語）", "役職（日本語）", "役職（英語）", "生年月日", "出生地（日本語）", "出生地（英語）",
+        "国籍（日本語）", "国籍（英語）", "旅券番号", "身分証番号", "住所・所在地（国）（日本語）", "住所・所在地（都市その他の情報）（日本語）", "住所・所在地（国）（英語）",
+        "住所・所在地（都市その他の情報）（英語）", "国連参照番号", "リスト掲載日", "その他の情報", "外務省告示情報",
+    ];
+
+    /// <summary>A row of Japan's list: the named columns filled, quoted as the CSV quotes them, the others empty.</summary>
+    private static string JapanRow(params (string Column, string Value)[] cells) =>
+        string.Join(',', JapanHeader.Select(column => cells.FirstOrDefault(cell => cell.Column == column).Value is { } value ? $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"" : string.Empty));
+
+    [Fact]
+    public void Japan_ReadsPeopleAndGroups_InEnglishAndJapanese_WeakAliases_AndPairedAddresses()
+    {
+        var subjects = Parse(new JapanParser(), "\uFEFF" + string.Join("\r\n",
+            string.Join(',', JapanHeader),
+            JapanRow(("区分", "29"), ("番号", "029-000001"), ("告示日付", "2022.3.8 2023.1.10改訂"), ("個人・団体", "個人"), ("氏名（日本語）", "ソコロフ・イワン"),
+                ("氏名（英語）", "Ivan SOKOLOV; Ivan Petrovich Sokolov"), ("別名・別称（英語）", "Vanya Sokolov；I. Sokolov"), ("確定に十分でない別名（英語）", "Big Ivan"),
+                ("生年月日", "1970/1/2"), ("国籍（英語）", "Russia"), ("住所・所在地（国）（英語）", "Russian Federation(リスト掲載時点); Cyprus"),
+                ("住所・所在地（都市その他の情報）（英語）", "Moscow,; Limassol,"), ("住所・所在地（国）（日本語）", "ロシア")),
+            new string(',', JapanHeader.Length - 1),
+            JapanRow(("区分", "2"), ("番号", "002-000005"), ("告示日付", "2001.9.22"), ("個人・団体", "団体"), ("氏名（英語）", "Northwind Trading LLC"),
+                ("旧称（英語）", "Northwind Export LLC"), ("住所・所在地（国）（日本語）", "日本"), ("住所・所在地（都市その他の情報）（日本語）", "東京")),
+            JapanRow(("番号", "044-000001"), ("個人・団体", "その他"), ("氏名（英語）", "UNNAMED GANG"), ("住所・所在地（国）（英語）", "Haiti; Haiti"),
+                ("住所・所在地（都市その他の情報）（英語）", "Port-au-Prince")),
+            string.Empty));
+
+        Assert.Equal(["029-000001", "002-000005", "044-000001"], subjects.Select(subject => subject.ExternalId));
+        var person = subjects[0];
+        Assert.Equal((SubjectType.Individual, "Ivan SOKOLOV"), (person.Type, person.PrimaryName));
+        Assert.Equal(
+            [("Ivan SOKOLOV", false), ("Ivan Petrovich Sokolov", false), ("ソコロフ・イワン", false), ("Vanya Sokolov", false), ("I. Sokolov", false), ("Big Ivan", true)],
+            person.Names.Select(name => (name.FullName, name.IsWeak)));
+        Assert.Equal(NameScript.Other, person.Names.Single(name => name.FullName == "ソコロフ・イワン").Script);
+        Assert.Equal([new ParsedAddress("Moscow, Russian Federation", null), new ParsedAddress("Limassol, Cyprus", null)], person.Addresses);
+        Assert.Equal((JapanParser.Programme + ", category 29", new DateOnly(2022, 3, 8), "born 1970/1/2; nationality Russia"), (person.Programmes, person.ListedOn, person.Remarks));
+        Assert.Null(person.SourceUrl);
+
+        var group = subjects[1];
+        Assert.Equal((SubjectType.Entity, "Northwind Trading LLC", new DateOnly(2001, 9, 22)), (group.Type, group.PrimaryName, group.ListedOn));
+        Assert.Contains(group.Names, name => name.FullName == "Northwind Export LLC");
+        Assert.Equal(new ParsedAddress("東京, 日本", null), Assert.Single(group.Addresses));
+
+        // Not a person or a group as the list writes them; a city and countries that don't pair are kept each on its own.
+        Assert.Equal((SubjectType.Unknown, JapanParser.Programme), (subjects[2].Type, subjects[2].Programmes));
+        Assert.Equal([new ParsedAddress("Port-au-Prince", null), new ParsedAddress("Haiti", null)], subjects[2].Addresses);
+    }
+
+    [Fact]
+    public void Japan_WithoutItsColumns_OrARowWithoutItsNumber_IsAFormatError()
+    {
+        Assert.Throws<ListFormatException>(() => Parse(new JapanParser(), "番号,氏名（英語）\r\n1,A\r\n"));
+        Assert.Throws<ListFormatException>(() => Parse(new JapanParser(), string.Join(',', JapanHeader) + "\r\n" + JapanRow(("氏名（英語）", "A")) + "\r\n"));
+    }
+
     [Theory]
     [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}, null]}""")]
     [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}]""")]

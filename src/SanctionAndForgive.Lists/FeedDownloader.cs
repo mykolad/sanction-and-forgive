@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.RegularExpressions;
 
 namespace SanctionAndForgive.Lists;
 
@@ -21,7 +22,7 @@ public sealed record DownloadRetry(IReadOnlyList<TimeSpan> Delays, TimeSpan Budg
 /// that refuses such clients is reported, not worked around. A passing fault (a server error, 408, 429, a broken
 /// connection, an attempt that timed out) is tried again as <see cref="DownloadRetry"/> says; anything else (404, 403)
 /// fails at once.</summary>
-public sealed class FeedDownloader(HttpClient httpClient, TimeSpan timeout, DownloadRetry retry, TimeProvider time, TextWriter log)
+public sealed partial class FeedDownloader(HttpClient httpClient, TimeSpan timeout, DownloadRetry retry, TimeProvider time, TextWriter log)
 {
     /// <summary>An HTTP client without a timeout of its own: <see cref="DownloadAsync"/> applies one to the whole
     /// download, body included (<c>HttpClient.Timeout</c> stops at the headers with <c>ResponseHeadersRead</c>).</summary>
@@ -31,6 +32,63 @@ public sealed class FeedDownloader(HttpClient httpClient, TimeSpan timeout, Down
         client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("sanction-and-forgive", version));
         client.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("(+https://github.com/mykolad/sanction-and-forgive)"));
         return client;
+    }
+
+    /// <summary>The largest publisher's page read for a link (<see cref="ListSource.LinkPattern"/>).</summary>
+    public const int MaxPageBytes = 4 << 20;
+
+    /// <summary>Downloads a catalogued feed's file to a new temporary file: its URL with <paramref name="euToken"/> in
+    /// place of <c>{token}</c>, or, for a feed with a <see cref="ListSource.LinkPattern"/>, the file its page links
+    /// today. The page and the file are each tried again as <see cref="DownloadAsync(string, Uri, CancellationToken)"/>
+    /// says.</summary>
+    public async Task<string> DownloadAsync(ListSource source, string euToken, CancellationToken cancellationToken)
+    {
+        var url = new Uri(source.Url!.Replace("{token}", euToken, StringComparison.Ordinal));
+        if (source.LinkPattern is { } pattern)
+        {
+            var page = await DownloadAsync(source.Code, url, cancellationToken);
+            try
+            {
+                if (new FileInfo(page).Length > MaxPageBytes)
+                {
+                    throw new ListFormatException($"The publisher's page is larger than {MaxPageBytes} bytes.");
+                }
+
+                url = FindLink(url, await File.ReadAllTextAsync(page, cancellationToken), pattern);
+            }
+            finally
+            {
+                File.Delete(page);
+            }
+        }
+
+        return await DownloadAsync(source.Code, url, cancellationToken);
+    }
+
+    /// <summary>The file a page links, for a feed published under a dated name: of the page's links (<c>href</c>,
+    /// entities decoded, resolved against <paramref name="page"/>) on the page's own host and scheme, those whose
+    /// address matches <paramref name="linkPattern"/>; the last of them in ordinal order, so the newest date. A
+    /// <see cref="ListFormatException"/> when none does: the page changed, and the import fails rather than guess.</summary>
+    public static Uri FindLink(Uri page, string html, string linkPattern)
+    {
+        var pattern = new Regex(linkPattern, RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        Uri? found = null;
+        foreach (Match link in Href().Matches(html))
+        {
+            if (!Uri.TryCreate(page, WebUtility.HtmlDecode(link.Groups[1].Value.Trim()), out var target)
+                || target.Scheme != page.Scheme || !string.Equals(target.Host, page.Host, StringComparison.OrdinalIgnoreCase)
+                || !pattern.IsMatch(target.AbsoluteUri))
+            {
+                continue;
+            }
+
+            if (found is null || string.CompareOrdinal(target.AbsoluteUri, found.AbsoluteUri) > 0)
+            {
+                found = target;
+            }
+        }
+
+        return found ?? throw new ListFormatException($"The publisher's page has no link matching {linkPattern}.");
     }
 
     /// <summary>Downloads <paramref name="url"/> to a new temporary file and returns its path. Each attempt that will be
@@ -103,6 +161,9 @@ public sealed class FeedDownloader(HttpClient httpClient, TimeSpan timeout, Down
         TimeoutException or IOException => true,
         _ => false,
     };
+
+    [GeneratedRegex("""href\s*=\s*["']([^"']*)["']""", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Href();
 
     private static string Describe(Exception exception) => exception switch
     {

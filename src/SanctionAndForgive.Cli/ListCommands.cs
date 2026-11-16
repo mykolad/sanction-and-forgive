@@ -218,7 +218,7 @@ internal sealed class ListCommands(ImportStore store, FeedDownloader downloader,
         try
         {
             record = await store.EnsureSourceAsync(source.Code, source.Name, source.Url?.Replace("{token}", "…", StringComparison.Ordinal), source.MaxAgeHours, cancellationToken);
-            path ??= await downloader.DownloadAsync(source.Code, new Uri(source.Url!.Replace("{token}", euToken, StringComparison.Ordinal)), cancellationToken);
+            path ??= await downloader.DownloadAsync(source, euToken, cancellationToken);
             List<SanctionAndForgive.Data.Subject> subjects;
             await using (var stream = File.OpenRead(path))
             {

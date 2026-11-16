@@ -34,6 +34,11 @@ public sealed record ListSource(string Code, string Name, string? Url, int MaxAg
     /// <summary>Why a feed that isn't <see cref="FeedStatus.Active"/> isn't imported, in a sentence for the status
     /// page.</summary>
     public string? Note { get; init; }
+
+    /// <summary>For a feed published under a new name each time (a date in it): <see cref="Url"/> is the publisher's
+    /// page, and the file is the link on it whose address matches this pattern (<see cref="FeedDownloader.FindLink"/>).
+    /// Written so .NET, Go (RE2) and Rust read it alike.</summary>
+    public string? LinkPattern { get; init; }
 }
 
 public static class ListSources
@@ -113,6 +118,12 @@ public static class ListSources
         {
             Homepage = "https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register",
             TermsUrl = "https://www.mfat.govt.nz/en/copyright",
+        },
+        new("jp-mof", "Japan asset-freeze list (Ministry of Finance)", "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html", DailyMaxAge, FeedStatus.Active, () => new JapanParser())
+        {
+            Homepage = "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",
+            TermsUrl = "https://www.mof.go.jp/about_mof/notice/index.html",
+            LinkPattern = @"/shisantouketsu[0-9]{8}\.csv$",
         },
         new("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", DailyMaxAge, FeedStatus.Active, () => new SfmsParser())
         {

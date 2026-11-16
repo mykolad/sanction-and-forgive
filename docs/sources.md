@@ -22,6 +22,7 @@ left out of the counts and the import, since the MVP doesn't screen them.
 | `fr-tresor` | France national asset-freeze register (DG Trésor), from 2026-11-16 | JSON API, 15.0 MB | 8,187 (5,462 / 2,725 / 0) | 20,311 (134, 4,758, 438) | 3,491 | Active |
 | `nl-terrorism` | Netherlands national terrorism list (Ministry of Foreign Affairs), from 2026-11-16 | ODS, 14 KB | 117 (114 / 3 / 0) | 120 (0, 0, 0) | 0 | Active |
 | `nz-mfat` | New Zealand Russia Sanctions Register (MFAT), from 2026-11-16 | XLSX, 21.6 MB | 1,918 (1,389 / 529 / 0) | 2,896 (0, 0, 0) | 124 | Active |
+| `jp-mof` | Japan asset-freeze list (Ministry of Finance), from 2026-11-16 | CSV, 3.2 MB | 2,897 (2,028 / 869 / 0) | 15,034 (345, 0, 6,648) | 1,707 | Active |
 | **All fetched** | | 246 MB | **50,107** | **147,997** (7,062 weak, 20,175 Cyrillic) | 44,519 | |
 
 The handover estimated 60-90k subjects. Without Australia and NSDC there are about 50k. NSDC is probably the
@@ -80,6 +81,20 @@ largest list, so the total is likely to land inside that range once it's added.
   (512) and `Bank` (17) rows are entities, named in `First name`; the 7 `Asset` rows (categories of ships and aircraft)
   and the closing `Total` row are left out, as would be a row marked revoked, delisted or removed (none today). No
   per-record page. Read by `Spreadsheets.XlsxRows` (zip and XML only).
+- **Japan (`jp-mof`, 2026-11-16):** the Ministry of Finance's `資産凍結等対象者一覧` (list of parties subject to asset
+  freezes under the Foreign Exchange and Foreign Trade Act), published under a new dated name at each update
+  (`shisantouketsuYYYYMMDD.csv`, also as `.xlsx`) and linked from
+  [the list page](https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html).
+  The catalogue's URL is that page and its `LinkPattern` (`/shisantouketsu[0-9]{8}\.csv$`) finds the file: the
+  downloader fetches the page, takes the newest matching link on the page's own host, then downloads it; a page
+  without one fails the import. CSV in UTF-8 with a byte order mark: 32 Japanese column names, every text in Japanese
+  and English. `個人` (2,028) are people, `団体` (869) groups. The English name is primary (a few hold several, split
+  at semicolons); the Japanese name, aliases (`別名・別称`) and former names (`旧称`) are aliases; `確定に十分でない別名`
+  (aliases not enough to identify, 345) are weak. Lists in a cell are split at `;` or `；`. Addresses: the city and
+  the country columns, paired when they have as many parts, in English when given, else in Japanese (384 rows);
+  "(リスト掲載時点)" (at the time of listing) is dropped. Listed on is the notice date (`告示日付`, `2002.3.1`, amendments
+  after it). The programme is the category number (`区分`, 1 to 44), which only the list page names. No per-record
+  page. The 6,648 names in other scripts are the Japanese ones, mostly katakana, which no table transliterates yet.
 
 ## Terms of reuse
 
@@ -101,6 +116,7 @@ resell the lists.
 | France | Yes: Licence Ouverte 2.0 (Etalab), the dataset's licence on data.gouv.fr (read 2026-11-16). | Name the source and its date. The website's footer: "France: Registre national des gels, Direction générale du Trésor, reused under the Licence Ouverte 2.0." | [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/) |
 | Netherlands | Yes: government.nl declares CC0 1.0 for its content (read 2026-11-16). | None required. | [government.nl copyright](https://www.government.nl/copyright) |
 | New Zealand | Yes: MFAT's site content is Crown copyright, licensed under CC BY 4.0 (read 2026-11-16). | Credit the Ministry. The website's footer: "New Zealand: Russia Sanctions Register, Ministry of Foreign Affairs and Trade, licensed under CC BY 4.0." | [MFAT copyright](https://www.mfat.govt.nz/en/copyright) |
+| Japan | Yes: the Ministry of Finance's content is under the Public Data License 1.0 (PDL1.0) unless marked otherwise (its copyright page, read 2026-11-16). | Name the source; say if it was edited. The website's footer: "Japan: 資産凍結等対象者一覧 (list of parties subject to asset freezes), Ministry of Finance (財務省), used under the Public Data License 1.0; names and addresses are read for matching, not changed." | [MOF copyright and links](https://www.mof.go.jp/about_mof/notice/index.html), [PDL 1.0](https://www.digital.go.jp/resources/open_data/public_data_license_v1.0) |
 
 The UN's listings are also on the EU and UK lists, which implement them. Leaving out the UN row loses its own as-of
 date in the result, not coverage.
