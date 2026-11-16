@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -33,6 +34,8 @@ func ParserFor(code string) Parser {
 		return parseCanada
 	case "ua-sfms":
 		return parseSfms
+	case "fr-tresor":
+		return parseFrance
 	}
 	return nil
 }
@@ -696,3 +699,147 @@ func parseSfms(reader io.Reader) ([]ParsedSubject, error) {
 }
 
 var _ = time.Time{}
+
+// franceRecordURL is a register entry's page: its official record.
+const franceRecordURL = "https://gels-avoirs.dgtresor.gouv.fr/Gels/RegistreDetail?idRegistre="
+
+type franceField struct {
+	TypeChamp *string           `json:"TypeChamp"`
+	Valeur    []json.RawMessage `json:"Valeur"`
+}
+
+type franceRecord struct {
+	IDRegistre     json.RawMessage   `json:"IdRegistre"`
+	Nature         *string           `json:"Nature"`
+	Nom            *string           `json:"Nom"`
+	RegistreDetail []json.RawMessage `json:"RegistreDetail"`
+}
+
+// parseFrance reads France's national asset-freeze register (DG Trésor, JSON): FranceParser in the reference.
+func parseFrance(reader io.Reader) ([]ParsedSubject, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		// A truncated or malformed file must fail, not pass as a shorter list.
+		return nil, formatError("France's register isn't valid JSON: %s", err.Error())
+	}
+	var publications map[string]json.RawMessage
+	var details []json.RawMessage
+	if raw, ok := root["Publications"]; !ok || !isJSON(raw, '{') || json.Unmarshal(raw, &publications) != nil {
+		return nil, formatError(`Expected {"Publications": {"PublicationDetail": [...]}}.`)
+	}
+	if raw, ok := publications["PublicationDetail"]; !ok || !isJSON(raw, '[') || json.Unmarshal(raw, &details) != nil {
+		return nil, formatError(`Expected {"Publications": {"PublicationDetail": [...]}}.`)
+	}
+
+	var out []ParsedSubject
+	for _, rawRecord := range details {
+		if !isJSON(rawRecord, '{') {
+			return nil, formatError("A register entry isn't an object.")
+		}
+		var record franceRecord
+		if err := json.Unmarshal(rawRecord, &record); err != nil {
+			return nil, formatError("A register entry isn't an object.")
+		}
+		var id *string
+		switch {
+		case isJSON(record.IDRegistre, '"'):
+			var text string
+			if json.Unmarshal(record.IDRegistre, &text) == nil {
+				id = cleanString(text)
+			}
+		case len(bytes.TrimSpace(record.IDRegistre)) > 0 && !isJSON(record.IDRegistre, '{') && !isJSON(record.IDRegistre, '[') && !bytes.Equal(bytes.TrimSpace(record.IDRegistre), []byte("null")) && !bytes.Equal(bytes.TrimSpace(record.IDRegistre), []byte("true")) && !bytes.Equal(bytes.TrimSpace(record.IDRegistre), []byte("false")):
+			id = cleanString(string(bytes.TrimSpace(record.IDRegistre)))
+		}
+		if id == nil {
+			return nil, formatError("A register entry has no IdRegistre.")
+		}
+		kind := Unknown
+		switch {
+		case eq(record.Nature, "Personne physique"):
+			kind = Individual
+		case eq(record.Nature, "Personne morale"):
+			kind = Entity
+		case eq(record.Nature, "Navire"):
+			continue
+		}
+
+		var fields []franceField
+		for _, rawField := range record.RegistreDetail {
+			var field franceField
+			if isJSON(rawField, '{') && json.Unmarshal(rawField, &field) == nil {
+				fields = append(fields, field)
+			}
+		}
+		values := func(fieldType string) []map[string]json.RawMessage {
+			var found []map[string]json.RawMessage
+			for _, field := range fields {
+				if !eq(field.TypeChamp, fieldType) {
+					continue
+				}
+				for _, rawValue := range field.Valeur {
+					var value map[string]json.RawMessage
+					if isJSON(rawValue, '{') && json.Unmarshal(rawValue, &value) == nil {
+						found = append(found, value)
+					}
+				}
+			}
+			return found
+		}
+		text := func(value map[string]json.RawMessage, name string) *string {
+			raw, ok := value[name]
+			if !ok || !isJSON(raw, '"') {
+				return nil
+			}
+			var s string
+			if json.Unmarshal(raw, &s) != nil {
+				return nil
+			}
+			return &s
+		}
+
+		b := newBuilder(*id, kind)
+		var labels, motifs []*string
+		for _, value := range values("FONDEMENT_JURIDIQUE") {
+			labels = append(labels, text(value, "FondementJuridiqueLabel"))
+		}
+		for _, value := range values("MOTIFS") {
+			motifs = append(motifs, text(value, "Motifs"))
+		}
+		b.Programmes = Join("; ", labels...)
+		b.Remarks = Join(" ", motifs...)
+		b.SourceURL = s(franceRecordURL + url.QueryEscape(*id))
+
+		var given *string
+		for _, value := range values("PRENOM") {
+			if name := text(value, "Prenom"); Clean(name) != nil {
+				given = name
+				break
+			}
+		}
+		if kind == Individual {
+			b.AddName(Join(" ", given, record.Nom), false, true)
+		} else {
+			b.AddName(record.Nom, false, true)
+		}
+		for _, alias := range values("ALIAS") {
+			comment := text(alias, "Commentaire")
+			weak := comment != nil && strings.Contains(strings.ToLower(*comment), "alias faible")
+			b.AddName(text(alias, "Alias"), weak, false)
+		}
+		for _, address := range append(values("ADRESSE_PM"), values("ADRESSE_PP")...) {
+			b.AddAddress(Join(", ", text(address, "Adresse"), text(address, "Pays")), nil)
+		}
+		add(&out, b.Build())
+	}
+	return out, nil
+}
+
+// isJSON reports whether a raw JSON value starts with the given character (an object, an array, a string).
+func isJSON(raw json.RawMessage, first byte) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == first
+}

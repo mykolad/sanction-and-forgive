@@ -99,6 +99,11 @@ public static class ListSources
             Homepage = "https://drs.nsdc.gov.ua/",
             Note = "The register's API needs a key, which takes a registration. Waiting for one.",
         },
+        new("fr-tresor", "France national asset-freeze register (DG Trésor)", "https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json", DailyMaxAge, FeedStatus.Active, () => new FranceParser())
+        {
+            Homepage = "https://gels-avoirs.dgtresor.gouv.fr/",
+            TermsUrl = "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+        },
         new("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", DailyMaxAge, FeedStatus.Active, () => new SfmsParser())
         {
             Homepage = "https://fiu.gov.ua/",

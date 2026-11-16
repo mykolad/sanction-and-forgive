@@ -55,7 +55,7 @@ const fn source(
 }
 
 /// The catalogue, in the reference's order.
-pub static SOURCES: [ListSource; 11] = [
+pub static SOURCES: [ListSource; 12] = [
     source(
         "eu",
         "EU consolidated financial sanctions",
@@ -145,6 +145,15 @@ pub static SOURCES: [ListSource; 11] = [
         "https://drs.nsdc.gov.ua/",
         "",
         "The register's API needs a key, which takes a registration. Waiting for one.",
+    ),
+    source(
+        "fr-tresor",
+        "France national asset-freeze register (DG Trésor)",
+        "https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json",
+        FeedStatus::Active,
+        "https://gels-avoirs.dgtresor.gouv.fr/",
+        "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+        "",
     ),
     source("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", FeedStatus::Active, "https://fiu.gov.ua/", "", ""),
 ];

@@ -23,6 +23,7 @@ pub fn parser_for(code: &str) -> Option<Parser> {
         "ch-seco" => parse_seco,
         "ca-sema" => parse_canada,
         "ua-sfms" => parse_sfms,
+        "fr-tresor" => parse_france,
         _ => return None,
     })
 }
@@ -533,5 +534,96 @@ fn parse_sfms(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError
         out.extend(b.build());
         Ok(())
     })?;
+    Ok(out)
+}
+
+/// A register entry's page: its official record.
+pub const FRANCE_RECORD_URL: &str = "https://gels-avoirs.dgtresor.gouv.fr/Gels/RegistreDetail?idRegistre=";
+
+/// A string field, or None when it's missing or not a string (as the reference reads them).
+fn json_str(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+/// Percent-encodes all but the unreserved characters, as the reference's Uri.EscapeDataString does.
+fn escape_data(value: &str) -> String {
+    let mut out = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// France's national asset-freeze register (DG Trésor, JSON): FranceParser in the reference.
+fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
+    let mut data = Vec::new();
+    reader.read_to_end(&mut data)?;
+    // A truncated or malformed file must fail, not pass as a shorter list.
+    let document: Value = serde_json::from_slice(&data).map_err(|e| format_error(format!("France's register isn't valid JSON: {e}")))?;
+    let details = document
+        .get("Publications")
+        .filter(|p| p.is_object())
+        .and_then(|p| p.get("PublicationDetail"))
+        .and_then(Value::as_array)
+        .filter(|_| document.is_object())
+        .ok_or_else(|| format_error("Expected {\"Publications\": {\"PublicationDetail\": [...]}}."))?;
+
+    let mut out = Vec::new();
+    for record in details {
+        if !record.is_object() {
+            return Err(format_error("A register entry isn't an object."));
+        }
+        let id = match record.get("IdRegistre") {
+            Some(Value::String(text)) => super::parse::clean(Some(text)),
+            Some(Value::Number(number)) => super::parse::clean(Some(&number.to_string())),
+            _ => None,
+        }
+        .ok_or_else(|| format_error("A register entry has no IdRegistre."))?;
+        let kind = match record.get("Nature").and_then(Value::as_str) {
+            Some("Personne physique") => SubjectType::Individual,
+            Some("Personne morale") => SubjectType::Entity,
+            Some("Navire") => continue,
+            _ => SubjectType::Unknown,
+        };
+
+        let fields: Vec<&Value> = record
+            .get("RegistreDetail")
+            .and_then(Value::as_array)
+            .map(|f| f.iter().filter(|f| f.is_object()).collect())
+            .unwrap_or_default();
+        let values = |field_type: &str| -> Vec<&Value> {
+            fields
+                .iter()
+                .filter(|f| f.get("TypeChamp").and_then(Value::as_str) == Some(field_type))
+                .filter_map(|f| f.get("Valeur").and_then(Value::as_array))
+                .flat_map(|v| v.iter().filter(|v| v.is_object()))
+                .collect()
+        };
+
+        let mut b = Builder::new(&id, kind);
+        b.programmes =
+            join("; ", &values("FONDEMENT_JURIDIQUE").iter().map(|v| json_str(v, "FondementJuridiqueLabel")).collect::<Vec<_>>());
+        b.remarks = join(" ", &values("MOTIFS").iter().map(|v| json_str(v, "Motifs")).collect::<Vec<_>>());
+        b.source_url = Some(format!("{FRANCE_RECORD_URL}{}", escape_data(&id)));
+
+        let surname = json_str(record, "Nom");
+        let given =
+            values("PRENOM").iter().map(|v| json_str(v, "Prenom")).find(|name| super::parse::clean(name.as_deref()).is_some()).flatten();
+        let primary = if kind == SubjectType::Individual { join(" ", &[given, surname]) } else { surname };
+        b.add_name(primary.as_deref(), false, true);
+        for alias in values("ALIAS") {
+            let weak = json_str(alias, "Commentaire").is_some_and(|c| c.to_lowercase().contains("alias faible"));
+            b.add_name(json_str(alias, "Alias").as_deref(), weak, false);
+        }
+        for address in values("ADRESSE_PM").into_iter().chain(values("ADRESSE_PP")) {
+            let raw = join(", ", &[json_str(address, "Adresse"), json_str(address, "Pays")]);
+            b.add_address(raw.as_deref(), None);
+        }
+        out.extend(b.build());
+    }
     Ok(out)
 }
