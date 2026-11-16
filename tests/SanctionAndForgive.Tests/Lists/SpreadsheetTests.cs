@@ -161,6 +161,27 @@ public class SpreadsheetTests
     }
 
     [Fact]
+    public void Ods_ACellUnderTheLimit_IsReadWhole()
+    {
+        var text = new string('x', 600_000);
+        using var file = Ods(["Title"], [text, "y"]);
+
+        Assert.Equal(text, Spreadsheets.OdsRows(file, CancellationToken.None)[1][0]);
+    }
+
+    [Fact]
+    public void Ods_WhoseCellIsLongerThanTheLimit_IsAFormatError_AsItsRead()
+    {
+        // 20,000 runs of a hundred spaces: 500 kB of XML for 2 million characters in one cell.
+        const string ns = "xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\" xmlns:text=\"urn:oasis:names:tc:opendocument:xmlns:text:1.0\"";
+        var spaces = string.Concat(Enumerable.Repeat("<text:s text:c=\"100\"/>", 20_000));
+        var content = $"<office:document-content {ns}><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>a{spaces}b</text:p></table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>";
+        using var file = Zip(("content.xml", content));
+
+        Assert.Throws<ListFormatException>(() => Spreadsheets.OdsRows(file, CancellationToken.None));
+    }
+
+    [Fact]
     public void Ods_ThatIsntAZip_OrHasNoContent_IsAFormatError()
     {
         using var notZip = new MemoryStream(Encoding.UTF8.GetBytes("Surname,First name"));

@@ -14,6 +14,9 @@ use super::parse::{clean, format_error, join, parse_date, Builder, ParseError, P
 
 const MAX_PART_BYTES: u64 = 256 << 20;
 const MAX_COLUMNS: usize = 256;
+/// The longest text one cell may have, paragraphs and their line breaks included, checked as it's read (a few bytes of
+/// text:s stand for a hundred spaces): far above any list's cell; spreadsheet programs stop at 32,767 characters.
+const MAX_CELL_TEXT: usize = 1 << 20;
 const ODS_TABLE: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:table:1.0";
 const ODS_TEXT: &[u8] = b"urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 
@@ -173,7 +176,12 @@ fn ods_row(reader: &mut NsReader<&[u8]>, expanded: &mut Expansion) -> Result<Vec
 /// self-closed or not.
 fn ods_cell_text(reader: &mut NsReader<&[u8]>) -> Result<String, ParseError> {
     let (mut paragraphs, mut current, mut in_paragraph, mut depth) = (Vec::new(), String::new(), false, 0usize);
+    let mut done = 0usize;
     loop {
+        // Each finished paragraph, and its line break; then the one being read.
+        if done + current.len() > MAX_CELL_TEXT {
+            return Err(format_error(format!("A cell of the spreadsheet is longer than {MAX_CELL_TEXT} characters.")));
+        }
         let (resolved, event) = reader.read_resolved_event().map_err(xml_error)?;
         match event {
             Event::Eof => return Err(format_error("The spreadsheet's content.xml ends inside a cell.")),
@@ -193,7 +201,10 @@ fn ods_cell_text(reader: &mut NsReader<&[u8]>) -> Result<String, ParseError> {
                 }
             }
             Event::Empty(e) if is(&resolved, ODS_TEXT) => match e.local_name().as_ref() {
-                b"p" | b"h" => paragraphs.push(String::new()),
+                b"p" | b"h" => {
+                    paragraphs.push(String::new());
+                    done += 1;
+                }
                 b"s" if in_paragraph => current.push_str(&" ".repeat(count(reader, &e, ODS_TEXT, b"c").min(100))),
                 b"line-break" if in_paragraph => current.push('\n'),
                 b"tab" if in_paragraph => current.push('\t'),
@@ -205,6 +216,7 @@ fn ods_cell_text(reader: &mut NsReader<&[u8]>) -> Result<String, ParseError> {
                 }
                 depth -= 1;
                 if is(&resolved, ODS_TEXT) && matches!(e.local_name().as_ref(), b"p" | b"h") {
+                    done += current.len() + 1;
                     paragraphs.push(std::mem::take(&mut current));
                     in_paragraph = false;
                 }
@@ -707,6 +719,17 @@ mod tests {
         let content = format!(
             "<office:document-content {NAMESPACES}><office:body><office:spreadsheet><table:table>{}</table:table></office:spreadsheet></office:body></office:document-content>",
             row.repeat(40_000)
+        );
+        assert!(ods(&content).is_err());
+    }
+
+    #[test]
+    fn a_cell_longer_than_the_limit_is_a_format_error_as_its_read() {
+        // 20,000 runs of a hundred spaces: 500 kB of XML for 2 million characters in one cell.
+        let content = format!(
+            "<office:document-content {NAMESPACES}><office:body><office:spreadsheet><table:table><table:table-row><table:table-cell><text:p>a{}b</text:p>\
+             </table:table-cell></table:table-row></table:table></office:spreadsheet></office:body></office:document-content>",
+            r#"<text:s text:c="100"/>"#.repeat(20_000)
         );
         assert!(ods(&content).is_err());
     }

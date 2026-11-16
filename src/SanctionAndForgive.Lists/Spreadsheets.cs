@@ -16,6 +16,11 @@ public static class Spreadsheets
     /// <summary>Repeated cells beyond this are dropped: a sheet repeats an empty cell up to the last column.</summary>
     private const int MaxColumns = 256;
 
+    /// <summary>The longest text one cell may have, paragraphs and their line breaks included, checked as it's read
+    /// (a few bytes of <c>text:s</c> stand for a hundred spaces): far above any list's cell; spreadsheet programs stop
+    /// at 32,767 characters.</summary>
+    public const int MaxCellText = 1 << 20;
+
     private const string OdsTable = "urn:oasis:names:tc:opendocument:xmlns:table:1.0";
     private const string OdsText = "urn:oasis:names:tc:opendocument:xmlns:text:1.0";
 
@@ -369,8 +374,15 @@ public static class Spreadsheets
         var paragraphs = new List<string>();
         var current = new System.Text.StringBuilder();
         var inParagraph = false;
+        var done = 0L;
         while (reader.Read() && !(reader.NodeType == XmlNodeType.EndElement && reader.Depth == cellDepth))
         {
+            // Each finished paragraph, and its line break; then the one being read.
+            if (done + current.Length > MaxCellText)
+            {
+                throw new ListFormatException($"A cell of the spreadsheet is longer than {MaxCellText:N0} characters.");
+            }
+
             switch (reader.NodeType)
             {
                 case XmlNodeType.Element when reader.NamespaceURI == OdsText && reader.LocalName is "p" or "h":
@@ -379,11 +391,14 @@ public static class Spreadsheets
                     if (!inParagraph)
                     {
                         paragraphs.Add(string.Empty);
+                        done++;
                     }
 
                     break;
                 case XmlNodeType.EndElement when reader.NamespaceURI == OdsText && reader.LocalName is "p" or "h":
                     paragraphs.Add(current.ToString());
+                    done += current.Length + 1;
+                    current.Clear();
                     inParagraph = false;
                     break;
                 case XmlNodeType.Element when inParagraph && reader.NamespaceURI == OdsText && reader.LocalName == "s":
@@ -399,6 +414,11 @@ public static class Spreadsheets
                     current.Append(reader.Value);
                     break;
             }
+        }
+
+        if (done + current.Length > MaxCellText)
+        {
+            throw new ListFormatException($"A cell of the spreadsheet is longer than {MaxCellText:N0} characters.");
         }
 
         return string.Join('\n', paragraphs);
