@@ -96,6 +96,66 @@ largest list, so the total is likely to land inside that range once it's added.
   after it). The programme is the category number (`区分`, 1 to 44), which only the list page names. No per-record
   page. The 6,648 names in other scripts are the Japanese ones, mostly katakana, which no table transliterates yet.
 
+## Scripts of the listed names
+
+Measured on 2026-11-16 with `probe --source all --scripts` (#90): every name of every fetched list (primary names and
+aliases, so a party often counts several times), by the Unicode scripts of its letters. A name in two scripts counts
+under the one that isn't Latin; kana with or without kanji is "Japanese kana". `us-uflpa` (#99) is all Latin.
+
+| List | Names | Latin | Cyrillic | Arabic | Han | Japanese kana | Hangul | Greek | Hebrew | Georgian, Armenian | Thai, Lao, Khmer, Myanmar, Ethiopic | Other |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `eu` | 30,804 | 24,366 | 5,177 | 773 | 32 |  | 87 | 351 | 16 |  |  | 2 |
+| `ofac-sdn` | 47,832 | 42,028 | 3,663 | 1,498 | 575 |  | 50 | 9 | 2 | 4 |  | 3 |
+| `ofac-cons` | 1,794 | 1,676 | 43 |  | 75 |  |  |  |  |  |  |  |
+| `un` | 4,126 | 3,719 | 16 | 386 | 5 |  |  |  |  |  |  |  |
+| `uk` | 18,890 | 15,146 | 2,848 | 744 | 66 | 1 | 6 | 3 | 29 | 22 | 23 | 2 |
+| `us-export` | 11,576 | 11,576 |  |  |  |  |  |  |  |  |  |  |
+| `ch-seco` | 20,901 | 14,305 | 5,643 | 849 | 93 |  | 6 |  |  | 1 | 4 |  |
+| `ca-sema` | 9,288 | 6,036 | 2,988 | 233 | 13 |  |  |  | 17 | 1 |  |  |
+| `fr-tresor` | 20,311 | 15,116 | 4,758 | 343 | 36 | 7 | 34 |  | 16 | 1 |  |  |
+| `nl-terrorism` | 120 | 120 |  |  |  |  |  |  |  |  |  |  |
+| `nz-mfat` | 2,896 | 2,896 |  |  |  |  |  |  |  |  |  |  |
+| `jp-mof` | 15,034 | 8,395 |  | 1 | 227 | 6,411 |  |  |  |  |  |  |
+| `ua-sfms` | 3,897 | 3,796 | 101 |  |  |  |  |  |  |  |  |  |
+| **All** | **187,469** | **149,175** | **25,237** | **4,827** | **1,122** | **6,419** | **183** | **363** | **80** | **29** | **27** | **7** |
+
+Names with Cyrillic letters, by the letters only some alphabets have (`Scripts.CyrillicAlphabet`; "Russian or
+unmarked" uses none of them, so it holds Bulgarian too):
+
+| List | Russian or unmarked | і (Ukrainian, Belarusian or Kazakh) | ў (Belarusian) | ґ є ї (Ukrainian) | ћ ђ (Serbian) | ј љ њ џ (Serbian or Macedonian) | ө ү (Kyrgyz, Mongolian or Kazakh) | ә ғ қ ң ұ һ (Kazakh) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `eu` | 4,633 | 294 | 179 | 69 | 1 | 1 |  |  |
+| `ofac-sdn` | 3,452 | 132 | 62 | 11 | 5 | 1 |  |  |
+| `ofac-cons` | 43 |  |  |  |  |  |  |  |
+| `un` | 16 |  |  |  |  |  |  |  |
+| `uk` | 2,688 | 82 | 55 | 17 | 3 |  | 2 | 1 |
+| `ch-seco` | 5,243 | 150 | 182 | 66 | 1 | 1 |  |  |
+| `ca-sema` | 2,856 | 63 | 32 | 35 |  | 1 |  | 1 |
+| `fr-tresor` | 4,489 | 108 | 112 | 48 |  | 1 |  |  |
+| `ua-sfms` | 68 | 23 |  | 10 |  |  |  |  |
+| **All** | **23,488** | **852** | **622** | **256** | **10** | **5** | **2** | **2** |
+
+What it says:
+
+- **Latin is 80% of the names**, and most input will be Latin whatever the listed script: Latin details (#94) reach
+  the most screenings.
+- **Cyrillic is 13%**, read today through the Russian and Ukrainian tables. Belarusian (ў) is the next alphabet that
+  matters: 622 names with ў and part of the 852 with і (#91). Kazakh, Kyrgyz, Serbian and Macedonian letters appear in
+  fewer than 20 names together: not worth a table yet. The EU's "Russian or unmarked" includes its own Bulgarian
+  translations of organisation names (`Египетски Al-Jihad`).
+- **Arabic script is 2.6%** (4,827 names, OFAC SDN, EU, UK, SECO, UN): the largest group with no table (#92).
+- **Japanese kana (6,419) are all `jp-mof`'s Japanese renderings of names the same record also gives in English**:
+  no table needed for screening.
+- **Han is 1,122 names, half of them OFAC SDN's** (#93); Hangul 183, Greek 363 (almost all the EU's Greek translations
+  of organisation names, written with the micro sign for μ), Hebrew 80; the rest together under 70.
+- About 3,500 names mix Latin with another script: mostly the EU's and SECO's translations around a Latin name
+  (`Οργάνωση Abu Nidal`) and Cyrillic company names with a Latin word.
+
+How such a name behaves when entered today is recorded in `tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
+the same spelling matches in every script; Arabic vowel marks, tatweel and letter variants, Greek accents, a part of a
+Chinese or Korean name, a space inside one, traditional characters for simplified ones, and a Latin spelling of a name
+listed only in another script don't.
+
 ## Terms of reuse
 
 Read on 2026-11-06. Not legal advice. The demo shows matches to a company, which is commercial use. It doesn't

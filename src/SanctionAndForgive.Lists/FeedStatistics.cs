@@ -18,10 +18,18 @@ public sealed record FeedStatistics(
 {
     public int Subjects => Individuals + Entities + Unknown;
 
+    /// <summary>Names by the scripts of their letters (<see cref="Scripts.InName"/>).</summary>
+    public IReadOnlyDictionary<string, int> NamesByScript { get; init; } = new Dictionary<string, int>();
+
+    /// <summary>Names with Cyrillic letters, by the alphabet their letters point to (<see cref="Scripts.CyrillicAlphabet"/>).</summary>
+    public IReadOnlyDictionary<string, int> CyrillicByAlphabet { get; init; } = new Dictionary<string, int>();
+
     public static FeedStatistics Of(IEnumerable<ParsedSubject> subjects)
     {
         int individuals = 0, entities = 0, unknown = 0, names = 0, weak = 0, cyrillic = 0, other = 0, addresses = 0;
         long nameCharacters = 0, addressCharacters = 0, otherCharacters = 0;
+        var byScript = new Dictionary<string, int>(StringComparer.Ordinal);
+        var byAlphabet = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var subject in subjects)
         {
             switch (subject.Type)
@@ -38,6 +46,13 @@ public sealed record FeedStatistics(
                 weak += name.IsWeak ? 1 : 0;
                 cyrillic += name.Script == NameScript.Cyrillic ? 1 : 0;
                 other += name.Script == NameScript.Other ? 1 : 0;
+                var scripts = Scripts.InName(name.FullName);
+                byScript[scripts] = byScript.GetValueOrDefault(scripts) + 1;
+                if (scripts.Contains("Cyrillic", StringComparison.Ordinal))
+                {
+                    var alphabet = Scripts.CyrillicAlphabet(name.FullName);
+                    byAlphabet[alphabet] = byAlphabet.GetValueOrDefault(alphabet) + 1;
+                }
             }
 
             addresses += subject.Addresses.Count;
@@ -46,7 +61,11 @@ public sealed record FeedStatistics(
                 + (subject.Remarks?.Length ?? 0) + (subject.SourceUrl?.Length ?? 0);
         }
 
-        return new FeedStatistics(individuals, entities, unknown, names, weak, cyrillic, other, addresses, nameCharacters, addressCharacters, otherCharacters);
+        return new FeedStatistics(individuals, entities, unknown, names, weak, cyrillic, other, addresses, nameCharacters, addressCharacters, otherCharacters)
+        {
+            NamesByScript = byScript,
+            CyrillicByAlphabet = byAlphabet,
+        };
     }
 
     /// <summary>The root element's name of an XML file, <c>{json}</c> for JSON, or null if it's neither.</summary>

@@ -4,8 +4,8 @@ namespace SanctionAndForgive.Cli;
 /// never silently ignored.</summary>
 internal sealed class Arguments
 {
-    private static readonly HashSet<string> Flags = ["force"];
-    private static readonly HashSet<string> Known = ["source", "file", "keep", "force", "code", "name", "external-id", "count", "import"];
+    private static readonly HashSet<string> Flags = ["force", "scripts"];
+    private static readonly HashSet<string> Known = ["source", "file", "keep", "force", "scripts", "code", "name", "external-id", "count", "import"];
     private readonly Dictionary<string, string?> values = new(StringComparer.Ordinal);
 
     public static bool TryParse(string[] args, out Arguments parsed, out string? error)
