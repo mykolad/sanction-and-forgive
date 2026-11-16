@@ -59,13 +59,12 @@ func readHTMLTables(document string) []htmlTableRows {
 		table := htmlTableRows{before: htmlTextOf(document[previousEnd:match[0]])}
 		previousEnd = match[1]
 		for _, row := range htmlRow.FindAllStringSubmatch(document[match[2]:match[3]], -1) {
-			var cells []string
+			// A row without cells is kept: a list's reader decides whether it may be there.
+			cells := []string{}
 			for _, cell := range htmlCell.FindAllStringSubmatch(row[1], -1) {
 				cells = append(cells, htmlTextOf(cell[1]))
 			}
-			if len(cells) > 0 {
-				table.rows = append(table.rows, cells)
-			}
+			table.rows = append(table.rows, cells)
 		}
 		tables = append(tables, table)
 	}
@@ -105,12 +104,11 @@ func parseUflpa(reader io.Reader) ([]ParsedSubject, error) {
 			section = sections[len(sections)-1]
 		}
 		for _, row := range table.rows[1:] {
-			written := cleanString(row[0])
-			var date *time.Time
-			if len(row) == 2 {
-				date = ParseDate(s(row[1]), "January 2, 2006")
+			if len(row) != 2 {
+				return nil, formatError("A UFLPA row isn't a name and an effective date.")
 			}
-			if len(row) != 2 || written == nil || date == nil {
+			written, date := cleanString(row[0]), ParseDate(s(row[1]), "January 2, 2006")
+			if written == nil || date == nil {
 				return nil, formatError("A UFLPA row isn't a name and an effective date.")
 			}
 			primary, aliases, remark := uflpaSplitName(*written)

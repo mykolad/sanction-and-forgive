@@ -381,6 +381,7 @@ public class ParserTests
     [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table></html>")]
     [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td> </td></tr></table></html>")]
     [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td>Summer 2022</td></tr></table></html>")]
+    [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr></tr><tr><td>A</td><td>June 21, 2022</td></tr></table></html>")]
     public void Uflpa_RejectsAPageThatIsntTheList(string html)
     {
         Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), html));

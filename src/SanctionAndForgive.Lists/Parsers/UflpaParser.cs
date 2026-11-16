@@ -229,11 +229,8 @@ public static partial class HtmlTables
             var rows = new List<List<string>>();
             foreach (Match row in RowElement().Matches(table.Groups[1].Value))
             {
-                var cells = CellElement().Matches(row.Groups[1].Value).Select(cell => TextOf(cell.Groups[1].Value)).ToList();
-                if (cells.Count > 0)
-                {
-                    rows.Add(cells);
-                }
+                // A row without cells is kept: a list's reader decides whether it may be there.
+                rows.Add([.. CellElement().Matches(row.Groups[1].Value).Select(cell => TextOf(cell.Groups[1].Value))]);
             }
 
             tables.Add(new Table(before, rows));

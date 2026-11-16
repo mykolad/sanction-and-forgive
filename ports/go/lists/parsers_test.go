@@ -170,6 +170,7 @@ func TestUflpaRejectsAPageThatIsntTheList(t *testing.T) {
 		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table></html>`,
 		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td> </td></tr></table></html>`,
 		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td>Summer 2022</td></tr></table></html>`,
+		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr></tr><tr><td>A</td><td>June 21, 2022</td></tr></table></html>`,
 		uflpaPage[:strings.LastIndex(uflpaPage, "<tr>")],
 		uflpaPage[:strings.LastIndex(uflpaPage, "</table>")+len("</table>")],
 		uflpaPage[:strings.LastIndex(uflpaPage, "</tr>")] + uflpaPage[strings.LastIndex(uflpaPage, "</tr>")+len("</tr>"):],

@@ -48,11 +48,9 @@ fn read_tables(document: &str) -> Vec<Table> {
         let whole = table.get(0).unwrap();
         let before = text_of(&document[previous_end..whole.start()]);
         previous_end = whole.end();
-        let rows = ROW
-            .captures_iter(&table[1])
-            .map(|row| CELL.captures_iter(&row[1]).map(|cell| text_of(&cell[1])).collect::<Vec<_>>())
-            .filter(|cells| !cells.is_empty())
-            .collect();
+        // A row without cells is kept: a list's reader decides whether it may be there.
+        let rows =
+            ROW.captures_iter(&table[1]).map(|row| CELL.captures_iter(&row[1]).map(|cell| text_of(&cell[1])).collect::<Vec<_>>()).collect();
         tables.push(Table { before, rows });
     }
     tables
@@ -270,6 +268,7 @@ mod tests {
             "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table></html>",
             "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td> </td></tr></table></html>",
             "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td>Summer 2022</td></tr></table></html>",
+            "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr></tr><tr><td>A</td><td>June 21, 2022</td></tr></table></html>",
             in_last_table,
             after_it,
             &row_not_closed,
