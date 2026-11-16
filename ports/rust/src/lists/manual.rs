@@ -261,11 +261,7 @@ impl Downloader {
     pub async fn download_feed(&self, source: &ListSource, eu_token: &str) -> Result<tempfile_path::TempPath, ParseError> {
         let mut address = source.url.replace("{token}", eu_token);
         if !source.link_pattern.is_empty() {
-            let page = self.download(source.code, &address).await?;
-            let size = std::fs::metadata(page.path())?.len();
-            if size > MAX_PAGE_BYTES {
-                return Err(format_error(format!("The publisher's page is larger than {MAX_PAGE_BYTES} bytes.")));
-            }
+            let page = self.download_limited(source.code, &address, Some(MAX_PAGE_BYTES)).await?;
             let document = String::from_utf8_lossy(&std::fs::read(page.path())?).into_owned();
             address = find_link(&address, &document, source.link_pattern)?;
         }
@@ -273,10 +269,15 @@ impl Downloader {
     }
 
     pub async fn download(&self, source: &str, url: &str) -> Result<tempfile_path::TempPath, ParseError> {
+        self.download_limited(source, url, None).await
+    }
+
+    /// download, stopping as soon as the body passes max_bytes (when given): an error not tried again.
+    async fn download_limited(&self, source: &str, url: &str, max_bytes: Option<u64>) -> Result<tempfile_path::TempPath, ParseError> {
         let started = Instant::now();
         let mut attempt = 1;
         loop {
-            let fault = match self.attempt(url).await {
+            let fault = match self.attempt(url, max_bytes).await {
                 Ok(path) => return Ok(path),
                 Err(fault) => fault,
             };
@@ -303,7 +304,7 @@ impl Downloader {
         }
     }
 
-    async fn attempt(&self, url: &str) -> Result<tempfile_path::TempPath, Fault> {
+    async fn attempt(&self, url: &str, max_bytes: Option<u64>) -> Result<tempfile_path::TempPath, Fault> {
         let work = async {
             let response = self
                 .client
@@ -321,8 +322,13 @@ impl Downloader {
             let mut stream = response.bytes_stream();
             use futures_util::StreamExt;
             use tokio::io::AsyncWriteExt;
+            let mut written = 0u64;
             while let Some(chunk) = stream.next().await {
                 let chunk = chunk.map_err(|e| Fault::Other(e.to_string(), true))?;
+                written += chunk.len() as u64;
+                if let Some(limit) = max_bytes.filter(|limit| written > *limit) {
+                    return Err(Fault::Other(format!("The publisher's page is larger than {limit} bytes."), false));
+                }
                 file.write_all(&chunk).await.map_err(|e| Fault::Other(e.to_string(), false))?;
             }
             file.flush().await.map_err(|e| Fault::Other(e.to_string(), false))?;

@@ -46,14 +46,9 @@ public sealed partial class FeedDownloader(HttpClient httpClient, TimeSpan timeo
         var url = new Uri(source.Url!.Replace("{token}", euToken, StringComparison.Ordinal));
         if (source.LinkPattern is { } pattern)
         {
-            var page = await DownloadAsync(source.Code, url, cancellationToken);
+            var page = await DownloadAsync(source.Code, url, MaxPageBytes, cancellationToken);
             try
             {
-                if (new FileInfo(page).Length > MaxPageBytes)
-                {
-                    throw new ListFormatException($"The publisher's page is larger than {MaxPageBytes} bytes.");
-                }
-
                 url = FindLink(url, await File.ReadAllTextAsync(page, cancellationToken), pattern);
             }
             finally
@@ -62,7 +57,7 @@ public sealed partial class FeedDownloader(HttpClient httpClient, TimeSpan timeo
             }
         }
 
-        return await DownloadAsync(source.Code, url, cancellationToken);
+        return await DownloadAsync(source.Code, url, null, cancellationToken);
     }
 
     /// <summary>The file a page links, for a feed published under a dated name: of the page's links (<c>href</c>,
@@ -95,14 +90,19 @@ public sealed partial class FeedDownloader(HttpClient httpClient, TimeSpan timeo
     /// tried again writes one line to the log, named by <paramref name="source"/> (never the URL: it can hold a token).
     /// Throws the last attempt's <see cref="HttpRequestException"/>, <see cref="IOException"/> or
     /// <see cref="TimeoutException"/> (one attempt longer than the timeout) once the retries are spent.</summary>
-    public async Task<string> DownloadAsync(string source, Uri url, CancellationToken cancellationToken)
+    public Task<string> DownloadAsync(string source, Uri url, CancellationToken cancellationToken) =>
+        DownloadAsync(source, url, null, cancellationToken);
+
+    /// <summary>As <see cref="DownloadAsync(string, Uri, CancellationToken)"/>, stopping as soon as the body passes
+    /// <paramref name="maxBytes"/> (when given): a <see cref="ListFormatException"/>, not tried again.</summary>
+    private async Task<string> DownloadAsync(string source, Uri url, long? maxBytes, CancellationToken cancellationToken)
     {
         var started = time.GetTimestamp();
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                return await AttemptAsync(url, cancellationToken);
+                return await AttemptAsync(url, maxBytes, cancellationToken);
             }
             catch (Exception exception) when (IsPassing(exception) && attempt <= retry.Delays.Count)
             {
@@ -127,7 +127,7 @@ public sealed partial class FeedDownloader(HttpClient httpClient, TimeSpan timeo
         }
     }
 
-    private async Task<string> AttemptAsync(Uri url, CancellationToken cancellationToken)
+    private async Task<string> AttemptAsync(Uri url, long? maxBytes, CancellationToken cancellationToken)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
@@ -137,7 +137,27 @@ public sealed partial class FeedDownloader(HttpClient httpClient, TimeSpan timeo
             using var response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             response.EnsureSuccessStatusCode();
             await using var file = File.Create(path);
-            await response.Content.CopyToAsync(file, deadline.Token);
+            if (maxBytes is not { } limit)
+            {
+                await response.Content.CopyToAsync(file, deadline.Token);
+                return path;
+            }
+
+            await using var body = await response.Content.ReadAsStreamAsync(deadline.Token);
+            var buffer = new byte[81920];
+            var written = 0L;
+            int read;
+            while ((read = await body.ReadAsync(buffer, deadline.Token)) > 0)
+            {
+                written += read;
+                if (written > limit)
+                {
+                    throw new ListFormatException($"The publisher's page is larger than {limit} bytes.");
+                }
+
+                await file.WriteAsync(buffer.AsMemory(0, read), deadline.Token);
+            }
+
             return path;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

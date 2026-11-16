@@ -209,11 +209,11 @@ var hrefPattern = regexp.MustCompile(`(?i)href\s*=\s*["']([^"']*)["']`)
 func (d *Downloader) DownloadFeed(ctx context.Context, source *ListSource, euToken string) (string, error) {
 	address := strings.ReplaceAll(source.URL, "{token}", euToken)
 	if source.LinkPattern != "" {
-		page, err := d.Download(ctx, source.Code, address)
+		page, err := d.download(ctx, source.Code, address, MaxPageBytes)
 		if err != nil {
 			return "", err
 		}
-		data, err := readPage(page)
+		data, err := os.ReadFile(page)
 		os.Remove(page)
 		if err != nil {
 			return "", err
@@ -223,17 +223,6 @@ func (d *Downloader) DownloadFeed(ctx context.Context, source *ListSource, euTok
 		}
 	}
 	return d.Download(ctx, source.Code, address)
-}
-
-func readPage(path string) ([]byte, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() > MaxPageBytes {
-		return nil, formatError("The publisher's page is larger than %d bytes.", MaxPageBytes)
-	}
-	return os.ReadFile(path)
 }
 
 // FindLink is the file a page links, for a feed published under a dated name: of the page's links (href, entities
@@ -269,9 +258,14 @@ func FindLink(page, document, linkPattern string) (string, error) {
 }
 
 func (d *Downloader) Download(ctx context.Context, source, url string) (string, error) {
+	return d.download(ctx, source, url, 0)
+}
+
+// download is Download, stopping as soon as the body passes maxBytes (when above 0): a format error, not tried again.
+func (d *Downloader) download(ctx context.Context, source, url string, maxBytes int64) (string, error) {
 	started := time.Now()
 	for attempt := 1; ; attempt++ {
-		path, err := d.attempt(ctx, url)
+		path, err := d.attempt(ctx, url, maxBytes)
 		if err == nil {
 			return path, nil
 		}
@@ -295,7 +289,7 @@ func (d *Downloader) Download(ctx context.Context, source, url string) (string, 
 	}
 }
 
-func (d *Downloader) attempt(ctx context.Context, url string) (string, error) {
+func (d *Downloader) attempt(ctx context.Context, url string, maxBytes int64) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, d.Timeout)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -315,7 +309,15 @@ func (d *Downloader) attempt(ctx context.Context, url string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := io.Copy(file, response.Body); err != nil {
+	body := io.Reader(response.Body)
+	if maxBytes > 0 {
+		body = io.LimitReader(response.Body, maxBytes+1)
+	}
+	written, err := io.Copy(file, body)
+	if err == nil && maxBytes > 0 && written > maxBytes {
+		err = formatError("The publisher's page is larger than %d bytes.", maxBytes)
+	}
+	if err != nil {
 		file.Close()
 		os.Remove(file.Name())
 		return "", err
