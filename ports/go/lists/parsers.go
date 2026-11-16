@@ -42,6 +42,8 @@ func ParserFor(code string) Parser {
 		return parseNewZealand
 	case "jp-mof":
 		return parseJapan
+	case "us-uflpa":
+		return parseUflpa
 	}
 	return nil
 }

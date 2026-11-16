@@ -219,7 +219,7 @@ pub fn find_link(page: &str, document: &str, link_pattern: &str) -> Result<Strin
 }
 
 /// HTML's character references in an attribute: the five named ones and numeric ones (all a link needs).
-fn decode_entities(text: &str) -> String {
+pub(crate) fn decode_entities(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(at) = rest.find('&') {
@@ -233,6 +233,14 @@ fn decode_entities(text: &str) -> String {
                 "gt" => Some('>'),
                 "quot" => Some('"'),
                 "apos" => Some('\''),
+                "nbsp" => Some('\u{a0}'),
+                "ndash" => Some('\u{2013}'),
+                "mdash" => Some('\u{2014}'),
+                "lsquo" => Some('\u{2018}'),
+                "rsquo" => Some('\u{2019}'),
+                "ldquo" => Some('\u{201c}'),
+                "rdquo" => Some('\u{201d}'),
+                "hellip" => Some('\u{2026}'),
                 _ => entity
                     .strip_prefix("#x")
                     .or_else(|| entity.strip_prefix("#X"))
