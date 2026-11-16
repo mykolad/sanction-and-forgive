@@ -1,5 +1,5 @@
 {
-  "note": "Words that never decide a match. 'stop' and 'honorifics' are ignored in names (honorifics only for people). 'addressWords' are street-type and filler words dropped from addresses.",
+  "note": "Words that never decide a match. 'stop' and 'honorifics' are ignored in names (honorifics only for people). 'addressWords' are street-type and filler words dropped from addresses. A country name after one of 'streetWords' and one or two of 'streetParticles' names the street, not the country: 'rue de Malte', 'avenue de la Grèce'.",
   "stop": ["of", "the", "and", "de", "van", "von", "der", "den", "da", "di", "del", "della", "la", "le", "du", "des", "für", "fur", "и", "та"],
   "honorifics": ["mr", "mrs", "ms", "miss", "dr", "prof", "gen", "general", "col", "colonel", "maj", "major", "capt", "captain", "lt", "sgt", "sir", "господин", "госпожа", "пан", "пані"],
   "addressWords": [
@@ -11,6 +11,11 @@
     "street", "st", "str", "strasse", "straße", "ave", "avenue", "road", "rd", "blvd", "boulevard", "lane", "ln", "drive", "dr",
     "square", "sq", "building", "bldg", "floor", "fl", "office", "suite", "ste", "apt", "apartment", "room", "rm", "unit",
     "no", "nr", "number", "po", "box", "district", "province", "region", "oblast", "city", "village", "town", "area",
-    "deliver", "delivery", "to", "in", "at", "for", "via", "c/o", "co", "the", "of", "and", "warehouse", "address"
-  ]
+    "deliver", "delivery", "to", "in", "at", "for", "via", "c/o", "co", "the", "of", "and", "warehouse", "address",
+    "rue", "bd", "allée", "allee", "chemin", "quai", "impasse", "route", "cours", "cedex", "av", "place", "passage", "voie", "esplanade", "promenade", "faubourg",
+    "de", "du", "des", "la", "le", "les", "au", "aux", "et"
+  ],
+  "streetWords": ["rue", "avenue", "av", "boulevard", "bd", "place", "allée", "allee", "chemin", "quai", "impasse", "route", "cours",
+    "passage", "square", "voie", "esplanade", "promenade", "faubourg"],
+  "streetParticles": ["de", "du", "des", "la", "le"]
 }

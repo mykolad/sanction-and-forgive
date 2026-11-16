@@ -48,6 +48,10 @@ pub struct MatcherData {
     pub stop_words: HashSet<String>,
     pub honorifics: HashSet<String>,
     pub address_words: HashSet<String>,
+    /// A country name after one of these street types and one or two street_particles names the street ("rue de
+    /// Malte"), as in the reference's AddressParser.
+    pub street_words: HashSet<String>,
+    pub street_particles: HashSet<String>,
     pub spelling_groups: HashMap<String, usize>,
     pub spelling_group_members: Vec<Vec<String>>,
     pub cognate_groups: HashMap<String, Vec<usize>>,
@@ -203,6 +207,7 @@ fn load() -> MatcherData {
     let word_lists = object(document("words.json"));
     let set = |property: &str| -> HashSet<String> { strings(&word_lists[property]).iter().flat_map(|word| words(word)).collect() };
     let (stop_words, honorifics, address_words) = (set("stop"), set("honorifics"), set("addressWords"));
+    let (street_words, street_particles) = (set("streetWords"), set("streetParticles"));
 
     let mut spelling_group_members: Vec<Vec<String>> = Vec::new();
     for group in object(document("spelling-pairs.json"))["groups"].as_array().unwrap() {
@@ -281,6 +286,8 @@ fn load() -> MatcherData {
         stop_words,
         honorifics,
         address_words,
+        street_words,
+        street_particles,
         spelling_groups,
         spelling_group_members,
         cognate_groups,

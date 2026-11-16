@@ -32,6 +32,6 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "566ac3d19d5b");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "039bf443f9ab");
     }
 }

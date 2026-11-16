@@ -44,6 +44,13 @@ internal sealed class MatcherData
 
     public required HashSet<string> AddressWords { get; init; }
 
+    /// <summary>Street types (<c>rue</c>, <c>avenue</c>) after which a country name joined by one or two
+    /// <see cref="StreetParticles"/> names the street, not the country: <c>rue de Malte</c>.</summary>
+    public required HashSet<string> StreetWords { get; init; }
+
+    /// <summary>The words joining a street type to the name (<c>de</c>, <c>du</c>, <c>des</c>, <c>la</c>, <c>le</c>).</summary>
+    public required HashSet<string> StreetParticles { get; init; }
+
     /// <summary>Latin spelling → spelling group.</summary>
     public required Dictionary<string, int> SpellingGroups { get; init; }
 
@@ -209,6 +216,8 @@ internal sealed class MatcherData
             StopWords = Set("stop"),
             Honorifics = Set("honorifics"),
             AddressWords = Set("addressWords"),
+            StreetWords = Set("streetWords"),
+            StreetParticles = Set("streetParticles"),
             SpellingGroups = spellingGroups,
             SpellingGroupMembers = spellingMembers,
             CognateGroups = cognateGroups,
