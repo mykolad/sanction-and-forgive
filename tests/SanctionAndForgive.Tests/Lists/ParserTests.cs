@@ -376,12 +376,24 @@ public class ParserTests
 
     [Theory]
     [InlineData("<html><p>No tables here.</p></html>")]
-    [InlineData("<table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table>")]
-    [InlineData("<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table>")]
-    [InlineData("<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table>")]
+    [InlineData("<html><table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table></html>")]
+    [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table></html>")]
+    [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table></html>")]
+    [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td> </td></tr></table></html>")]
+    [InlineData("<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td>Summer 2022</td></tr></table></html>")]
     public void Uflpa_RejectsAPageThatIsntTheList(string html)
     {
         Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), html));
+    }
+
+    [Fact]
+    public void Uflpa_RejectsAPageCutShort_InItsLastTable_OrAfterIt()
+    {
+        var inLastTable = UflpaPage[..UflpaPage.LastIndexOf("<tr>", StringComparison.Ordinal)];
+        var afterIt = UflpaPage[..(UflpaPage.LastIndexOf("</table>", StringComparison.Ordinal) + "</table>".Length)];
+
+        Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), inLastTable));
+        Assert.Throws<ListFormatException>(() => Parse(new UflpaParser(), afterIt));
     }
 
     [Theory]

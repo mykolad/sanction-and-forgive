@@ -21,6 +21,9 @@ static ALIAS_LEAD: LazyLock<Regex> =
 static ACRONYM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Z0-9&-]{2,12}$").unwrap());
 static TRAILING: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i),?\s+(and (?:its subordinate and affiliated entities|subsidiaries))\s*$").unwrap());
+static TABLE_OPEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<table\b").unwrap());
+static TABLE_CLOSE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</table\s*>").unwrap());
+static DOCUMENT_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</html\s*>\s*$").unwrap());
 static SECTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"Section\s+\d+\([a-z]\)\(\d+\)\([A-Z]\)\([ivx]+\)").unwrap());
 
 /// A table: the page's text before it (since the previous table), and its rows of cells.
@@ -63,9 +66,17 @@ pub fn parse_uflpa(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseE
     let mut data = Vec::new();
     input.read_to_end(&mut data)?;
     let text = String::from_utf8_lossy(&data);
-    let tables = read_tables(text.strip_prefix('\u{FEFF}').unwrap_or(&text));
+    let document = text.strip_prefix('\u{FEFF}').unwrap_or(&text);
+    let tables = read_tables(document);
     if tables.is_empty() {
         return Err(format_error("The UFLPA page has no entity tables."));
+    }
+    // A page cut short loses its last rows or tables without a trace: the document must end, and every table close.
+    let complete = TABLE_OPEN.find_iter(document).count() == tables.len()
+        && TABLE_CLOSE.find_iter(document).count() == tables.len()
+        && DOCUMENT_END.is_match(document);
+    if !complete {
+        return Err(format_error("The UFLPA page is cut short: a table or the document doesn't close."));
     }
     let mut entities: Vec<Entity> = Vec::new();
     let mut by_key: HashMap<String, usize> = HashMap::new();
@@ -78,7 +89,8 @@ pub fn parse_uflpa(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseE
         let section = SECTION.find_iter(&table.before).last().map(|m| m.as_str().to_string());
         for row in &table.rows[1..] {
             let written = clean(row.first().map(String::as_str));
-            let (2, Some(written)) = (row.len(), written) else {
+            let date = row.get(1).and_then(|cell| parse_date(Some(cell), "%B %d, %Y"));
+            let (2, Some(written), Some(date)) = (row.len(), written, date) else {
                 return Err(format_error("A UFLPA row isn't a name and an effective date."));
             };
             let (primary, mut aliases, remark) = split_name(&written);
@@ -107,10 +119,8 @@ pub fn parse_uflpa(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseE
                     entity.remarks.push(remark);
                 }
             }
-            if let Some(date) = parse_date(Some(&row[1]), "%B %d, %Y") {
-                if entity.listed_on.is_none_or(|listed| date < listed) {
-                    entity.listed_on = Some(date);
-                }
+            if entity.listed_on.is_none_or(|listed| date < listed) {
+                entity.listed_on = Some(date);
             }
         }
     }
@@ -242,11 +252,17 @@ mod tests {
 
     #[test]
     fn a_page_that_isnt_the_list_is_a_format_error() {
+        let in_last_table = &PAGE[..PAGE.rfind("<tr>").unwrap()];
+        let after_it = &PAGE[..PAGE.rfind("</table>").unwrap() + "</table>".len()];
         for page in [
             "<html><p>No tables here.</p></html>",
-            "<table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table>",
-            "<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table>",
-            "<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table>",
+            "<html><table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table></html>",
+            "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table></html>",
+            "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table></html>",
+            "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td> </td></tr></table></html>",
+            "<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td>Summer 2022</td></tr></table></html>",
+            in_last_table,
+            after_it,
         ] {
             assert!(parse_uflpa(&mut page.as_bytes()).is_err(), "{page}");
         }

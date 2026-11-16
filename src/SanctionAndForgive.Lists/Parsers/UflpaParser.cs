@@ -10,7 +10,8 @@ namespace SanctionAndForgive.Lists.Parsers;
 /// Aliases are written in the name, in parentheses: <c>(also known as A; B; and C)</c>, <c>(formerly known as …)</c>,
 /// <c>(including three aliases: …)</c>, <c>(and two aliases: …)</c>, or an acronym alone (<c>(XPCC)</c>); other
 /// parentheses are part of the name (<c>(Shanshan)</c>). A trailing "and subsidiaries" or "and its subordinate and
-/// affiliated entities" goes to the remarks. An entity listed under several sections is one record: its sections
+/// affiliated entities" goes to the remarks. A page cut short (a table or the document not closed), a table without its
+/// header, or a row that isn't a name and a date is a format error. An entity listed under several sections is one record: its sections
 /// joined, the earliest date, every spelling of its name kept (two that differ only by a final full stop are one
 /// entity). The id is the first spelling of the name without its aliases. No per-record page.</summary>
 public sealed partial class UflpaParser : IListParser
@@ -33,6 +34,12 @@ public sealed partial class UflpaParser : IListParser
             throw new ListFormatException("The UFLPA page has no entity tables.");
         }
 
+        // A page cut short loses its last rows or tables without a trace: the document must end, and every table close.
+        if (!HtmlTables.IsComplete(html, tables.Count))
+        {
+            throw new ListFormatException("The UFLPA page is cut short: a table or the document doesn't close.");
+        }
+
         var entities = new List<Entity>();
         var byId = new Dictionary<string, Entity>(StringComparer.Ordinal);
         foreach (var table in tables)
@@ -47,7 +54,7 @@ public sealed partial class UflpaParser : IListParser
             var section = Section().Matches(table.Before) is { Count: > 0 } sections ? sections[^1].Value : null;
             foreach (var row in table.Rows.Skip(1))
             {
-                if (row is not [var cell, var dateCell] || Text.Clean(cell) is not { } written)
+                if (row is not [var cell, var dateCell] || Text.Clean(cell) is not { } written || Text.ParseDate(dateCell, "MMMM d, yyyy") is not { } date)
                 {
                     throw new ListFormatException("A UFLPA row isn't a name and an effective date.");
                 }
@@ -65,7 +72,7 @@ public sealed partial class UflpaParser : IListParser
 
                 aliases.Add(primary);
 
-                entity.Add(aliases, remark, section, Text.ParseDate(dateCell, "MMMM d, yyyy"));
+                entity.Add(aliases, remark, section, date);
             }
         }
 
@@ -166,7 +173,7 @@ public sealed partial class UflpaParser : IListParser
         private readonly List<string> remarks = [];
         private DateOnly? listedOn;
 
-        public void Add(List<string> aliases, string? remark, string? section, DateOnly? date)
+        public void Add(List<string> aliases, string? remark, string? section, DateOnly date)
         {
             names.AddRange(aliases);
             if (section is not null && !sections.Contains(section))
@@ -179,9 +186,9 @@ public sealed partial class UflpaParser : IListParser
                 remarks.Add(remark);
             }
 
-            if (date is { } d && (listedOn is null || d < listedOn))
+            if (listedOn is null || date < listedOn)
             {
-                listedOn = d;
+                listedOn = date;
             }
         }
 
@@ -235,6 +242,11 @@ public static partial class HtmlTables
         return tables;
     }
 
+    /// <summary>Whether a page holding <paramref name="tables"/> read tables is whole: as many table openings and
+    /// closings as tables read, and the document's closing tag.</summary>
+    public static bool IsComplete(string html, int tables) =>
+        TableOpen().Count(html) == tables && TableClose().Count(html) == tables && DocumentEnd().IsMatch(html);
+
     /// <summary>A fragment's text: tags as spaces, character references decoded, whitespace collapsed.</summary>
     public static string TextOf(string fragment) =>
         Text.Clean(WebUtility.HtmlDecode(Tag().Replace(fragment, " "))) ?? string.Empty;
@@ -250,4 +262,13 @@ public static partial class HtmlTables
 
     [GeneratedRegex(@"<[^>]*>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex Tag();
+
+    [GeneratedRegex(@"<table\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TableOpen();
+
+    [GeneratedRegex(@"</table\s*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TableClose();
+
+    [GeneratedRegex(@"</html\s*>\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DocumentEnd();
 }

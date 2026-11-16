@@ -23,6 +23,9 @@ var (
 	uflpaAcronym    = regexp.MustCompile(`^[A-Z0-9&-]{2,12}$`)
 	uflpaTrailing   = regexp.MustCompile(`(?i),?\s+(and (?:its subordinate and affiliated entities|subsidiaries))\s*$`)
 	uflpaSectionRef = regexp.MustCompile(`Section\s+\d+\([a-z]\)\(\d+\)\([A-Z]\)\([ivx]+\)`)
+	htmlTableOpen   = regexp.MustCompile(`(?i)<table\b`)
+	htmlTableClose  = regexp.MustCompile(`(?i)</table\s*>`)
+	htmlDocumentEnd = regexp.MustCompile(`(?i)</html\s*>\s*$`)
 )
 
 type htmlTableRows struct {
@@ -33,6 +36,13 @@ type htmlTableRows struct {
 // htmlTextOf is a fragment's text: tags as spaces, character references decoded, whitespace collapsed.
 func htmlTextOf(fragment string) string {
 	return deref(cleanString(html.UnescapeString(htmlTag.ReplaceAllString(fragment, " "))))
+}
+
+// htmlIsComplete says whether a page holding this many read tables is whole: as many table openings and closings as
+// tables read, and the document's closing tag.
+func htmlIsComplete(document string, tables int) bool {
+	return len(htmlTableOpen.FindAllStringIndex(document, -1)) == tables && len(htmlTableClose.FindAllStringIndex(document, -1)) == tables &&
+		htmlDocumentEnd.MatchString(document)
 }
 
 // readHTMLTables reads every table's rows and cells, and the page's text between the previous table and this one.
@@ -73,6 +83,10 @@ func parseUflpa(reader io.Reader) ([]ParsedSubject, error) {
 	if len(tables) == 0 {
 		return nil, formatError("The UFLPA page has no entity tables.")
 	}
+	// A page cut short loses its last rows or tables without a trace: the document must end, and every table close.
+	if !htmlIsComplete(string(data), len(tables)) {
+		return nil, formatError("The UFLPA page is cut short: a table or the document doesn't close.")
+	}
 	var entities []*uflpaEntity
 	byKey := map[string]*uflpaEntity{}
 	for _, table := range tables {
@@ -86,7 +100,11 @@ func parseUflpa(reader io.Reader) ([]ParsedSubject, error) {
 		}
 		for _, row := range table.rows[1:] {
 			written := cleanString(row[0])
-			if len(row) != 2 || written == nil {
+			var date *time.Time
+			if len(row) == 2 {
+				date = ParseDate(s(row[1]), "January 2, 2006")
+			}
+			if len(row) != 2 || written == nil || date == nil {
 				return nil, formatError("A UFLPA row isn't a name and an effective date.")
 			}
 			primary, aliases, remark := uflpaSplitName(*written)
@@ -105,7 +123,7 @@ func parseUflpa(reader io.Reader) ([]ParsedSubject, error) {
 			if remark != "" && !slices.Contains(entity.remarks, remark) {
 				entity.remarks = append(entity.remarks, remark)
 			}
-			if date := ParseDate(s(row[1]), "January 2, 2006"); date != nil && (entity.listedOn == nil || date.Before(*entity.listedOn)) {
+			if entity.listedOn == nil || date.Before(*entity.listedOn) {
 				entity.listedOn = date
 			}
 		}

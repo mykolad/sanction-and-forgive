@@ -165,9 +165,13 @@ func TestUflpaReadsEachSectionsTableAliasesInTheNameOneRecordPerEntity(t *testin
 func TestUflpaRejectsAPageThatIsntTheList(t *testing.T) {
 	for _, page := range []string{
 		`<html><p>No tables here.</p></html>`,
-		`<table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table>`,
-		`<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table>`,
-		`<table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table>`,
+		`<html><table><tr><th>Company</th><th>Date</th></tr><tr><td>A</td><td>June 21, 2022</td></tr></table></html>`,
+		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td></tr></table></html>`,
+		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td> </td><td>June 21, 2022</td></tr></table></html>`,
+		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td> </td></tr></table></html>`,
+		`<html><table><tr><th>Name of Entity</th><th>Effective Date</th></tr><tr><td>A</td><td>Summer 2022</td></tr></table></html>`,
+		uflpaPage[:strings.LastIndex(uflpaPage, "<tr>")],
+		uflpaPage[:strings.LastIndex(uflpaPage, "</table>")+len("</table>")],
 	} {
 		var formatErr *FormatError
 		if _, err := parseUflpa(strings.NewReader(page)); !errors.As(err, &formatErr) {
