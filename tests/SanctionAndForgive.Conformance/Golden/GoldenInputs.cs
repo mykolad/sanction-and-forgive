@@ -29,12 +29,18 @@ public static class GoldenInputs
         "221 Rue de Rivoli, 75001 Paris, France", "Via Roma 10, 00184 Roma, Italy", "1 Infinite Loop, Cupertino, CA, USA",
     ];
 
+    /// <summary>The feeds the inputs are drawn from: the nine there were when the golden files were first made, fixed,
+    /// so a new list adds its own cells to the golden files without changing the inputs (and every other list's
+    /// answers stay comparable line by line).</summary>
+    private static readonly string[] InputFeeds = ["eu", "ofac-sdn", "ofac-cons", "un", "uk", "us-export", "ch-seco", "ca-sema", "ua-sfms"];
+
     public static IReadOnlyList<GoldenInput> All { get; } = Generate();
+
 
     private static List<GoldenInput> Generate()
     {
         var rng = new Rng(Fixtures.Seed + 1);
-        var listed = FeedFiles.Feeds.SelectMany(feed => FeedFiles.Subjects(feed.Code)).DistinctBy(subject => subject.Number).OrderBy(subject => subject.Number).ToList();
+        var listed = InputFeeds.SelectMany(FeedFiles.Subjects).DistinctBy(subject => subject.Number).OrderBy(subject => subject.Number).ToList();
         var inputs = new List<GoldenInput>();
         void Add(string? receiver, string? company, string? address) =>
             inputs.Add(new GoldenInput($"golden-{inputs.Count + 1:0000}", receiver, company, address));

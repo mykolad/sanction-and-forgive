@@ -74,6 +74,24 @@
       "historyCount": "*"
     },
     {
+      "code": "fr-tresor",
+      "name": "France national asset-freeze register (DG Trésor)",
+      "state": "Current",
+      "status": "Active",
+      "reason": null,
+      "recordCount": 100,
+      "version": "*",
+      "lastCheckedAt": "*",
+      "updatedAt": "*",
+      "maxAgeHours": 72,
+      "homepage": "https://gels-avoirs.dgtresor.gouv.fr/",
+      "fileUrl": "https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json",
+      "termsUrl": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
+    },
+    {
       "code": "ofac-cons",
       "name": "OFAC consolidated (non-SDN)",
       "state": "Current",
