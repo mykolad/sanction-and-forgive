@@ -235,6 +235,54 @@ public class ParserTests
         Assert.Equal(("Шевченко Тарас", SubjectType.Individual, NameScript.Cyrillic), (subjects[1].PrimaryName, subjects[1].Type, subjects[1].Names[0].Script));
     }
 
+    [Fact]
+    public void France_ReadsPersonsAndCompanies_LeavesOutVessels_MarksWeakAliases()
+    {
+        var subjects = Parse(new FranceParser(), """
+            {"Publications": {"DatePublication": "2026-11-16T10:47:40+01:00", "PublicationDetail": [
+              {"IdRegistre": 101, "Nature": "Personne physique", "Nom": "SOKOLOV", "RegistreDetail": [
+                {"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan Petrovich"}]},
+                {"TypeChamp": "ALIAS", "Valeur": [{"Alias": "Иван Петрович СОКОЛОВ", "Commentaire": "en russe"}, {"Alias": "Vanya", "Commentaire": "alias faible"}]},
+                {"TypeChamp": "ADRESSE_PP", "Valeur": [{"Adresse": "Lenina 5, Moscou", "Pays": "RUSSIE"}]},
+                {"TypeChamp": "MOTIFS", "Valeur": [{"Motifs": "Membre du conseil."}]},
+                {"TypeChamp": "FONDEMENT_JURIDIQUE", "Valeur": [{"FondementJuridique": 1, "FondementJuridiqueLabel": "(UE) 2022/332"}, {"FondementJuridique": 2, "FondementJuridiqueLabel": "(UE) 2025/1894"}]}]},
+              {"IdRegistre": 102, "Nature": "Personne morale", "Nom": "Northwind Trading SARL", "RegistreDetail": [
+                {"TypeChamp": "ADRESSE_PM", "Valeur": [{"Adresse": "12 rue de la Paix, Paris", "Pays": "FRANCE"}]}]},
+              {"IdRegistre": 103, "Nature": "Navire", "Nom": "SEA STAR", "RegistreDetail": [{"TypeChamp": "NUMERO_OMI", "Valeur": [{"NumeroOMI": "1234567"}]}]}
+            ]}}
+            """);
+
+        Assert.Equal(["101", "102"], subjects.Select(subject => subject.ExternalId));
+        var person = subjects[0];
+        Assert.Equal((SubjectType.Individual, "Ivan Petrovich SOKOLOV"), (person.Type, person.PrimaryName));
+        Assert.Contains(person.Names, name => name is { FullName: "Иван Петрович СОКОЛОВ", IsWeak: false, Script: NameScript.Cyrillic });
+        Assert.Contains(person.Names, name => name is { FullName: "Vanya", IsWeak: true });
+        Assert.Equal(new ParsedAddress("Lenina 5, Moscou, RUSSIE", null), Assert.Single(person.Addresses));
+        Assert.Equal(("(UE) 2022/332; (UE) 2025/1894", "Membre du conseil."), (person.Programmes, person.Remarks));
+        Assert.Equal(FranceParser.RecordUrl + "101", person.SourceUrl);
+        Assert.Equal((SubjectType.Entity, "Northwind Trading SARL"), (subjects[1].Type, subjects[1].PrimaryName));
+    }
+
+    [Theory]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}]}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"Nature": "Personne morale", "Nom": "A"}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}, 7]}}""")]
+    [InlineData("""{"Publications": {}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne physique", "Nom": "A", "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}, {"Prenom": 7}]}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale"}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne physique", "Nom": " ", "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}]}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": {"TypeChamp": "ALIAS"}}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": {"Alias": "B"}}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"Valeur": [{"Alias": "B"}]}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": ["B"]}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": ["ALIAS"]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": [{"Alias": 7}]}]}]}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": [{"TypeChamp": "ADRESSE_PM", "Valeur": [{"Pays": "FRANCE"}]}]}]}}""")]
+    public void France_RejectsMalformedDocuments(string json)
+    {
+        Assert.Throws<ListFormatException>(() => Parse(new FranceParser(), json));
+    }
+
     [Theory]
     [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}, null]}""")]
     [InlineData("""{"results": [{"id": "a1", "source": "Entity List (EL) - Bureau of Industry and Security", "name": "A"}]""")]

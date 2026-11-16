@@ -15,7 +15,7 @@ public static class FeedFiles
     public static readonly IReadOnlyList<(string Code, int Count)> Feeds =
     [
         ("eu", 160), ("ofac-sdn", 200), ("ofac-cons", 60), ("un", 80), ("uk", 140), ("us-export", 120),
-        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50),
+        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100),
     ];
 
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
@@ -27,7 +27,7 @@ public static class FeedFiles
         Fixtures.For(code, Feeds.Single(feed => feed.Code == code).Count);
 
     /// <summary>The file name for a feed (its extension says the format).</summary>
-    public static string FileName(string code, string variant) => $"{code}.{variant}.{(code == "us-export" ? "json" : "xml")}";
+    public static string FileName(string code, string variant) => $"{code}.{variant}.{(code is "us-export" or "fr-tresor" ? "json" : "xml")}";
 
     /// <summary>Writes <paramref name="subjects"/> as <paramref name="code"/>'s feed to <paramref name="path"/>.</summary>
     public static void Write(string code, IReadOnlyList<FixtureSubject> subjects, string path)
@@ -36,6 +36,9 @@ public static class FeedFiles
         {
             case "us-export":
                 File.WriteAllText(path, UsExport(subjects), new UTF8Encoding(false));
+                return;
+            case "fr-tresor":
+                File.WriteAllText(path, France(subjects), new UTF8Encoding(false));
                 return;
             default:
                 var document = code switch
@@ -352,6 +355,101 @@ public static class FeedFiles
         }
 
         return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>Countries as France's register names them (French, in capitals): the matcher reads them
+    /// (countries.json).</summary>
+    private static readonly Dictionary<string, string> FrenchCountries = new(StringComparer.Ordinal)
+    {
+        ["RU"] = "RUSSIE", ["BY"] = "BIÉLORUSSIE", ["IR"] = "IRAN", ["AE"] = "ÉMIRATS ARABES UNIS", ["HK"] = "HONG-KONG",
+        ["TR"] = "TURQUIE", ["KZ"] = "KAZAKHSTAN", ["SY"] = "SYRIE", ["KP"] = "CORÉE DU NORD",
+    };
+
+    /// <summary>France's register (DG Trésor JSON): a person's given names apart from the surname, typed fields, a weak
+    /// alias marked "alias faible", and a vessel (left out).</summary>
+    private static string France(IReadOnlyList<FixtureSubject> subjects)
+    {
+        using var stream = new MemoryStream();
+        using (var json = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true }))
+        {
+            json.WriteStartObject();
+            json.WriteStartObject("Publications");
+            json.WriteString("DatePublication", "2026-11-16T10:47:40.2722917+01:00");
+            json.WriteStartArray("PublicationDetail");
+            foreach (var subject in subjects)
+            {
+                json.WriteStartObject();
+                json.WriteNumber("IdRegistre", 7000 + subject.Number);
+                json.WriteString("Nature", subject.Person ? "Personne physique" : "Personne morale");
+                json.WriteString("Nom", subject.Family);
+                json.WriteStartArray("RegistreDetail");
+                if (subject.Person)
+                {
+                    Field(json, "PRENOM", [[("Prenom", subject.Given!)]]);
+                }
+
+                var aliases = new List<(string, string)[]>();
+                if (subject.CyrillicName is { } cyrillic)
+                {
+                    aliases.Add([("Alias", cyrillic), ("Commentaire", "en russe")]);
+                }
+
+                aliases.AddRange(subject.Aliases.Select(alias => new[] { ("Alias", alias), ("Commentaire", string.Empty) }));
+                if (subject.WeakAlias is { } weak)
+                {
+                    aliases.Add([("Alias", weak), ("Commentaire", "alias faible")]);
+                }
+
+                if (aliases.Count > 0)
+                {
+                    Field(json, "ALIAS", aliases);
+                }
+
+                if (subject.Address is { } address)
+                {
+                    Field(json, subject.Person ? "ADRESSE_PP" : "ADRESSE_PM", [[("Adresse", $"{address.Street}, {address.City}"), ("Pays", FrenchCountries[address.Iso])]]);
+                }
+
+                Field(json, "MOTIFS", [[("Motifs", "Inscription fictive (conformance).")]]);
+                Field(json, "FONDEMENT_JURIDIQUE", [[("FondementJuridiqueLabel", $"(UE) {subject.Programme} du {Fixtures.Date(subject.ListedOn, "dd/MM/yyyy")}")]]);
+                json.WriteEndArray();
+                json.WriteEndObject();
+            }
+
+            json.WriteStartObject();
+            json.WriteNumber("IdRegistre", 6999);
+            json.WriteString("Nature", "Navire");
+            json.WriteString("Nom", "CONFORMANCE STAR");
+            json.WriteStartArray("RegistreDetail");
+            Field(json, "NUMERO_OMI", [[("NumeroOMI", "1234567")]]);
+            json.WriteEndArray();
+            json.WriteEndObject();
+            json.WriteEndArray();
+            json.WriteEndObject();
+            json.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void Field(Utf8JsonWriter json, string type, IEnumerable<(string Name, string Value)[]> values)
+    {
+        json.WriteStartObject();
+        json.WriteString("TypeChamp", type);
+        json.WriteStartArray("Valeur");
+        foreach (var value in values)
+        {
+            json.WriteStartObject();
+            foreach (var (name, text) in value)
+            {
+                json.WriteString(name, text);
+            }
+
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+        json.WriteEndObject();
     }
 
     private static XDocument Seco(IReadOnlyList<FixtureSubject> subjects)

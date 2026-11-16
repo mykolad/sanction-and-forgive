@@ -73,6 +73,9 @@ var Sources = []ListSource{
 	{Code: "ua-nsdc", Name: "Ukraine NSDC State Register of Sanctions", URL: "https://api-drs.nsdc.gov.ua/v2/subjects", MaxAgeHours: dailyMaxAge, Status: NeedsAccess,
 		Homepage: "https://drs.nsdc.gov.ua/",
 		Note:     "The register's API needs a key, which takes a registration. Waiting for one."},
+	{Code: "fr-tresor", Name: "France national asset-freeze register (DG Trésor)", URL: "https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json", MaxAgeHours: dailyMaxAge, Status: Active,
+		Homepage: "https://gels-avoirs.dgtresor.gouv.fr/",
+		TermsURL: "https://www.etalab.gouv.fr/licence-ouverte-open-licence/"},
 	{Code: "ua-sfms", Name: "Ukraine SFMS terrorism list", URL: "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", MaxAgeHours: dailyMaxAge, Status: Active,
 		Homepage: "https://fiu.gov.ua/"},
 }

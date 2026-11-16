@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -33,6 +34,8 @@ func ParserFor(code string) Parser {
 		return parseCanada
 	case "ua-sfms":
 		return parseSfms
+	case "fr-tresor":
+		return parseFrance
 	}
 	return nil
 }
@@ -696,3 +699,186 @@ func parseSfms(reader io.Reader) ([]ParsedSubject, error) {
 }
 
 var _ = time.Time{}
+
+// franceRecordURL is a register entry's page: its official record.
+const franceRecordURL = "https://gels-avoirs.dgtresor.gouv.fr/Gels/RegistreDetail?idRegistre="
+
+type franceRecord struct {
+	IDRegistre     json.RawMessage `json:"IdRegistre"`
+	Nature         *string         `json:"Nature"`
+	Nom            *string         `json:"Nom"`
+	RegistreDetail json.RawMessage `json:"RegistreDetail"`
+}
+
+// franceRequired: the text each kind of field's values always has.
+var franceRequired = map[string][]string{
+	"ALIAS": {"Alias"}, "PRENOM": {"Prenom"}, "ADRESSE_PM": {"Adresse", "Pays"}, "ADRESSE_PP": {"Adresse", "Pays"},
+	"MOTIFS": {"Motifs"}, "FONDEMENT_JURIDIQUE": {"FondementJuridiqueLabel"},
+}
+
+type franceField struct {
+	kind   string
+	values []map[string]json.RawMessage
+}
+
+// parseFrance reads France's national asset-freeze register (DG Trésor, JSON): FranceParser in the reference.
+func parseFrance(reader io.Reader) ([]ParsedSubject, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(data, &root); err != nil {
+		// A truncated or malformed file must fail, not pass as a shorter list.
+		return nil, formatError("France's register isn't valid JSON: %s", err.Error())
+	}
+	var publications map[string]json.RawMessage
+	var details []json.RawMessage
+	if raw, ok := root["Publications"]; !ok || !isJSON(raw, '{') || json.Unmarshal(raw, &publications) != nil {
+		return nil, formatError(`Expected {"Publications": {"PublicationDetail": [...]}}.`)
+	}
+	if raw, ok := publications["PublicationDetail"]; !ok || !isJSON(raw, '[') || json.Unmarshal(raw, &details) != nil {
+		return nil, formatError(`Expected {"Publications": {"PublicationDetail": [...]}}.`)
+	}
+
+	var out []ParsedSubject
+	for _, rawRecord := range details {
+		if !isJSON(rawRecord, '{') {
+			return nil, formatError("A register entry isn't an object.")
+		}
+		var record franceRecord
+		if err := json.Unmarshal(rawRecord, &record); err != nil {
+			return nil, formatError("A register entry isn't an object.")
+		}
+		var id *string
+		switch {
+		case isJSON(record.IDRegistre, '"'):
+			var text string
+			if json.Unmarshal(record.IDRegistre, &text) == nil {
+				id = cleanString(text)
+			}
+		case len(bytes.TrimSpace(record.IDRegistre)) > 0 && !isJSON(record.IDRegistre, '{') && !isJSON(record.IDRegistre, '[') && !bytes.Equal(bytes.TrimSpace(record.IDRegistre), []byte("null")) && !bytes.Equal(bytes.TrimSpace(record.IDRegistre), []byte("true")) && !bytes.Equal(bytes.TrimSpace(record.IDRegistre), []byte("false")):
+			id = cleanString(string(bytes.TrimSpace(record.IDRegistre)))
+		}
+		if id == nil {
+			return nil, formatError("A register entry has no IdRegistre.")
+		}
+		kind := Unknown
+		switch {
+		case eq(record.Nature, "Personne physique"):
+			kind = Individual
+		case eq(record.Nature, "Personne morale"):
+			kind = Entity
+		case eq(record.Nature, "Navire"):
+			continue
+		}
+
+		// A field that isn't the shape expected is a format error, never skipped: an update must not lose aliases or
+		// addresses while its record count stays the same.
+		var fields []franceField
+		if detail := bytes.TrimSpace(record.RegistreDetail); len(detail) > 0 && !bytes.Equal(detail, []byte("null")) {
+			var rawFields []json.RawMessage
+			if !isJSON(detail, '[') || json.Unmarshal(detail, &rawFields) != nil {
+				return nil, formatError("Register entry %s: RegistreDetail isn't a list.", *id)
+			}
+			for _, rawField := range rawFields {
+				var field map[string]json.RawMessage
+				var kind string
+				var rawValues []json.RawMessage
+				bad := !isJSON(rawField, '{') || json.Unmarshal(rawField, &field) != nil
+				if !bad {
+					raw, ok := field["TypeChamp"]
+					bad = !ok || !isJSON(raw, '"') || json.Unmarshal(raw, &kind) != nil
+				}
+				if !bad {
+					raw, ok := field["Valeur"]
+					bad = !ok || !isJSON(raw, '[') || json.Unmarshal(raw, &rawValues) != nil
+				}
+				if bad {
+					return nil, formatError(`Register entry %s: a field isn't {"TypeChamp": …, "Valeur": [...]}.`, *id)
+				}
+				parsed := franceField{kind: kind}
+				for _, rawValue := range rawValues {
+					var value map[string]json.RawMessage
+					if !isJSON(rawValue, '{') || json.Unmarshal(rawValue, &value) != nil {
+						return nil, formatError("Register entry %s: a %s value isn't an object.", *id, kind)
+					}
+					// A value the register always gives as text (a name, an address, a legal basis): missing or not text
+					// is a format error, never a name or an address quietly lost.
+					for _, key := range franceRequired[kind] {
+						if raw, ok := value[key]; !ok || !isJSON(raw, '"') {
+							return nil, formatError("Register entry %s: a value has no text %q.", *id, key)
+						}
+					}
+					parsed.values = append(parsed.values, value)
+				}
+				fields = append(fields, parsed)
+			}
+		}
+		values := func(fieldType string) []map[string]json.RawMessage {
+			var found []map[string]json.RawMessage
+			for _, field := range fields {
+				if field.kind == fieldType {
+					found = append(found, field.values...)
+				}
+			}
+			return found
+		}
+		text := func(value map[string]json.RawMessage, name string) *string {
+			raw, ok := value[name]
+			if !ok || !isJSON(raw, '"') {
+				return nil
+			}
+			var s string
+			if json.Unmarshal(raw, &s) != nil {
+				return nil
+			}
+			return &s
+		}
+
+		// Every entry has its name: one without is a broken file, not an entry to search by its aliases or to drop.
+		if Clean(record.Nom) == nil {
+			return nil, formatError("Register entry %s has no Nom.", *id)
+		}
+		b := newBuilder(*id, kind)
+		var labels, motifs []*string
+		for _, value := range values("FONDEMENT_JURIDIQUE") {
+			labels = append(labels, text(value, "FondementJuridiqueLabel"))
+		}
+		for _, value := range values("MOTIFS") {
+			motifs = append(motifs, text(value, "Motifs"))
+		}
+		b.Programmes = Join("; ", labels...)
+		b.Remarks = Join(" ", motifs...)
+		b.SourceURL = s(franceRecordURL + url.QueryEscape(*id))
+
+		var given *string
+		for _, value := range values("PRENOM") {
+			if name := text(value, "Prenom"); Clean(name) != nil {
+				given = name
+				break
+			}
+		}
+		if kind == Individual {
+			b.AddName(Join(" ", given, record.Nom), false, true)
+		} else {
+			b.AddName(record.Nom, false, true)
+		}
+		for _, alias := range values("ALIAS") {
+			comment := text(alias, "Commentaire")
+			weak := comment != nil && strings.Contains(strings.ToLower(*comment), "alias faible")
+			b.AddName(text(alias, "Alias"), weak, false)
+		}
+		for _, address := range append(values("ADRESSE_PM"), values("ADRESSE_PP")...) {
+			b.AddAddress(Join(", ", text(address, "Adresse"), text(address, "Pays")), nil)
+		}
+		add(&out, b.Build())
+	}
+	return out, nil
+}
+
+// isJSON reports whether a raw JSON value starts with the given character (an object, an array, a string).
+func isJSON(raw json.RawMessage, first byte) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == first
+}
