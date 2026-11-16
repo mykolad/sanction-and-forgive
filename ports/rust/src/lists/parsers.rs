@@ -670,6 +670,7 @@ mod tests {
             r#"{"Publications": {"PublicationDetail": [{"Nature": "Personne morale", "Nom": "A"}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}, 7]}}"#,
             r#"{"Publications": {}}"#,
+            r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne physique", "Nom": "A", "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}, {"Prenom": 7}]}]}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale"}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne physique", "Nom": " ", "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}]}]}]}}"#,
             r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": {"TypeChamp": "ALIAS"}}]}}"#,

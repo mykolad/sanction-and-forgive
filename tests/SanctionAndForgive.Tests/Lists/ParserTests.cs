@@ -268,6 +268,7 @@ public class ParserTests
     [InlineData("""{"Publications": {"PublicationDetail": [{"Nature": "Personne morale", "Nom": "A"}]}}""")]
     [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A"}, 7]}}""")]
     [InlineData("""{"Publications": {}}""")]
+    [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne physique", "Nom": "A", "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}, {"Prenom": 7}]}]}]}}""")]
     [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale"}]}}""")]
     [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne physique", "Nom": " ", "RegistreDetail": [{"TypeChamp": "PRENOM", "Valeur": [{"Prenom": "Ivan"}]}]}]}}""")]
     [InlineData("""{"Publications": {"PublicationDetail": [{"IdRegistre": 1, "Nature": "Personne morale", "Nom": "A", "RegistreDetail": {"TypeChamp": "ALIAS"}}]}}""")]
