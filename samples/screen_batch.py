@@ -115,7 +115,9 @@ def finding(answer, code):
         return "not searched"
     hits = [(kind, cell) for kind, cell in cells if cell["state"] == "Checked" and cell["outcome"] in ("Match", "Review")]
     if hits:
-        kind, cell = max(hits, key=lambda hit: hit[1]["percent"] or 0)
+        # The finding that explains the decision: one not allowed before an allowed one, a Match before a Review,
+        # then the highest percentage.
+        kind, cell = max(hits, key=lambda hit: (not hit[1].get("allowed"), hit[1]["outcome"] == "Match", hit[1]["percent"] or 0))
         name = cell["best"]["listedName"] if cell.get("best") else ""
         allowed = " (allowed)" if cell.get("allowed") else ""
         return f"{cell['outcome']}{allowed} {cell['percent']}% {kind}: {name}".strip()

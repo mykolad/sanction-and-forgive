@@ -96,11 +96,12 @@ def decide(result):
 
 
 class UsageParser(argparse.ArgumentParser):
-    """argparse exits 2 on a usage error; 2 here means "held for review", so a usage error exits 1."""
+    """argparse exits 2 on a usage error; 2 here means "held for review", so a usage error exits 1. Its message can
+    quote what was typed (an unrecognised option's value: a name), so it isn't printed: only the usage."""
 
     def error(self, message):
         self.print_usage(sys.stderr)
-        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        print(f"{self.prog}: error: the arguments aren't valid (see the usage above, or --help)", file=sys.stderr)
         sys.exit(1)
 
 
@@ -112,7 +113,9 @@ def main():
     parser.add_argument("--address", help="the delivery address, any format")
     args = parser.parse_args()
     if not (args.receiver or args.company or args.address):
-        parser.error("give at least one of --receiver, --company, --address")
+        parser.print_usage(sys.stderr)
+        print(f"{parser.prog}: error: give at least one of --receiver, --company, --address", file=sys.stderr)
+        return 1
 
     # Unique per check: the same booking screened again (after an edit, say) gets its own reference. The booking id is
     # cut to leave room for the random part (64 characters in all), and characters a reference can't hold become "-".
