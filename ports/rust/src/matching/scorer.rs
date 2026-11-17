@@ -71,6 +71,8 @@ pub struct NameScorer<'a> {
     /// Whether to look for words one side writes as two (join_compounds): a search sets it per alias, on for those its
     /// joined postings found (where a join can apply at all), so the rest don't pay for the check.
     pub try_join: bool,
+    /// Which of the eligible joins (eligible_joins, in order) this evaluation applies: one bit each.
+    join_mask: u64,
     scratch: Evaluation,
     cells: Vec<Alignment>,
     values: Vec<f64>,
@@ -84,6 +86,19 @@ pub struct NameScorer<'a> {
 
 const MAX_EXACT_TOKENS: usize = 12;
 
+/// At most this many eligible joins are chosen among (2^6 choices at most): a name has a few words.
+const MAX_JOINS: usize = 6;
+
+/// The joins a comparison could make, in a fixed order: (on the listed side, the pair's first word), the listed name's
+/// first. A pair is eligible when the other name has a word that reads exactly as the two (NameForm::joined).
+fn eligible_joins(query: &NameForm, listed: &NameForm) -> Vec<(bool, usize)> {
+    let has = |tokens: &[TokenRef], key: &str| !key.is_empty() && tokens.iter().any(|t| t.forms.iter().any(|f| f == key));
+    let mut out: Vec<(bool, usize)> =
+        listed.joined.iter().enumerate().filter(|(_, k)| has(&query.core, k)).map(|(j, _)| (true, j)).collect();
+    out.extend(query.joined.iter().enumerate().filter(|(_, k)| has(&listed.core, k)).map(|(i, _)| (false, i)));
+    out
+}
+
 fn unit_weight(_: &Token) -> f64 {
     1.0
 }
@@ -95,6 +110,7 @@ impl<'a> NameScorer<'a> {
             options,
             data,
             try_join: true,
+            join_mask: 0,
             scratch: Evaluation::default(),
             cells: Vec::new(),
             values: Vec::new(),
@@ -120,15 +136,19 @@ impl<'a> NameScorer<'a> {
     /// align one to one. Exactly: fold keys are too loose for this (khan and gia an fold alike). None when there's
     /// nothing to join (most names: no allocation then).
     fn join_compounds(&mut self, query: &NameForm, listed: &NameForm) -> Option<(Vec<TokenRef>, Vec<usize>, Vec<TokenRef>)> {
-        if !self.try_join {
+        if !self.try_join || self.join_mask == 0 {
             return None;
         }
-        let has = |tokens: &[TokenRef], key: &str| !key.is_empty() && tokens.iter().any(|t| t.forms.iter().any(|f| f == key));
-        if !listed.joined.iter().any(|k| has(&query.core, k)) && !query.joined.iter().any(|k| has(&listed.core, k)) {
-            return None;
-        }
-        let listed_join: Vec<bool> = listed.joined.iter().map(|k| has(&query.core, k)).collect();
-        let query_join: Vec<bool> = query.joined.iter().map(|k| has(&listed.core, k)).collect();
+        let eligible = eligible_joins(query, listed);
+        let chosen = |listed_side: bool, index: usize| {
+            eligible
+                .iter()
+                .take(MAX_JOINS)
+                .enumerate()
+                .any(|(bit, &(side, at))| side == listed_side && at == index && self.join_mask & (1 << bit) != 0)
+        };
+        let listed_join: Vec<bool> = (0..listed.joined.len()).map(|j| chosen(true, j)).collect();
+        let query_join: Vec<bool> = (0..query.joined.len()).map(|i| chosen(false, i)).collect();
         let mut listed_core = Vec::with_capacity(listed.core.len());
         let mut j = 0;
         while j < listed.core.len() {
@@ -157,42 +177,57 @@ impl<'a> NameScorer<'a> {
 
     /// Scores query against one listed alias. Nothing it computes outlives the call: it's the inner loop.
     pub fn score(&mut self, query: &NameForm, listed: &NameForm, weak_alias: bool, weight: &mut dyn FnMut(&Token) -> f64) -> ScoreValue {
-        let mut e = std::mem::take(&mut self.scratch);
-        e.zero = None;
-        e.initials = None;
-        e.pairs.clear();
-        e.caps.clear();
-        e.percent = 0;
-        e.contained = false;
-        e.joined = None;
-        let mut value = self.evaluate(query, listed, weak_alias, weight, &mut e, false);
-        if e.joined.is_some() {
-            let mut plain = Evaluation::default();
-            value = self.better_unjoined(query, listed, weak_alias, weight, &mut plain, false, value).unwrap_or(value);
-        }
-        self.scratch = e;
-        value
+        self.best_join_mask(query, listed, weak_alias, weight).1
     }
 
-    /// Where words were joined, the names scored again with their words as they are: joining two words can lose an
-    /// alignment the words had (Hua Wei Huawei / Wei Huawei Hua). The unjoined reading's value when it's at least as
-    /// good (a tie goes to the words as written), and its evaluation in e.
-    #[allow(clippy::too_many_arguments)]
-    fn better_unjoined(
+    /// Which joins to make, and the value they give: the words as written first, then each choice of joins that don't
+    /// share a word (at most MAX_JOINS eligible ones), fewest joins first; a choice is taken only when it scores higher,
+    /// so a tie goes to fewer joins. Joining two words can lose an alignment the words had (Hua Wei Huawei / Wei Huawei
+    /// Hua), and the first join can block a better one (Hua Wei Ren Huawei / Hua Weiren Huawei): every choice is
+    /// scored. Without an eligible join (most aliases), one evaluation.
+    fn best_join_mask(
         &mut self,
         query: &NameForm,
         listed: &NameForm,
         weak_alias: bool,
         weight: &mut dyn FnMut(&Token) -> f64,
-        e: &mut Evaluation,
-        explain: bool,
-        joined: ScoreValue,
-    ) -> Option<ScoreValue> {
-        let try_join = self.try_join;
-        self.try_join = false;
-        let plain = self.evaluate(query, listed, weak_alias, weight, e, explain);
-        self.try_join = try_join;
-        (plain.percent >= joined.percent).then_some(plain)
+    ) -> (u64, ScoreValue) {
+        let mut e = std::mem::take(&mut self.scratch);
+        let mut evaluate = |scorer: &mut Self, mask: u64, e: &mut Evaluation| {
+            e.zero = None;
+            e.initials = None;
+            e.pairs.clear();
+            e.caps.clear();
+            e.percent = 0;
+            e.contained = false;
+            e.joined = None;
+            scorer.join_mask = mask;
+            let value = scorer.evaluate(query, listed, weak_alias, weight, e, false);
+            scorer.join_mask = 0;
+            value
+        };
+        let mut best = (0, evaluate(self, 0, &mut e));
+        if self.try_join {
+            let eligible = eligible_joins(query, listed);
+            let n = eligible.len().min(MAX_JOINS);
+            let overlaps = |mask: u64| {
+                (0..n).any(|a| {
+                    mask & (1 << a) != 0
+                        && (0..n)
+                            .any(|b| b != a && mask & (1 << b) != 0 && eligible[a].0 == eligible[b].0 && eligible[a].1 + 1 == eligible[b].1)
+                })
+            };
+            for joins in 1..=n as u32 {
+                for mask in (1u64..1 << n).filter(|m| m.count_ones() == joins && !overlaps(*m)) {
+                    let value = evaluate(self, mask, &mut e);
+                    if value.percent > best.1.percent {
+                        best = (mask, value);
+                    }
+                }
+            }
+        }
+        self.scratch = e;
+        best
     }
 
     /// Scores query against the alias again, the same way, and explains the result.
@@ -203,15 +238,12 @@ impl<'a> NameScorer<'a> {
         weak_alias: bool,
         weight: &mut dyn FnMut(&Token) -> f64,
     ) -> NameScoreDetails {
+        // The same choice of joins as score's, then that evaluation explained.
+        let (mask, _) = self.best_join_mask(query, listed, weak_alias, weight);
         let mut e = Evaluation::default();
-        let value = self.evaluate(query, listed, weak_alias, weight, &mut e, true);
-        if e.joined.is_some() {
-            // The same choice as score's.
-            let mut plain = Evaluation::default();
-            if self.better_unjoined(query, listed, weak_alias, weight, &mut plain, true, value).is_some() {
-                e = plain;
-            }
-        }
+        self.join_mask = mask;
+        self.evaluate(query, listed, weak_alias, weight, &mut e, true);
+        self.join_mask = 0;
         if let Some(reason) = e.zero {
             return NameScoreDetails { explanation: vec![reason.to_string()], words: Vec::new(), notes: vec![reason.to_string()] };
         }

@@ -371,6 +371,21 @@ mod tests {
         assert_eq!(cell.outcome, Some(Outcome::Match), "{:?}", cell.percent);
     }
 
+    /// Every choice of joins is tried: the first join mustn't block a better one, and some joins can help while others
+    /// don't, both ways round.
+    #[test]
+    fn the_best_choice_of_joins_is_taken() {
+        for (query, listed) in [
+            ("Hua Wei Ren Huawei", "Hua Weiren Huawei"),
+            ("Hua Weiren Huawei", "Hua Wei Ren Huawei"),
+            ("Hua Wei Huawei Zhongxing", "Wei Huawei Hua Zhong Xing"),
+            ("Wei Huawei Hua Zhong Xing", "Hua Wei Huawei Zhongxing"),
+        ] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Entity);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
     /// Joining is for words that read together as the other side's word: different names stay apart.
     #[test]
     fn joining_words_never_makes_different_names_match() {
