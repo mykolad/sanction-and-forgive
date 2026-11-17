@@ -119,6 +119,12 @@ public static class ListSources
             Homepage = "https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register",
             TermsUrl = "https://www.mfat.govt.nz/en/copyright",
         },
+        new("be-terrorism", "Belgium national terrorism list (FPS Finance)", "https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national", DailyMaxAge, FeedStatus.Active, () => new BelgiumParser())
+        {
+            Homepage = "https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national",
+            TermsUrl = "https://fin.belgium.be/en/terms-use",
+            LinkPattern = @"/[0-9]{8}[^/]*[Nn]ationale[^/]*\.xlsx$",
+        },
         new("jp-mof", "Japan asset-freeze list (Ministry of Finance)", "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html", DailyMaxAge, FeedStatus.Active, () => new JapanParser())
         {
             Homepage = "https://www.mof.go.jp/policy/international_policy/gaitame_kawase/gaitame/economic_sanctions/list.html",

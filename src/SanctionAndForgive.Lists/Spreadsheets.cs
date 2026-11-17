@@ -91,7 +91,8 @@ public static class Spreadsheets
     private const string XlsxRelationships = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     private const string PackageRelationships = "http://schemas.openxmlformats.org/package/2006/relationships";
 
-    /// <summary>The rows of an Office Open XML workbook's sheet named <paramref name="sheetName"/>: found through the
+    /// <summary>The rows of an Office Open XML workbook's sheet named <paramref name="sheetName"/> (empty: its first
+    /// sheet, for a workbook whose sheet keeps the name its program gave it): found through the
     /// workbook and its relationships, cells placed by their reference (<c>C12</c>), shared strings resolved (phonetic
     /// runs left out), numbers as written (a date is a serial number: <see cref="ExcelDate"/>). Every part read is
     /// read to its end, so one cut short or broken is refused. Each shared string, and each cell (a shared string's
@@ -147,13 +148,13 @@ public static class Spreadsheets
         while (reader.Read())
         {
             if (found is null && reader.NodeType == XmlNodeType.Element && reader.LocalName == "sheet" && reader.NamespaceURI == XlsxMain
-                && reader.GetAttribute("name") == sheetName && reader.GetAttribute("id", XlsxRelationships) is { } id)
+                && (sheetName.Length == 0 || reader.GetAttribute("name") == sheetName) && reader.GetAttribute("id", XlsxRelationships) is { } id)
             {
                 found = id;
             }
         }
 
-        return found ?? throw new ListFormatException($"The workbook has no sheet named \"{sheetName}\".");
+        return found ?? throw new ListFormatException(sheetName.Length == 0 ? "The workbook has no sheet." : $"The workbook has no sheet named \"{sheetName}\".");
     }
 
     private static string RelationshipTarget(ZipArchive zip, string id)

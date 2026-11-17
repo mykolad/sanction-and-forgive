@@ -2,6 +2,24 @@
   "now": "*",
   "lists": [
     {
+      "code": "be-terrorism",
+      "name": "Belgium national terrorism list (FPS Finance)",
+      "state": "Current",
+      "status": "Active",
+      "reason": null,
+      "recordCount": 40,
+      "version": "*",
+      "lastCheckedAt": "*",
+      "updatedAt": "*",
+      "maxAgeHours": 72,
+      "homepage": "https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national",
+      "fileUrl": "https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national",
+      "termsUrl": "https://fin.belgium.be/en/terms-use",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
+    },
+    {
       "code": "ca-sema",
       "name": "Canada autonomous sanctions (SEMA)",
       "state": "Current",
