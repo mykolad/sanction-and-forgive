@@ -22,6 +22,8 @@ RUN dotnet publish "src/SanctionAndForgive.Api/SanctionAndForgive.Api.csproj" -c
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra AS final
 WORKDIR /app
 COPY --from=build /app/publish .
+# The licence, and the notices for the dictionaries derived from OpenCC and Unicode CLDR data (all embedded).
+COPY ["LICENSE", "THIRD-PARTY-NOTICES.txt", "./"]
 USER $APP_UID
 
 # The base image already listens on 8080 (ASPNETCORE_HTTP_PORTS=8080); don't set ASPNETCORE_URLS as well.

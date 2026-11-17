@@ -170,7 +170,8 @@ vowel marks and tatweel dropped; alef forms, hamza seats, ya and alef maqsura, t
 Eastern digits read as ASCII), reads Arabic name particles in Latin script alike (Abd al-Rahman, Abdulrahman, Abdel
 Rahman; al-Sayed, Elsayed; Nasr Allah, Nasrallah), and compares Chinese and Korean names in their own script
 (`cjk.json`, #93: adjacent Han or Hangul words joined, company forms such as 股份有限公司 and 주식회사 split off,
-traditional characters read as simplified with OpenCC's character table, Apache License 2.0). How such a name behaves
+traditional characters read as simplified with OpenCC's character table, Apache License 2.0; its licence and the
+changes made are in `THIRD-PARTY-NOTICES.txt`, which every image carries). How such a name behaves
 in the .NET app is recorded in
 `tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
 the same spelling matches in every script; Arabic vowel marks, tatweel and letter variants, Greek accents, a part of a
