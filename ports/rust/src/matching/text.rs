@@ -428,7 +428,7 @@ fn particle_reading(tables: &[TransliterationTable], word: &str) -> Option<Strin
 /// nasr-allah); then Abu with the word after it, merged or not ("abu abd allah" → abu-abd-allah). Each rule decides on
 /// the words' Latin readings (particle_reading). Rust only for now (#92); create_token reads them (arabic_readings).
 pub fn merge_arabic_particles(tables: &[TransliterationTable], words: Vec<String>) -> Vec<String> {
-    const ABD: [&str; 8] = ["abd", "abdel", "abdul", "abdal", "abdil", "abdur", "abdus", "abdu"];
+    const ABD: [&str; 9] = ["abd", "abdel", "abdul", "abdoul", "abdal", "abdil", "abdur", "abdus", "abdu"];
     const ABU: [&str; 3] = ["abu", "abou", "abo"];
     const ALLAH: [&str; 5] = ["allah", "ullah", "ollah", "illah", "ellah"];
     let readings: Vec<Option<String>> = words.iter().map(|word| particle_reading(tables, word)).collect();
@@ -493,7 +493,10 @@ fn abd_rest(rest: &str) -> String {
     let b = rest.as_bytes();
     let vowel = |c: u8| matches!(c, b'a' | b'e' | b'i' | b'o' | b'u');
     // The article (al, el, ul, il) or an assimilated one (ur-r, us-s), then a linking vowel alone.
-    let stripped = if b.len() > 4 && vowel(b[0]) && (b[1] == b'l' || (!vowel(b[1]) && b[1] == b[2])) {
+    let stripped = if b.len() > 5 && rest.starts_with("oul") {
+        // The French spelling of the article: Abdoul Rahman, Abdoulrahman.
+        &rest[3..]
+    } else if b.len() > 4 && vowel(b[0]) && (b[1] == b'l' || (!vowel(b[1]) && b[1] == b[2])) {
         &rest[2..]
     } else if b.len() > 4 && vowel(b[0]) && !vowel(b[1]) {
         &rest[1..]
