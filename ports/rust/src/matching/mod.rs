@@ -33,7 +33,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "408565f8b3c2");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "7ea0e54db126");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
