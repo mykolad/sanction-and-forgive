@@ -85,8 +85,9 @@ reference. The pipeline:
   (a new language is a new table plus golden rows; register it in `MatcherData.TableFiles`), `legal-forms.json`
   (classes, ambiguous spellings, multi-word phrases), `generic.json`, `words.json` (stop words, honorifics, address
   words), `spelling-pairs.json`, `cognates.json`, `countries.json` (244 countries: English variants as the feeds write
-  them, Russian, Ukrainian, native names from ICU, French from CLDR as France's register writes them, without Maurice,
-  Dominique and Grenade, which are first names and words), `places.json` (exonyms with their country). Keys are normalised like
+  them, Russian, Ukrainian, native names from ICU, French from CLDR as France's register writes them, and German, Polish,
+  Turkish, Spanish and Italian from CLDR; without first names, words, abbreviations of something else and places common
+  elsewhere: Maurice, Dominique, Grenade, Dominika, Mauricio, Granada, RU, ABD, Norfolk, Santa Lucía...), `places.json` (exonyms with their country). Keys are normalised like
   the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`. `arabic.json` (Arabic-script folding) is
   read by the Rust port only so far; .NET and Go hash it.
 - **Text** (`Text/`): `Normalizer.Words` (NFKC, lower case, apostrophes inside words deleted, punctuation as
@@ -98,7 +99,7 @@ reference. The pipeline:
   initials run is never a legal form). `TokenComparer` is section 5.4's table. `NameScorer` aligns (best pairs first),
   weights by IDF, maps to the percentage bands (`Bands`), applies caps, contained names and initials.
 - **Addresses** (`Addresses/`): country (names, or a final capitalised ISO code; a country name after a street type
-  and a particle names the street: `rue de Malte`, words.json `streetWords`), places, words and numbers;
+  and a particle names the street: `rue de Malte`, `Calle de Chile`, words.json `streetWords`), places, words and numbers;
   `NotCompared` / `Corroborated` / `Conflicting`, plus address-only screening.
 - **`ListIndex`**: one per list, built from `ListedSubject`s (`Individual`, `Entity`, or `Unknown`: both readings).
   Interned tokens, document frequencies, aliases by fold key, a trigram index over the fold-key vocabulary (typos
