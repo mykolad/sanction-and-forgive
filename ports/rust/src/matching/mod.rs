@@ -34,7 +34,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "3577e9f13665");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "29cac07855fe");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -187,6 +187,10 @@ mod tests {
             ("Office 4, Some Road, Malta", "MT"),
             ("Platz der Türkei 12, Berlin", ""),
             ("Ataturk Cad. 12, Istanbul", ""),
+            ("Irak Mahallesi 5, Ankara", ""),
+            ("Japonya Mah. 3, Ankara", ""),
+            ("Mısır Çarşısı No: 4, Eminönü, İstanbul", ""),
+            ("Suriye Pasajı 3, İstanbul", ""),
             ("Kuba Kowalski, Kwiatowa 5, Warszawa", ""),
             ("Corso Italia 3, Milano, Italia", "IT"),
             ("12 Example Avenue, Germany, 10115", "DE"),

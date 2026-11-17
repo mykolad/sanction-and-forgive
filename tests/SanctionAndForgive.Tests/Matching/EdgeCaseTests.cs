@@ -36,6 +36,8 @@ public class EdgeCaseTests
     [InlineData("12 Jordan Road, Kowloon, Hong Kong", "Kowloon, HK")]
     [InlineData("Platz der Türkei 12, Berlin", "Platz der Türkei 12, Berlin, DE")]
     [InlineData("Ataturk Cad. 12, Istanbul", "Ataturk Cad. 12, Istanbul, TR")]
+    [InlineData("Irak Mahallesi 5, Ankara", "Irak Mahallesi 5, Ankara, TR")]
+    [InlineData("Mısır Çarşısı No: 4, Eminönü, İstanbul", "Misir Carsisi 4, Eminonu, Istanbul, TR")]
     [InlineData("Kuba Kowalski, Kwiatowa 5 10, Warszawa", "Kwiatowa 5 10, Warszawa, PL")]
     public void AStreetNamedAfterACountry_IsAStreet_ButACountryNamedAfterAStreetIsStillTheCountry(string entered, string listed)
     {
