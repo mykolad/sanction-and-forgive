@@ -4,25 +4,34 @@
   API started with the conformance settings, the CLI run in containers from the same image.
 
 .EXAMPLE
-  # The .NET implementation, built from this repository, against the local SQL Server container (CLAUDE.md):
+  # The reference, the Rust implementation (ports/rust), built from this repository, against the local SQL Server
+  # container (CLAUDE.md):
   ./tests/conformance/run.ps1 -Build
 
 .EXAMPLE
-  # The Go implementation (ports/go), its CLI at /app/cli in the image:
-  ./tests/conformance/run.ps1 -Build -Image sanction-and-forgive-go:conformance -Dockerfile ports/go/Dockerfile -CliCommand '--entrypoint /app/cli {image}'
+  # The .NET implementation at version 1 of the suite (docs/conformance.md, "Versions"), its CLI run with dotnet:
+  ./tests/conformance/run.ps1 -Build -Version 1 -Image sanction-and-forgive:conformance -Dockerfile Dockerfile -CliCommand '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll'
 
 .EXAMPLE
-  # Rewrite the golden files from the reference implementation after a deliberate change (review the diff):
+  # The Go implementation (ports/go) at version 1, its CLI at /app/cli in the image:
+  ./tests/conformance/run.ps1 -Build -Version 1 -Image sanction-and-forgive-go:conformance -Dockerfile ports/go/Dockerfile
+
+.EXAMPLE
+  # Rewrite version 2's golden files from the reference (Rust) after a deliberate change (review the diff):
   ./tests/conformance/run.ps1 -Build -UpdateGolden
+
+.EXAMPLE
+  # Rewrite version 1's from the .NET implementation, after a shared dictionary change moves its answers:
+  ./tests/conformance/run.ps1 -Build -UpdateGolden -Version 1 -Image sanction-and-forgive:conformance -Dockerfile Dockerfile -CliCommand '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll'
 #>
 param(
     # The image to test. Its entry point serves the API on 8080; -CliCommand runs its CLI.
-    [string] $Image = 'sanction-and-forgive:conformance',
-    # Build $Image from this repository first, with -Dockerfile (the .NET implementation's by default).
+    [string] $Image = 'sanction-and-forgive-rust:conformance',
+    # Build $Image from this repository first, with -Dockerfile (the reference's, Rust, by default).
     [switch] $Build,
-    [string] $Dockerfile = 'Dockerfile',
-    # How the CLI is started inside the image (the .NET image: dotnet SanctionAndForgive.Cli.dll).
-    [string] $CliCommand = '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll',
+    [string] $Dockerfile = 'ports/rust/Dockerfile',
+    # How the CLI is started inside the image (the Rust and Go images: /app/cli).
+    [string] $CliCommand = '--entrypoint /app/cli {image}',
     # SQL Server as this machine reaches it, and as the containers do.
     [string] $SqlServer = 'localhost,14333',
     [string] $ContainerSqlServer = 'host.docker.internal,14333',
@@ -36,6 +45,9 @@ param(
     [int] $IssuerPort = 18090,
     [string] $IssuerBind = '127.0.0.1',
     [switch] $UpdateGolden,
+    # The suite's version (docs/conformance.md, "Versions"): its golden files are tests/conformance/golden/v<n>.
+    [ValidateSet(1, 2)]
+    [int] $Version = 2,
     # Extra arguments for dotnet test (a filter, say).
     [string[]] $TestArguments = @()
 )
@@ -106,6 +118,7 @@ try {
     $env:CONFORMANCE_ISSUER = $issuer
     $env:CONFORMANCE_ISSUER_BIND = $IssuerBind
     $env:CONFORMANCE_UPDATE_GOLDEN = if ($UpdateGolden) { '1' } else { '' }
+    $env:CONFORMANCE_VERSION = "$Version"
     dotnet test (Join-Path $root 'tests/SanctionAndForgive.Conformance') --logger 'console;verbosity=normal' @TestArguments
     $result = $LASTEXITCODE
     if ($result -ne 0) {

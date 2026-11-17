@@ -33,7 +33,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "99697a1388e0");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "350da5e1ee3c");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -87,6 +87,13 @@ mod tests {
         let plain = screen("نور", "نور", SubjectKind::Entity);
         assert_eq!(screen("نُور", "نور", SubjectKind::Entity), plain);
         assert_eq!(screen("نـور", "نور", SubjectKind::Entity), plain);
+    }
+
+    /// A stray tatweel between words is no word: the names still match.
+    #[test]
+    fn a_stray_tatweel_is_no_word() {
+        let (outcome, percent) = screen("محمد ـ حسن", "محمد حسن", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
     }
 
     /// The same normalisation never makes different names match.

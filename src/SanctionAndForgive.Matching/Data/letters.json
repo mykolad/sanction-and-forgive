@@ -1,0 +1,21 @@
+{
+  "note": "Latin letters that aren't a base letter plus an accent, so decomposing a word doesn't take their mark off. 'folds' is what each reads as without diacritics (ł as l, ß as ss, þ as th), applied before the marks are dropped and again to what decomposition leaves; İ is here because lower-casing leaves it. 'secondForms' are second spellings some languages write, by language: German ü ö ä as ue oe ae; Danish and Norwegian ø as oe and å as aa; Serbian and Croatian đ as dj. A word gets one more reading per group whose letters it has, and one with every such group together (Åström reads as astrom, astroem, aastrom and aastroem). Keys are single lower-case letters as the normaliser leaves them.",
+  "folds": {
+    "ß": "ss",
+    "ø": "o",
+    "đ": "d",
+    "ð": "d",
+    "ł": "l",
+    "æ": "ae",
+    "œ": "oe",
+    "ı": "i",
+    "İ": "i",
+    "þ": "th",
+    "ħ": "h"
+  },
+  "secondForms": [
+    { "ü": "ue", "ö": "oe", "ä": "ae" },
+    { "ø": "oe", "å": "aa" },
+    { "đ": "dj" }
+  ]
+}

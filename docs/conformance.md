@@ -1,9 +1,10 @@
 # Conformance suite
 
 A black-box test of the whole application, in whatever language it's written: its HTTP API, its CLI and the database
-they share. The .NET implementation is the reference. The golden files record its answers, and another implementation
-(Go, Rust: the owner's experiment, 2026-11-09) must give the same answers, field for field. Only one implementation is
-deployed at a time.
+they share. The Rust implementation (`ports/rust`), which production runs, is the reference since 2026-11-17 (owner's
+decision; the .NET one was until then): improvements land there first. The golden files record its answers, and the
+other implementations (.NET, Go: the owner's experiment, 2026-11-09) give the same answers, field for field, once they
+catch up. Only one implementation is deployed at a time.
 
 `tests/SanctionAndForgive.Conformance` (xUnit) references none of the app's projects. `tests/conformance/run.ps1` runs it
 against a container image, and the CI job `conformance` runs that script on every pull request.
@@ -39,11 +40,28 @@ A plain `dotnet test` of the solution skips every conformance test: they need `C
 
 | Implementation | Where | Image | CLI in the image | Conformance |
 |---|---|---|---|---|
-| .NET (reference) | `src/` | `Dockerfile`, 356 MB | `dotnet SanctionAndForgive.Cli.dll` | 23 of 23 |
+| Rust (reference) | `ports/rust/` | `ports/rust/Dockerfile`, 60 MB | `/app/cli` | 23 of 23 |
+| .NET | `src/` | `Dockerfile`, 356 MB | `dotnet SanctionAndForgive.Cli.dll` | 23 of 23 |
 | Go | `ports/go/` | `ports/go/Dockerfile`, 68 MB | `/app/cli` | 23 of 23 |
-| Rust | `ports/rust/` | `ports/rust/Dockerfile`, 60 MB | `/app/cli` | 23 of 23 |
 
-The CI job `conformance` runs the suite against each of them on every pull request, and all three are required on `master`.
+The CI job `conformance` runs the suite against each of them on every pull request, each at its version of the suite
+(below), and all three are required on `master`.
+
+## Versions
+
+Since 2026-11-17 the suite has two versions, each with its own golden files (`tests/conformance/golden/v1`, `v2`;
+`CONFORMANCE_VERSION`, `run.ps1 -Version`), so every implementation is held to the answers it should give and every
+check stays green (owner's suggestion):
+
+| Version | Golden files from | Tested in CI |
+|---|---|---|
+| 2 | the Rust reference; they change with its improvements | Rust |
+| 1 | the .NET implementation, as all three answered on 2026-11-17 | .NET, Go |
+
+Version 1 changes only when a shared dictionary change moves the .NET implementation's answers (regenerate it from
+.NET: `run.ps1 -Build -UpdateGolden -Version 1` with the .NET image), so a regression in .NET or Go still fails its
+job. When .NET or Go catch up with Rust, their CI job moves to version 2. A test that only version 2 holds checks
+`Settings.Version`.
 
 ## What an implementation must provide
 
@@ -129,29 +147,32 @@ Everything else must match exactly. A failure names the input and the first diff
 ## Against the reference, on real lists
 
 The fictional lists can't hold every quirk of real data. With `CONFORMANCE_REFERENCE_URL` set to the reference
-(.NET) running against the same database as the implementation under test, `ReferenceTests` builds 2,000 screenings
+(Rust) running against the same database as the implementation under test, `ReferenceTests` builds 2,000 screenings
 from that database's own lists (names as listed, in lower case, with a letter dropped, and ordinary names with an
 address) and compares every result with the reference's, field for field. Against a copy of the real lists it found
 two things the golden set didn't: .NET's invariant casing leaves the Turkish `İ` and `ı` as they are, and Go's
 `math.Log` differs from the C library's in the last bit for some arguments, which turned a 99% into a 98% on a band's
-edge (the Go image now calls the C library's `log`, as .NET does). Run it with both images on the real lists:
+edge (the Go image now calls the C library's `log`, as .NET does). Run it with both images on the real lists, the
+Rust reference's (`run.ps1 -Build` builds it) and the one under test, here .NET's; an implementation still at version 1
+differs from the reference wherever Rust is ahead:
 
 ```powershell
 $cs = "Server=host.docker.internal,14333;Database=sanctions_local;User ID=sa;Password=Throwaway-container-2026!;TrustServerCertificate=True"
-docker run -d --name ref --add-host=host.docker.internal:host-gateway -p 5299:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive:conformance
-docker run -d --name go --add-host=host.docker.internal:host-gateway -p 5399:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive-go:conformance
+docker run -d --name ref --add-host=host.docker.internal:host-gateway -p 5299:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive-rust:conformance
+docker run -d --name dotnet --add-host=host.docker.internal:host-gateway -p 5399:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive:conformance
 $env:CONFORMANCE_BASE_URL = 'http://localhost:5399'; $env:CONFORMANCE_REFERENCE_URL = 'http://localhost:5299'
 dotnet test tests/SanctionAndForgive.Conformance --filter FullyQualifiedName~ReferenceTests
 ```
 
 It also prints each one's time per screening, one stream at a time. On the real lists (both as Linux containers on
-one desktop, all ten lists loaded): on 2026-11-09, .NET 14.3 ms and Go 16.5 ms, about 350 MiB each; on 2026-11-10,
+one desktop, all ten lists loaded, .NET then the reference): on 2026-11-09, .NET 14.3 ms and Go 16.5 ms, about 350 MiB each; on 2026-11-10,
 after the Go port's tuning (`ports/go/README.md`), Go 7.3 ms against .NET's 14.5 ms, 346 MiB in a 512 MiB container,
 every result still the reference's.
 
 ## Changing the golden files
 
-A deliberate change in what the reference answers (matching, wording, a field) changes the golden files in the same
-pull request: `./tests/conformance/run.ps1 -Build -UpdateGolden`, then review the diff. A matching change still needs
-the evaluation and the owner's approval where CLAUDE.md says so. An implementation in another language never rewrites
-the golden files: it changes until it matches them.
+A deliberate change in what the reference (Rust) answers (matching, wording, a field) changes version 2's golden files
+in the same pull request: `./tests/conformance/run.ps1 -Build -UpdateGolden` (the Rust image and version 2 by default),
+then review the diff. A shared dictionary change regenerates version 1 from .NET as well.
+A matching change still needs the evaluation and the owner's approval where CLAUDE.md says so. Another implementation
+never rewrites the golden files: it changes until it matches them.

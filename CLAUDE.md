@@ -222,15 +222,18 @@ Since 2026-11-17 (owner's decision) improvements land in the Rust port first, wh
 follow later: a Rust-only change keeps the fictional lists' results as the reference has them, or the golden files'
 source has to change (ask the owner), and a shared dictionary only one implementation reads says so in its note.
 `tests/SanctionAndForgive.Conformance` tests an implementation as a black box through its HTTP API, its CLI and the
-shared database, references no app project, and compares with golden files from the .NET reference
-(`tests/conformance/golden`): 600 screenings through the stream, 60 single ones, the catalogue, browsing. Then
+shared database, references no app project, and compares with golden files from the reference, the Rust port since
+2026-11-17 (`tests/conformance/golden`): 600 screenings through the stream, 60 single ones, the catalogue, browsing. Then
 behaviour, then changes that it puts back. Fictional feeds in all nine formats come from a fixed seed (`Feeds/`).
 `tests/conformance/run.ps1` builds the image, makes a fresh database, starts the API with the conformance settings
 (`Lists__RefreshMinutes=60` and `Lists__ChangeCheckSeconds=1`, so every change arrives through the check; rate limit off, sign-in on, `Screening__StreamMaxRecords=1000`), runs the CLI in
-containers from the same image, and runs the suite. CI jobs `conformance (dotnet|go|rust)`, required on `master` (owner's decision, 2026-11-12). A change in what the reference
-answers updates the golden files in the same PR (`run.ps1 -Build -UpdateGolden`, review the diff); another
-implementation never rewrites them. **A change to the .NET app is a change to every port** (`ports/go`, `ports/rust`): the CI job
-runs the suite against each, so a behaviour change lands in all of them in the same PR, or the port's job fails.
+containers from the same image, and runs the suite. CI jobs `conformance (dotnet|go|rust)`, all required on `master`.
+**Improvements land in the Rust port first** (owner's decision, 2026-11-17); .NET and Go follow later. So the suite
+has two versions (docs/conformance.md, "Versions"): version 2's golden files (`tests/conformance/golden/v2`) are the
+Rust reference's and change with it (`run.ps1 -Build -UpdateGolden`, Rust and version 2 by default; review the diff);
+version 1's (`golden/v1`) are what .NET and Go answer, regenerated from .NET only when a shared dictionary change moves
+them (`-Version 1` with the .NET image). CI tests Rust at version 2, .NET and Go at version 1; another implementation
+never rewrites a version's golden files. A dictionary change still reaches all three (the files are shared).
 The dictionaries and `wwwroot` are copied into the ports at build time; never edit copies. The dictionaries are LF
 in every checkout (`.gitattributes`): their bytes are hashed into the matcher version. A dictionary change therefore updates the
 version the ports pin in a test (`ports/go/matching/version_test.go`, `ports/rust/src/matching/mod.rs`) to the one the

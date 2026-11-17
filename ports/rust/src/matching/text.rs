@@ -121,6 +121,8 @@ pub fn words(value: &str) -> Vec<String> {
     if !word.is_empty() {
         words.push(word);
     }
+    // A "word" of Arabic marks or tatweel alone (a stray ـ) carries no letter: it isn't a word.
+    words.retain(|word| !word.chars().all(is_arabic) || !arabic_form(word).is_empty());
     words
 }
 
@@ -157,23 +159,68 @@ pub fn to_upper_invariant(s: &str) -> String {
     s.chars().map(upper_invariant).collect()
 }
 
-/// A Latin word without diacritics: Ştefan → stefan, straße → strasse.
+/// The letters a word's marks don't come off by decomposing (data/letters.json, hashed into the matcher version with
+/// the other dictionaries): what each folds to, and the second spellings.
+struct LetterTables {
+    folds: HashMap<char, String>,
+    second_forms: Vec<HashMap<char, String>>,
+}
+
+static LETTERS: std::sync::LazyLock<LetterTables> = std::sync::LazyLock::new(|| {
+    let bytes = super::data::resource("letters.json").expect("letters.json is embedded");
+    let document: serde_json::Value = serde_json::from_slice(bytes).expect("letters.json is JSON");
+    let table = |entries: &serde_json::Value| -> HashMap<char, String> {
+        entries
+            .as_object()
+            .expect("letters.json's tables are objects")
+            .iter()
+            .map(|(letter, value)| {
+                let mut chars = letter.chars();
+                let (Some(c), None) = (chars.next(), chars.next()) else { panic!("letters.json: '{letter}' isn't one letter.") };
+                (c, value.as_str().expect("a letter's reading is text").to_string())
+            })
+            .collect()
+    };
+    let groups = document["secondForms"].as_array().expect("letters.json has secondForms").iter().map(table).collect();
+    LetterTables { folds: table(&document["folds"]), second_forms: groups }
+});
+
+/// A Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds (letters.json) apply
+/// first, then again to what decomposition leaves (ǿ is ø with an acute), and the marks are dropped.
 pub fn strip_diacritics(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for c in value.nfd() {
-        match c {
-            'ß' => out.push_str("ss"),
-            'ø' => out.push('o'),
-            'đ' => out.push('d'),
-            'ł' => out.push('l'),
-            'æ' => out.push_str("ae"),
-            'œ' => out.push_str("oe"),
-            'ı' => out.push('i'),
-            _ if is_category(c, GeneralCategory::NonspacingMark) => {}
-            _ => out.push(c),
+    let mut folded = String::with_capacity(value.len() + 4);
+    for c in value.chars() {
+        match LETTERS.folds.get(&c) {
+            Some(fold) => folded.push_str(fold),
+            None => folded.push(c),
+        }
+    }
+    let mut out = String::with_capacity(folded.len());
+    for c in folded.nfd() {
+        if is_category(c, GeneralCategory::NonspacingMark) {
+            continue;
+        }
+        match LETTERS.folds.get(&c) {
+            Some(fold) => out.push_str(fold),
+            None => out.push(c),
         }
     }
     out.nfc().collect()
+}
+
+/// A word's second spellings (letters.json): one per language group whose letters it has, and one with every such
+/// group together: müller → mueller; åström → åstroem, aaström, aastroem. None if it has none of those letters.
+pub fn second_forms(value: &str) -> Vec<String> {
+    let groups: Vec<&HashMap<char, String>> =
+        LETTERS.second_forms.iter().filter(|group| value.chars().any(|c| group.contains_key(&c))).collect();
+    let replace = |groups: &[&HashMap<char, String>]| -> String {
+        value.chars().map(|c| groups.iter().find_map(|group| group.get(&c).cloned()).unwrap_or_else(|| c.to_string())).collect()
+    };
+    let mut forms: Vec<String> = groups.iter().map(|group| replace(&[group])).collect();
+    if groups.len() > 1 {
+        forms.push(replace(&groups));
+    }
+    forms
 }
 
 pub fn is_cyrillic(c: char) -> bool {
@@ -374,8 +421,8 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         forms.push(form);
     } else if has_latin || is_number {
         forms.push(strip_diacritics(text));
-        if text.contains(['ü', 'ö', 'ä']) {
-            forms.push(strip_diacritics(&text.replace('ü', "ue").replace('ö', "oe").replace('ä', "ae")));
+        for second in second_forms(text) {
+            forms.push(strip_diacritics(&second));
         }
     }
 
