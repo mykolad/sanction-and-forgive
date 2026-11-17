@@ -126,6 +126,14 @@ mod tests {
             ("Ahmed El-Sayed", "Ahmad al-Sayed", Outcome::Match),
             ("Ahmed Elsayed", "Ahmad al-Sayed", Outcome::Match),
             ("Harun ar-Rashid", "Harun al-Rashid", Outcome::Match),
+            ("Abu Abd Allah Hassan", "Abu Abdullah Hassan", Outcome::Match),
+            ("Hassan Nasr Ellah", "Hassan Nasrellah", Outcome::Match),
+            ("Abou Bakr Hassan", "Abu Bakr Hassan", Outcome::Match),
+            ("Ahmed Ulsayed", "Ahmed al-Sayed", Outcome::Match),
+            ("Harun Arrashid", "Harun ar-Rashid", Outcome::Match),
+            ("Abu Bákr Hassan", "Abu Bakr Hassan", Outcome::Match),
+            ("Абу Бакр Хасан", "Abu Bakr Hassan", Outcome::Match),
+            ("Абд аль-Рахман Хасан", "Abd al-Rahman Hassan", Outcome::Match),
         ] {
             let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
             assert_eq!(outcome, Some(expected), "{query} / {listed}: {percent:?}");
@@ -141,6 +149,8 @@ mod tests {
             ("As Trading", "Trading", SubjectKind::Entity),
             ("Abdi Hassan", "Abd Hassan", SubjectKind::Individual),
             ("Abdul Hassan", "Hassan", SubjectKind::Individual),
+            ("Attar Hassan", "Tar Hassan", SubjectKind::Individual),
+            ("Ulrich Hansen", "Rich Hansen", SubjectKind::Individual),
         ] {
             let (outcome, percent) = screen(query, listed, kind);
             assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
