@@ -4,9 +4,9 @@ using SanctionAndForgive.Cli;
 using SanctionAndForgive.Data;
 using SanctionAndForgive.Lists;
 
-const string Usage = """
+var usage = $"""
     Usage (tools/lists.ps1 wraps these):
-      probe        [--source <code>|all] [--file <path>] [--keep <directory>]
+      probe        [--source <code>|all] [--file <path>] [--keep <directory>] [--scripts]
       import       --source <code>|all [--file <path>] [--force]
       status
       history      [--source <code>]
@@ -19,20 +19,20 @@ const string Usage = """
       load-inputs  [--file tests/load/inputs.csv] [--count 2000]
       evaluate     [--file docs/matching-evaluation.md]
 
-    Feeds: eu, ofac-sdn, ofac-cons, un, uk, us-export, ch-seco, ca-sema, au-dfat, ua-nsdc, ua-sfms.
+    Feeds: {string.Join(", ", ListSources.All.Select(source => source.Code))}.
     Configuration (environment variables or user secrets): ConnectionStrings:Lists, and Lists:EuToken
     (or LISTS_EU_TOKEN; default: the public token).
     """;
 
 if (args.Length == 0)
 {
-    Console.Error.WriteLine(Usage);
+    Console.Error.WriteLine(usage);
     return 2;
 }
 
 if (!Arguments.TryParse(args[1..], out var options, out var error))
 {
-    Console.Error.WriteLine(error + Environment.NewLine + Usage);
+    Console.Error.WriteLine(error + Environment.NewLine + usage);
     return 2;
 }
 
@@ -112,15 +112,15 @@ async Task<int> RunProbeAsync()
     }
     else
     {
-        Console.Error.WriteLine($"Unknown source {code}.{Environment.NewLine}{Usage}");
+        Console.Error.WriteLine($"Unknown source {code}.{Environment.NewLine}{usage}");
         return 2;
     }
 
-    return await new ProbeCommand(downloader, euToken, Console.Out).RunAsync(sources, options.Get("file"), options.Get("keep"), cancellation.Token);
+    return await new ProbeCommand(downloader, euToken, Console.Out).RunAsync(sources, options.Get("file"), options.Get("keep"), options.Has("scripts"), cancellation.Token);
 }
 
 int ShowUsage()
 {
-    Console.Error.WriteLine($"Missing or unknown arguments for {args[0]}.{Environment.NewLine}{Usage}");
+    Console.Error.WriteLine($"Missing or unknown arguments for {args[0]}.{Environment.NewLine}{usage}");
     return 2;
 }

@@ -5,7 +5,9 @@
 package matching
 
 import (
+	"encoding/json"
 	"strings"
+	"sync"
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
@@ -120,32 +122,106 @@ func isLetterOrDigit(c rune) bool {
 	return IsLetter(c) || Is(unicode.Nd, c)
 }
 
-// StripDiacritics returns a Latin word without diacritics: Ştefan → stefan, straße → strasse.
-func StripDiacritics(value string) string {
-	var b strings.Builder
-	for _, c := range norm.NFD.String(value) {
-		switch c {
-		case 'ß':
-			b.WriteString("ss")
-		case 'ø':
-			b.WriteRune('o')
-		case 'đ':
-			b.WriteRune('d')
-		case 'ł':
-			b.WriteRune('l')
-		case 'æ':
-			b.WriteString("ae")
-		case 'œ':
-			b.WriteString("oe")
-		case 'ı':
-			b.WriteRune('i')
-		default:
-			if !Is(unicode.Mn, c) {
-				b.WriteRune(c)
+// letterTables are the letters a word's marks don't come off by decomposing (data/letters.json, hashed into the
+// matcher version with the other dictionaries): what each folds to, and the second spellings.
+type letterTables struct {
+	folds       map[rune]string
+	secondForms []map[rune]string
+}
+
+var letters = sync.OnceValue(func() letterTables {
+	content, err := dataFiles.ReadFile("data/letters.json")
+	if err != nil {
+		panic("matching: letters.json isn't embedded: " + err.Error())
+	}
+	var document struct {
+		Folds       map[string]string   `json:"folds"`
+		SecondForms []map[string]string `json:"secondForms"`
+	}
+	if err := json.Unmarshal(content, &document); err != nil {
+		panic("matching: letters.json: " + err.Error())
+	}
+	table := func(entries map[string]string) map[rune]string {
+		out := make(map[rune]string, len(entries))
+		for letter, value := range entries {
+			runes := []rune(letter)
+			if len(runes) != 1 {
+				panic("matching: letters.json: '" + letter + "' isn't one letter.")
 			}
+			out[runes[0]] = value
+		}
+		return out
+	}
+	groups := make([]map[rune]string, len(document.SecondForms))
+	for i, group := range document.SecondForms {
+		groups[i] = table(group)
+	}
+	return letterTables{table(document.Folds), groups}
+})
+
+// StripDiacritics returns a Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds
+// (letters.json) apply first, then again to what decomposition leaves (ǿ is ø with an acute), and the marks are dropped.
+func StripDiacritics(value string) string {
+	folds := letters().folds
+	var folded strings.Builder
+	for _, c := range value {
+		if fold, ok := folds[c]; ok {
+			folded.WriteString(fold)
+		} else {
+			folded.WriteRune(c)
+		}
+	}
+	var b strings.Builder
+	for _, c := range norm.NFD.String(folded.String()) {
+		if Is(unicode.Mn, c) {
+			continue
+		}
+		if fold, ok := folds[c]; ok {
+			b.WriteString(fold)
+		} else {
+			b.WriteRune(c)
 		}
 	}
 	return norm.NFC.String(b.String())
+}
+
+// SecondForms are a word's second spellings (letters.json): one per language group whose letters it has, and one with
+// every such group together: müller → mueller; åström → åstroem, aaström, aastroem. None if it has none of those letters.
+func SecondForms(value string) []string {
+	var groups []map[rune]string
+	for _, group := range letters().secondForms {
+		for _, c := range value {
+			if _, ok := group[c]; ok {
+				groups = append(groups, group)
+				break
+			}
+		}
+	}
+	replace := func(groups []map[rune]string) string {
+		var b strings.Builder
+		for _, c := range value {
+			found := false
+			for _, group := range groups {
+				if second, ok := group[c]; ok {
+					b.WriteString(second)
+					found = true
+					break
+				}
+			}
+			if !found {
+				b.WriteRune(c)
+			}
+		}
+		return b.String()
+	}
+	var forms []string
+	for _, group := range groups {
+		forms = append(forms, replace([]map[rune]string{group}))
+	}
+	if len(groups) > 1 {
+		forms = append(forms, replace(groups))
+	}
+	return forms
 }
 
 func IsCyrillic(c rune) bool { return c >= 'Ѐ' && c <= 'ԯ' }
@@ -254,9 +330,8 @@ func (f *tokenFactory) Create(text string) *Token {
 		}
 	} else if hasLatin || isNumber {
 		forms = append(forms, StripDiacritics(text))
-		if strings.ContainsAny(text, "üöä") {
-			replaced := strings.NewReplacer("ü", "ue", "ö", "oe", "ä", "ae").Replace(text)
-			forms = append(forms, StripDiacritics(replaced))
+		for _, second := range SecondForms(text) {
+			forms = append(forms, StripDiacritics(second))
 		}
 	}
 
