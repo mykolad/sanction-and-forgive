@@ -6,6 +6,9 @@ const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible ma
 const SYMBOLS = { Match: "●", Review: "▲", Allowed: "◇", NoMatch: "✓", NotChecked: "–" };
 const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete" };
 const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address" };
+// A shipment's other parties (the "parties" feature, when the API offers it): the API's roles, and how they read.
+const ROLES = { shipper: "Shipper", consignee: "Consignee", notifyParty: "Notify party", forwarder: "Forwarder", carrier: "Carrier", endUser: "End user", other: "Other party" };
+const MAX_PARTIES = 10;
 
 const $ = (id) => document.getElementById(id);
 const form = $("screen-form");
@@ -61,6 +64,7 @@ async function loadStatus() {
     const response = await fetch("/api/v1/status", { headers: { Accept: "application/json" } });
     const status = await response.json();
     lists = status.lists;
+    $("parties").hidden = !(status.features || []).includes("parties");
     $("version").textContent = `Version ${status.version}, matcher ${status.matcherVersion}.`;
     $("sources").textContent = lists.length
       ? lists.map((list) => `${list.name} (${listAsOf(list)})`).join("; ") + "."
@@ -111,7 +115,13 @@ async function screen(event) {
     companyName: $("companyName").value.trim() || null,
     address: $("address").value.trim() || null,
   };
-  if (!body.receiverName && !body.companyName && !body.address) {
+  const parties = $("parties").hidden ? [] : partiesEntered();
+  if (parties.some((party) => !party.name && !party.address)) {
+    showState("Enter each party's name, its address, or both (or remove it).", true);
+    return;
+  }
+  if (parties.length) body.parties = parties;
+  if (!body.receiverName && !body.companyName && !body.address && !parties.length) {
     showState("Enter a receiver, a company or an address.", true);
     return;
   }
@@ -152,7 +162,7 @@ async function screen(event) {
     const result = await response.json();
     if (request !== current) return;
     showState("");
-    shown = { result, entered: { Receiver: body.receiverName, Company: body.companyName, Address: body.address }, at: new Date() };
+    shown = { result, entered: { Receiver: body.receiverName, Company: body.companyName, Address: body.address }, parties: body.parties || [], at: new Date() };
     render(result);
     buildRecord();
   } catch {
@@ -174,31 +184,98 @@ function render(result) {
   summary.replaceChildren(el("span", { class: "badge" }, OVERALL[result.outcome] || result.outcome), el("span", {}, result.summary,
     el("span", { class: "reference" }, `Reference ${result.reference}`)));
 
-  const table = $("result-table");
-  const head = el("tr", {}, el("th", { scope: "col" }, "List"),
-    result.entries.map((entry) => el("th", { scope: "col" }, KIND[entry.kind] || entry.kind, el("span", { class: "entry-input" }, entry.input))));
-  table.tHead.replaceChildren(head);
+  // One table per party (the shipment's own entries first, untitled when there are no parties); the outcome above is
+  // the shipment's.
+  const groups = [];
+  for (const entry of result.entries) {
+    const key = entry.party || 0;
+    let group = groups.find((candidate) => candidate.key === key);
+    if (!group) groups.push(group = { key, role: entry.role, entries: [] });
+    group.entries.push(entry);
+  }
+  groups.sort((a, b) => a.key - b.key);
+  $("result-tables").replaceChildren(...groups.map((group) => el("div", { class: "table-scroll" },
+    resultTable(result, group.entries, groups.length > 1
+      ? group.key ? `Party ${group.key}: ${ROLES[group.role] || group.role}` : "The shipment's receiver, company and address"
+      : null))));
 
-  const body = table.tBodies[0];
-  body.replaceChildren();
+  $("disclaimer").textContent = result.disclaimer;
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// A table of lists (rows) × entries (columns), with a caption when it's one party's of several.
+function resultTable(result, entries, caption) {
+  const body = el("tbody");
   for (const list of result.lists) {
     const row = el("tr", {}, el("td", { class: "list-name" }, list.name,
       el("span", { class: list.state === "Overdue" ? "as-of overdue" : "as-of" }, listAsOf(list))));
     if (list.state === "SwitchedOff") {
       // Not searched at all, so no cells: one note across the row (the summary gives the administrator's reason).
-      row.append(el("td", { colspan: String(result.entries.length), class: "switched-off" }, "Not searched: switched off by an administrator"));
+      row.append(el("td", { colspan: String(entries.length), class: "switched-off" }, "Not searched: switched off by an administrator"));
       body.append(row);
       continue;
     }
-    for (const entry of result.entries) {
+    for (const entry of entries) {
       const cell = entry.cells.find((candidate) => candidate.list === list.code);
       row.append(el("td", {}, cellButton(cell, entry, list)));
     }
     body.append(row);
   }
+  // Within a party's table the party is in the caption: the columns say only the kind.
+  const title = (entry) => caption && entry.party ? (entry.kind === "Receiver" ? "Person" : KIND[entry.kind] || entry.kind) : entryTitle(entry);
+  return el("table", { class: "result-table" },
+    caption ? el("caption", { class: "party-caption" }, caption) : null,
+    el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "List"),
+      entries.map((entry) => el("th", { scope: "col" }, title(entry), el("span", { class: "entry-input" }, entry.input))))),
+    body);
+}
 
-  $("disclaimer").textContent = result.disclaimer;
-  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+// An entry's column title: its kind, and for a party its number and role ("Party 2, consignee: Company"); a party's
+// name entered as a person's reads "Person" (the API's kind is Receiver).
+function entryTitle(entry) {
+  if (!entry.party) return KIND[entry.kind] || entry.kind;
+  const kind = entry.kind === "Receiver" ? "Person" : KIND[entry.kind] || entry.kind;
+  return `Party ${entry.party}, ${(ROLES[entry.role] || entry.role).toLowerCase()}: ${kind}`;
+}
+
+// The parties as entered, every row in order: the numbers in the result are the rows' numbers.
+function partiesEntered() {
+  return [...$("party-rows").children].map((row) => ({
+    role: row.querySelector(".party-role").value,
+    kind: row.querySelector(".party-kind").value,
+    name: row.querySelector(".party-name").value.trim() || null,
+    address: row.querySelector(".party-address").value.trim() || null,
+  }));
+}
+
+function addParty() {
+  const rows = $("party-rows");
+  if (rows.children.length >= MAX_PARTIES) return;
+  const number = rows.children.length + 1;
+  const row = el("div", { class: "party", role: "group" },
+    el("label", { class: "field" }, el("span", { class: "field-label" }, "Role"),
+      el("select", { class: "party-role" }, Object.entries(ROLES).map(([value, label]) => el("option", { value }, label)))),
+    el("label", { class: "field" }, el("span", { class: "field-label" }, "Name"),
+      el("input", { class: "party-name", maxlength: "300", autocomplete: "off", spellcheck: "false" })),
+    el("label", { class: "field" }, el("span", { class: "field-label" }, "Kind"),
+      el("select", { class: "party-kind" }, el("option", { value: "company" }, "Company"), el("option", { value: "person" }, "Person"))),
+    el("label", { class: "field field-wide" }, el("span", { class: "field-label" }, "Address", el("span", { class: "hint" }, "any format")),
+      el("textarea", { class: "party-address", maxlength: "300", rows: "1", spellcheck: "false" })),
+    el("button", { type: "button", class: "secondary party-remove", onclick: () => { row.remove(); partiesChanged(); } }, "Remove"));
+  // Roles in the usual order of a booking: the first party a shipper, the second a consignee, then notify party.
+  row.querySelector(".party-role").value = Object.keys(ROLES)[Math.min(number - 1, 2)];
+  rows.append(row);
+  partiesChanged();
+  row.querySelector(".party-name").focus();
+}
+
+function partiesChanged() {
+  const rows = $("party-rows").children;
+  [...rows].forEach((row, i) => {
+    row.setAttribute("aria-label", `Party ${i + 1}`);
+    row.querySelector(".party-remove").setAttribute("aria-label", `Remove party ${i + 1}`);
+  });
+  $("add-party").disabled = rows.length >= MAX_PARTIES;
 }
 
 function cellButton(cell, entry, list) {
@@ -207,7 +284,7 @@ function cellButton(cell, entry, list) {
   const who = cell.bestCandidate ? cell.bestCandidate.listedName : null;
   const label = cell.state === "NotChecked"
     ? `${list.name}: not checked`
-    : `${list.name}, ${KIND[entry.kind]}: ${percentText(cell.percent)} match likelihood, ${LABELS[state]}${who ? ", " + who : ""}`;
+    : `${list.name}, ${entryTitle(entry)}: ${percentText(cell.percent)} match likelihood, ${LABELS[state]}${who ? ", " + who : ""}`;
   return el("button", {
     type: "button",
     class: `cell ${state}`,
@@ -230,7 +307,7 @@ function showDetail(button, cell, entry, list) {
   // replaceChildren would show a null as the text "null": only the parts there are.
   detail.replaceChildren(...[
     el("h3", {}, candidate.listedName),
-    el("p", { class: "meta" }, `${list.name} · ${KIND[entry.kind]} “${entry.input}” · ${percentText(candidate.percent)} match likelihood (${LABELS[candidate.outcome]})`),
+    el("p", { class: "meta" }, `${list.name} · ${entryTitle(entry)} “${entry.input}” · ${percentText(candidate.percent)} match likelihood (${LABELS[candidate.outcome]})`),
     cell.allowed && entry.allowedBy ? el("p", { class: "allowed-note" }, el("strong", {}, "Allowed by the allow-list: "),
       `“${entry.allowedBy.name}”: ${entry.allowedBy.reason}. This possible match doesn't raise the outcome; a person can still review it.`) : null,
     el("dl", {},
@@ -280,7 +357,7 @@ function buildRecord() {
   // One candidate in full: the best of a cell, or another possible match on the same list.
   const candidateBlock = (entry, cell, list, candidate, percent, outcome) => el("div", { class: "print-hit" },
     el("h3", {}, candidate.listedName),
-    el("p", {}, `${list ? list.name : cell.list} · ${KIND[entry.kind] || entry.kind} · ${percentText(percent)} match likelihood (${LABELS[outcome]})`),
+    el("p", {}, `${list ? list.name : cell.list} · ${entryTitle(entry)} · ${percentText(percent)} match likelihood (${LABELS[outcome]})`),
     cell.allowed && entry.allowedBy ? el("p", {}, `Allowed by the allow-list: “${entry.allowedBy.name}”: ${entry.allowedBy.reason}.`) : null,
     el("dl", { class: "print-meta" },
       el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
@@ -297,10 +374,14 @@ function buildRecord() {
       el("dt", {}, "Reference"), el("dd", {}, result.reference),
       el("dt", {}, "Screened"), el("dd", {}, `${when(at)} (${at.toISOString()})`),
       el("dt", {}, "Result"), el("dd", {}, el("strong", {}, OVERALL[result.outcome] || result.outcome), ". ", result.summary),
-      ...["Receiver", "Company", "Address"].flatMap((kind) => [el("dt", {}, `${kind} entered`), el("dd", {}, entered[kind] || "—")])),
+      ...["Receiver", "Company", "Address"].flatMap((kind) => [el("dt", {}, `${kind} entered`), el("dd", {}, entered[kind] || "—")]),
+      // Each party as entered, numbered as the result numbers them.
+      ...shown.parties.flatMap((party, i) => [
+        el("dt", {}, `Party ${i + 1}, ${(ROLES[party.role] || party.role).toLowerCase()} (${party.kind === "person" ? "person" : "company"})`),
+        el("dd", {}, [party.name, party.address].filter(Boolean).join(" · ") || "—")])),
     el("h2", {}, "Lists searched"),
     el("table", { class: "print-table" },
-      el("thead", {}, el("tr", {}, el("th", {}, "List"), el("th", {}, "As of"), result.entries.map((entry) => el("th", {}, KIND[entry.kind] || entry.kind)))),
+      el("thead", {}, el("tr", {}, el("th", {}, "List"), el("th", {}, "As of"), result.entries.map((entry) => el("th", {}, entryTitle(entry))))),
       el("tbody", {}, result.lists.map((list) => el("tr", {},
         el("td", {}, list.name),
         el("td", {}, listAsOf(list)),
@@ -346,6 +427,7 @@ function addressText(state, entry) {
 }
 
 form.addEventListener("submit", screen);
+$("add-party").addEventListener("click", addParty);
 $("print-button").addEventListener("click", printRecord);
 $("clear-button").addEventListener("click", () => {
   current++;
@@ -353,6 +435,8 @@ $("clear-button").addEventListener("click", () => {
   pending = null;
   $("screen-button").disabled = false;
   form.reset();
+  $("party-rows").replaceChildren();
+  partiesChanged();
   shown = null;
   buildRecord();
   $("result").hidden = true;
