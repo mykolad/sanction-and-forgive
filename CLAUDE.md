@@ -203,7 +203,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `Screening_IsLoggedByReference_…` checks every log record for the entered text.
 - **Website** (`wwwroot`, plain JS, no build step): one form (receiver, company, a multi-line address "any format"),
   "Try an example" buttons, a summary line, the table (lists × entries; Match / Possible match / No match / Not checked
-  with a symbol each, never colour alone), a detail panel per cell (listed name, alias matched, how it aligned,
+  with a symbol each, never colour alone), a "Print or save the record" button (a print-only record built from
+  the result on the page: reference, time, what was entered, the lists as of when, each possible match and how it
+  aligned, the versions, the disclaimer; `@media print`), a detail panel per cell (listed name, alias matched, how it aligned,
   programme, address, the official record), the disclaimer, and the attribution footer (OGL, trade.gov's notice, EU).
   Every page starts with the same menu (`<nav class="menu">`, the current page `aria-current="page"`): Screen,
   **Browse lists** (`wwwroot/lists/`: pick a list, filter, page through entries, expand one for every name, address,
