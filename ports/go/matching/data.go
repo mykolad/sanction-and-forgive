@@ -51,10 +51,10 @@ type MatcherData struct {
 	AddressWords map[string]bool
 	// StreetWords and StreetParticles: a country name after a street type and one or two particles names the street
 	// ("rue de Malte"), as in the reference's AddressParser.
-	StreetWords          map[string]bool
-	StreetParticles      map[string]bool
+	StreetWords     map[string]bool
+	StreetParticles map[string]bool
 	// StreetSuffixes: street types written after the name ("Almanya Caddesi", "Jordan Road").
-	StreetSuffixes map[string]bool
+	StreetSuffixes       map[string]bool
 	SpellingGroups       map[string]int
 	SpellingGroupMembers [][]string
 	CognateGroups        map[string][]int

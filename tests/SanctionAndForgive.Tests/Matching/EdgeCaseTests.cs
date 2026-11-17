@@ -43,6 +43,18 @@ public class EdgeCaseTests
         Assert.Equal(AddressState.Corroborated, StateOf(entered, listed));
     }
 
+    [Theory]
+    [InlineData("12 Example Avenue, Germany, 10115", "12 Example Avenue, France, 10115")]
+    [InlineData("12 Example Avenue\nGermany 10115", "12 Example Avenue\nFrance 10115")]
+    [InlineData("Office 4 Some Road Malta", "Office 4 Some Road Cyprus")]
+    public void ACountryInAnotherPartOfTheAddress_IsStillTheCountry(string entered, string listed)
+    {
+        // A street type in one part and a country in the next ("Avenue, Germany, 10115"), or a country that ends the
+        // address, name the country: two addresses alike but for it conflict.
+        Assert.Equal(AddressState.Conflicting, StateOf(entered, listed));
+        AssertBand(AddressCell(entered, Subject("Northwind Shipping LLC", SubjectKind.Entity, listed)), Outcome.NoMatch);
+    }
+
     [Fact]
     public void UnaccentedTurkishStreetTypes_AreStreetTypes()
     {

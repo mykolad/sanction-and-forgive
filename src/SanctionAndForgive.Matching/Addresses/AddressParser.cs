@@ -21,10 +21,12 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
     {
         string? country = sourceCountryCode is { Length: 2 } code && data.CountryCodes.Contains(code.ToUpperInvariant()) ? code.ToUpperInvariant() : null;
         var words = Normalizer.Words(raw);
+        var parts = Parts(raw, words.Count);
         if (TrailingCode().Match(raw) is { Success: true } trailing && data.CountryCodes.Contains(trailing.Groups[1].Value))
         {
             country ??= trailing.Groups[1].Value;
             words.RemoveAt(words.Count - 1);
+            parts.RemoveAt(parts.Count - 1);
         }
 
         var tokens = words.Select(tokenizer.Get).ToList();
@@ -36,7 +38,7 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         {
             if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch)
             {
-                if (NamesAStreet(tokens, i, countryMatch.Length))
+                if (NamesAStreet(tokens, parts, i, countryMatch.Length))
                 {
                     // The whole name is the street's: no country or place within it ("rue de la République
                     // démocratique du Congo" is neither the DRC nor the Congo).
@@ -82,13 +84,14 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
 
     /// <summary>Whether the country name of <paramref name="length"/> words starting at <paramref name="start"/> names
     /// a street: after a street type and one or two particles (<c>12 rue de Malte, Paris</c> is in France, not Malta);
-    /// right after a street type with more of the address after it (<c>Via Germania 12</c>); or right before a street
-    /// type written after the name (<c>Almanya Caddesi 12</c>, <c>Jordan Road</c>). Commas are gone by now, so a
-    /// country name at the end after a street type is the country: <c>Sheikh Zayed Road, UAE</c>.</summary>
-    private bool NamesAStreet(List<Token> tokens, int start, int length)
+    /// right after a street type in the same part of the address (<paramref name="parts"/>), unless it ends the address
+    /// (<c>Via Germania 12</c> is a street, <c>12 Example Avenue, Germany, 10115</c> and <c>Some Road Malta</c> name
+    /// their countries); or right before a street type written after the name, in the same part (<c>Almanya Caddesi
+    /// 12</c>, <c>Jordan Road</c>).</summary>
+    private bool NamesAStreet(List<Token> tokens, List<int> parts, int start, int length)
     {
         var end = start + length;
-        if (end < tokens.Count && Is(tokens[end], data.StreetSuffixes))
+        if (end < tokens.Count && parts[end] == parts[end - 1] && Is(tokens[end], data.StreetSuffixes))
         {
             return true;
         }
@@ -101,8 +104,25 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
             particles++;
         }
 
-        return i >= 0 && Is(tokens[i], data.StreetWords) && (particles > 0 || end < tokens.Count);
+        return i >= 0 && Is(tokens[i], data.StreetWords) && (particles > 0 || (parts[i] == parts[start] && end < tokens.Count));
     }
+
+    /// <summary>The parts of an address that commas, semicolons and line breaks separate: each word's part, in order.
+    /// Should the parts' words ever differ from the whole's, every word is a part of its own, so a country name never
+    /// names a street for want of a comma.</summary>
+    private static List<int> Parts(string raw, int count)
+    {
+        var parts = new List<int>(count);
+        var pieces = raw.Split(PartSeparators);
+        for (var i = 0; i < pieces.Length; i++)
+        {
+            parts.AddRange(Enumerable.Repeat(i, Normalizer.Words(pieces[i]).Count));
+        }
+
+        return parts.Count == count ? parts : [.. Enumerable.Range(0, count).Select(i => -1 - i)];
+    }
+
+    private static readonly char[] PartSeparators = [',', ';', '\n', '\r', '\uFF0C', '\uFF1B', '\u3001'];
 
     private static bool Is(Token token, HashSet<string> words) => words.Contains(token.Text) || token.Forms.Any(words.Contains);
 

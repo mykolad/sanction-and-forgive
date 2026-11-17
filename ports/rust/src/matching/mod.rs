@@ -186,6 +186,9 @@ mod tests {
             ("Sheikh Zayed Road, UAE", "AE"),
             ("Office 4, Some Road, Malta", "MT"),
             ("Corso Italia 3, Milano, Italia", "IT"),
+            ("12 Example Avenue, Germany, 10115", "DE"),
+            ("12 Example Avenue\nGermany 10115", "DE"),
+            ("Office 4 Some Road Malta", "MT"),
         ] {
             assert_eq!(parse(raw).country, country, "{raw}");
         }
