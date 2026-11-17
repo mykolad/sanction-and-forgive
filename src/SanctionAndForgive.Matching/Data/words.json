@@ -14,9 +14,9 @@
     "deliver", "delivery", "to", "in", "at", "for", "via", "c/o", "co", "the", "of", "and", "warehouse", "address",
     "rue", "bd", "allée", "allee", "chemin", "quai", "impasse", "route", "cours", "cedex", "av", "place", "passage", "voie", "esplanade", "promenade", "faubourg",
     "de", "du", "des", "la", "le", "les", "au", "aux", "et"
-  , "gasse", "weg", "platz", "ring", "damm", "ufer", "ulica", "ul", "aleja", "plac", "osiedle", "os", "cadde", "caddesi", "cad", "cd", "sokak", "sokağı", "sok", "sk", "bulvar", "bulvarı", "mahalle", "mahallesi", "mah", "calle", "avenida", "avda", "paseo", "plaza", "carrera", "carretera", "camino", "ronda", "viale", "piazza", "piazzale", "corso", "largo", "vicolo", "strada", "del", "las", "los", "el", "di", "della", "delle", "dei", "degli", "dello", "sokagi", "bulvari"],
+  , "gasse", "weg", "platz", "ring", "damm", "ufer", "ulica", "ul", "aleja", "plac", "osiedle", "os", "cadde", "caddesi", "cad", "cd", "sokak", "sokağı", "sok", "sk", "bulvar", "bulvarı", "mahalle", "mahallesi", "mah", "calle", "avenida", "avda", "paseo", "plaza", "carrera", "carretera", "camino", "ronda", "viale", "piazza", "piazzale", "corso", "largo", "vicolo", "strada", "del", "las", "los", "el", "di", "della", "delle", "dei", "degli", "dello", "sokagi", "bulvari", "der"],
   "streetWords": ["rue", "avenue", "av", "boulevard", "bd", "place", "allée", "allee", "chemin", "quai", "impasse", "route", "cours",
     "passage", "square", "voie", "esplanade", "promenade", "faubourg", "straße", "strasse", "str", "gasse", "weg", "platz", "ring", "damm", "ufer", "ulica", "ul", "aleja", "plac", "osiedle", "os", "cadde", "caddesi", "cad", "cd", "sokak", "sokağı", "sok", "sk", "bulvar", "bulvarı", "mahalle", "mahallesi", "mah", "calle", "avenida", "avda", "paseo", "plaza", "carrera", "carretera", "camino", "ronda", "via", "viale", "piazza", "piazzale", "corso", "largo", "vicolo", "strada", "sokagi", "bulvari"],
-  "streetParticles": ["de", "du", "des", "la", "le", "del", "las", "los", "el", "di", "della", "delle", "dei", "degli", "dello"],
+  "streetParticles": ["de", "du", "des", "la", "le", "del", "las", "los", "el", "di", "della", "delle", "dei", "degli", "dello", "der"],
   "streetSuffixes": ["cadde", "caddesi", "cad", "cd", "sokak", "sokağı", "sokagi", "sok", "sk", "bulvar", "bulvarı", "bulvari", "street", "road", "avenue", "lane"]
 }

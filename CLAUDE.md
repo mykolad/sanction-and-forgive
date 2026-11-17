@@ -87,7 +87,8 @@ reference. The pipeline:
   words), `spelling-pairs.json`, `cognates.json`, `countries.json` (244 countries: English variants as the feeds write
   them, Russian, Ukrainian, native names from ICU, French from CLDR as France's register writes them, and German, Polish,
   Turkish, Spanish and Italian from CLDR; without first names, words, abbreviations of something else and places common
-  elsewhere: Maurice, Dominique, Grenade, Dominika, Mauricio, Granada, RU, ABD, Norfolk, Santa Lucía...), `places.json` (exonyms with their country). Keys are normalised like
+  elsewhere: Maurice, Dominique, Grenade, Dominika, Kuba, Grecia, Granada, Indie, Butan, Çad (Turkish cad.), RU, ABD,
+  Norfolk, Pitcairn...), `places.json` (exonyms with their country). Keys are normalised like
   the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`. `arabic.json` (Arabic-script folding, name particles) and
   `cjk.json` (Chinese and Korean: spacing, company forms, traditional characters) are read by the Rust port only so
   far; .NET and Go hash them.

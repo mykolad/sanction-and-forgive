@@ -9,17 +9,20 @@ func TestAddress_AStreetNamedAfterACountry_IsAStreet(t *testing.T) {
 	data := Data()
 	parser := &addressParser{data: data, tokenizer: &tokenizer{data: data, cache: map[string]*Token{}}}
 	for raw, want := range map[string]string{
-		"12 rue de Malte, Paris":            "",
-		"Almanya Caddesi 12, Istanbul":      "",
-		"Via Germania 12, Roma":             "",
-		"Corso Italia 3, Milano":            "",
-		"12 Jordan Road, Kowloon":           "",
-		"Sheikh Zayed Road, UAE":            "AE",
-		"Office 4, Some Road, Malta":        "MT",
-		"Corso Italia 3, Milano, Italia":    "IT",
-		"12 Example Avenue, Germany, 10115": "DE",
-		"12 Example Avenue\nGermany 10115":  "DE",
-		"Office 4 Some Road Malta":          "MT",
+		"12 rue de Malte, Paris":              "",
+		"Almanya Caddesi 12, Istanbul":        "",
+		"Via Germania 12, Roma":               "",
+		"Corso Italia 3, Milano":              "",
+		"12 Jordan Road, Kowloon":             "",
+		"Sheikh Zayed Road, UAE":              "AE",
+		"Office 4, Some Road, Malta":          "MT",
+		"Corso Italia 3, Milano, Italia":      "IT",
+		"12 Example Avenue, Germany, 10115":   "DE",
+		"12 Example Avenue\nGermany 10115":    "DE",
+		"Office 4 Some Road Malta":            "MT",
+		"Platz der Türkei 12, Berlin":         "",
+		"Ataturk Cad. 12, Istanbul":           "",
+		"Kuba Kowalski, Kwiatowa 5, Warszawa": "",
 	} {
 		if got := parser.Parse(raw, "").Country; got != want {
 			t.Errorf("Parse(%q).Country = %q, want %q", raw, got, want)
