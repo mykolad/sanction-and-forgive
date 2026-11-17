@@ -4,8 +4,9 @@ About ten minutes, in this order, against the production site. Every input below
 gave the answer shown; percentages can move by a point or two when the lists are updated. Steps 6 and 7 need an
 administrator's sign-in (the owner's Entra account). The questions in italics are the ones each step usually raises.
 
-Before you start: open the site, then **List status**, and check every list says *Current* (an *Overdue* list is fine
-for the demo: step 8 shows what it means).
+Before you start: open the site, then **List status**, and check every list in the first table (the lists searched)
+says ✓ *Searched* (one that says ! *Searched, out of date* is fine for the demo: step 8 shows what it means). The
+second table, the lists not imported, is expected.
 
 Press **Clear** before each example and leave the fields it doesn't name empty: the form keeps what was entered
 after a screening (to change one field and screen again), so a company left from the step before still counts.
@@ -89,8 +90,8 @@ the file and the terms; then the lists not imported and why (terms not cleared, 
 a list shows each update with how many records were added, removed or changed. An update that removed more than 20%
 of a list is held for review and the old one keeps serving.
 
-*What if a list can't be updated?* It's still searched as last downloaded, marked **Overdue** after 72 hours, and every
-result says so in its summary.
+*What if a list can't be updated?* It's still searched as last downloaded, marked *Searched, out of date* here (the
+API's state `Overdue`) after 72 hours, and every result says so in its summary.
 
 ## 9. A batch
 
