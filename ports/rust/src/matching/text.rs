@@ -123,7 +123,7 @@ pub fn words(value: &str) -> Vec<String> {
     }
     // A "word" of Arabic marks or tatweel alone (a stray ـ) carries no letter: it isn't a word.
     words.retain(|word| !word.chars().all(is_arabic) || !arabic_form(word).is_empty());
-    join_and_split_cjk(words)
+    words
 }
 
 /// Chinese and Korean names compared in their own script (data/cjk.json, #93): the split-off forms, longest first,
@@ -186,7 +186,8 @@ fn cjk_script(word: &str) -> u8 {
 }
 
 /// Adjacent words wholly in Han or wholly in Hangul as one word (neither script spaces a name as Latin does), then the
-/// company forms (cjk.json splitOff) split off either end as words of their own: the longest that fits, compared in
+/// company forms (cjk.json splitOff) split off either end as words of their own (names only: an address keeps its parts,
+/// so its country and its numbers stay words of their own): the longest that fits, compared in
 /// simplified characters, again and again while at least two characters are left. 中兴 通讯股份有限公司 is 中兴通讯 and
 /// 股份有限公司; 주식회사 삼성전자 is 주식회사 and 삼성전자.
 fn join_and_split_cjk(words: Vec<String>) -> Vec<String> {
@@ -771,7 +772,10 @@ impl<'a> Tokenizer<'a> {
     }
 
     pub fn tokenize(&mut self, value: &str, join_initials: bool) -> Vec<RawToken> {
-        let words = merge_arabic_particles(&self.data.tables, self.replace_legal_phrases(words(&remove_hyphenated_honorifics(value))));
+        let words = merge_arabic_particles(
+            &self.data.tables,
+            self.replace_legal_phrases(join_and_split_cjk(words(&remove_hyphenated_honorifics(value)))),
+        );
         let mut tokens = Vec::with_capacity(words.len());
         let mut i = 0;
         while i < words.len() {

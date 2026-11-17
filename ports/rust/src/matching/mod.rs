@@ -190,6 +190,33 @@ mod tests {
         }
     }
 
+    /// Joining Chinese and Korean words is for names: an address keeps its parts, so the same address in those scripts
+    /// is found, and its country stays a word of its own.
+    #[test]
+    fn chinese_and_korean_addresses_keep_their_parts() {
+        for address in ["서울 강남로 12", "中国, 北京, 长安街 1"] {
+            let subject = ListedSubject {
+                external_id: "X-1".to_string(),
+                kind: SubjectKind::Entity,
+                primary_name: "Northwind Trading".to_string(),
+                names: vec![ListedName { full_name: "Northwind Trading".to_string(), is_weak: false }],
+                addresses: vec![ListedAddress { raw: address.to_string(), country_code: String::new() }],
+                programme: None,
+                source_url: None,
+            };
+            let list = ScreenedList {
+                code: "eu".to_string(),
+                name: "EU".to_string(),
+                index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
+            };
+            let request = ScreeningRequest { receiver_name: String::new(), company_name: String::new(), address: address.to_string() };
+            let result = Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap();
+            let cell = &result.entries[0].cells[0];
+            assert!(cell.best.is_some(), "{address}: {:?} {:?}", cell.outcome, cell.percent);
+        }
+        assert_eq!(text::words("中国, 北京, 1"), ["中国", "北京", "1"]);
+    }
+
     /// The company forms alone, or different names, never match.
     #[test]
     fn different_chinese_and_korean_names_dont_match() {
