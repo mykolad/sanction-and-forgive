@@ -70,8 +70,10 @@ tools/lists.ps1           The script the owner runs to manage lists
   five retries, none starting more than 10 minutes after the first attempt; owner's decision, 2026-11-09); a refusal
   (403, 404) isn't. A retry's log line never says "failed" (the import alert looks for it). The job's
   `replicaTimeout` is an hour to leave room.
-- `probe` (`dotnet SanctionAndForgive.Cli.dll probe [--source <code>|all] [--file <path>] [--keep <dir>]`) downloads,
-  parses and prints counts per feed. It writes nothing else. It exits 1 if an `Active` feed failed.
+- `probe` (`dotnet SanctionAndForgive.Cli.dll probe [--source <code>|all] [--file <path>] [--keep <dir>] [--scripts]`) downloads,
+  parses and prints counts per feed. It writes nothing else. It exits 1 if an `Active` feed failed. `--scripts` (.NET
+  only, a measurement like `evaluate`) adds each feed's names by Unicode script and Cyrillic alphabet (`Scripts`);
+  docs/sources.md "Scripts of the listed names" holds the table, `Matching/ScriptTests.cs` how such names match.
 - Parser tests: `tests/SanctionAndForgive.Tests/Lists/ParserTests.cs`, one small fictional fixture per format.
 
 ## Matching (`SanctionAndForgive.Matching`)
