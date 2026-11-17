@@ -33,7 +33,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "9ffa31f8de38");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "99697a1388e0");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -76,6 +76,17 @@ mod tests {
         }
         let (outcome, _) = screen("شركة النور ٢٠٠٠", "شركة النور 2000", SubjectKind::Entity);
         assert_eq!(outcome, Some(Outcome::Match));
+        // A small mark above (U+0618) is dropped too.
+        let (outcome, percent) = screen("عؘلي حسن", "علي حسن", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// A short name stays short however many marks or tatweels it's written with: the cap for a short name applies alike.
+    #[test]
+    fn marks_dont_lift_a_short_arabic_name_past_its_cap() {
+        let plain = screen("نور", "نور", SubjectKind::Entity);
+        assert_eq!(screen("نُور", "نور", SubjectKind::Entity), plain);
+        assert_eq!(screen("نـور", "نور", SubjectKind::Entity), plain);
     }
 
     /// The same normalisation never makes different names match.

@@ -355,6 +355,7 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
     let has_latin = chars.iter().any(|&c| is_latin(c));
     let is_number = chars.iter().all(|c| c.is_ascii_digit());
     let mut forms: Vec<String> = Vec::new();
+    let mut length = chars.len() as u32;
     if has_cyrillic {
         for table in tables {
             forms.push(table.transliterate(text));
@@ -367,7 +368,10 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
             *form = strip_diacritics(form);
         }
     } else if !has_latin && !is_number && chars.iter().any(|&c| is_arabic(c)) {
-        forms.push(arabic_form(text));
+        let form = arabic_form(text);
+        // Its length is the form's: a dropped mark or tatweel mustn't make a short name long enough to pass its cap.
+        length = form.chars().count() as u32;
+        forms.push(form);
     } else if has_latin || is_number {
         forms.push(strip_diacritics(text));
         if text.contains(['ü', 'ö', 'ä']) {
@@ -394,7 +398,7 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         }
         folds
     };
-    Token { text: text.to_string(), forms: distinct, folds, is_cyrillic: has_cyrillic, is_number, length: chars.len() as u32, groups: None }
+    Token { text: text.to_string(), forms: distinct, folds, is_cyrillic: has_cyrillic, is_number, length, groups: None }
 }
 
 /// Section 5.1: normalise, replace multi-word legal forms, join runs of single letters (keeping the letters for

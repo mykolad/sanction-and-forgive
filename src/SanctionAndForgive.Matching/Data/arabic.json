@@ -1,6 +1,6 @@
 {
-  "note": "Arabic-script words compared in their own script (#92): after NFKC (which already turns presentation forms into letters), 'drop' marks are removed (vowel marks, shadda, sukun, superscript alef, tatweel, Quranic marks) and 'letters' are read as the letter given, so spellings that differ only by hamza seats, alef forms, ya and alef maqsura, ta marbuta and ha, the Persian and Urdu kaf, ya and heh, and Eastern Arabic digits compare equal. Read by the Rust port (create_token); .NET and Go hash it into the matcher version and will read it when they follow. Ranges are 'first-last' in hexadecimal.",
-  "drop": ["064B-065F", "0670", "0640", "06D6-06ED", "08D3-08FF"],
+  "note": "Arabic-script words compared in their own script (#92): after NFKC (which already turns presentation forms into letters), 'drop' marks are removed (vowel marks, shadda, sukun, superscript alef, tatweel, the small marks above and below, Quranic marks) and 'letters' are read as the letter given, so spellings that differ only by hamza seats, alef forms, ya and alef maqsura, ta marbuta and ha, the Persian and Urdu kaf, ya and heh, and Eastern Arabic digits compare equal. Read by the Rust port (create_token); .NET and Go hash it into the matcher version and will read it when they follow. Ranges are 'first-last' in hexadecimal.",
+  "drop": ["0610-061A", "064B-065F", "0670", "0640", "06D6-06ED", "08D3-08FF"],
   "letters": {
     "أ": "ا",
     "إ": "ا",
