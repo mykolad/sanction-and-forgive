@@ -44,6 +44,26 @@ impl EntryKind {
     }
 }
 
+/// A shipment's party (#65, Rust first): its role, and a name (a person's or a company's), an address, or both.
+#[derive(Debug, Clone)]
+pub struct Party {
+    /// One of ROLES: a word from a fixed set, never entered text, so the audit line can name it.
+    pub role: &'static str,
+    pub name: String,
+    pub person: bool,
+    pub address: String,
+}
+
+/// The roles a party can have.
+pub const ROLES: [&str; 7] = ["shipper", "consignee", "notifyParty", "forwarder", "carrier", "endUser", "other"];
+
+/// Which party an entry belongs to: its number in the request (1-based) and its role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartyTag {
+    pub number: u32,
+    pub role: &'static str,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverallOutcome {
     Match,
@@ -82,6 +102,8 @@ pub struct Entry {
     pub compared: &'static str,
     pub cells: Vec<Cell>,
     pub allowed_by: Option<AllowListEntry>,
+    /// The party it belongs to; None for the request's own receiver, company and address.
+    pub party: Option<PartyTag>,
 }
 
 #[derive(Debug, Clone)]
@@ -136,10 +158,46 @@ impl Screener {
         lists: &[ScreenedList],
         allow_list: &AllowList,
     ) -> Result<ScreeningResult, NothingEntered> {
-        let (receiver, company, address) = (clean(&request.receiver_name), clean(&request.company_name), clean(&request.address));
-        if receiver.is_empty() && company.is_empty() && address.is_empty() {
+        self.screen_parties(request, &[], lists, allow_list)
+    }
+
+    /// A shipment: the request's own receiver, company and address, then each party's name and address, every
+    /// entry against every list; the outcome is the highest of them all (#65).
+    pub fn screen_parties(
+        &self,
+        request: &ScreeningRequest,
+        parties: &[Party],
+        lists: &[ScreenedList],
+        allow_list: &AllowList,
+    ) -> Result<ScreeningResult, NothingEntered> {
+        let mut entries = self.entries(&request.receiver_name, &request.company_name, &request.address, None, lists, allow_list);
+        for (i, party) in parties.iter().enumerate() {
+            let tag = PartyTag { number: i as u32 + 1, role: party.role };
+            let (receiver, company) = if party.person { (party.name.as_str(), "") } else { ("", party.name.as_str()) };
+            entries.extend(self.entries(receiver, company, &party.address, Some(tag), lists, allow_list));
+        }
+        if entries.is_empty() {
             return Err(NothingEntered);
         }
+        Ok(ScreeningResult {
+            outcome: overall(&entries),
+            matcher_version: self.matcher_version.clone(),
+            entries,
+            allow_list_version: allow_list.version.clone(),
+        })
+    }
+
+    /// One party's entries (or the request's own): a receiver, a company and an address, each when entered.
+    fn entries(
+        &self,
+        receiver: &str,
+        company: &str,
+        address: &str,
+        party: Option<PartyTag>,
+        lists: &[ScreenedList],
+        allow_list: &AllowList,
+    ) -> Vec<Entry> {
+        let (receiver, company, address) = (clean(receiver), clean(company), clean(address));
         let mut tokenizer = Tokenizer::new(self.data);
         let parser = NameParser { data: self.data };
         let address_form = (!address.is_empty()).then(|| parse_address(self.data, &mut tokenizer, address, ""));
@@ -165,18 +223,20 @@ impl Screener {
                     cell
                 })
                 .collect();
-            entries.push(Entry { kind, input: name.to_string(), compared, cells, allowed_by });
+            entries.push(Entry { kind, input: name.to_string(), compared, cells, allowed_by, party });
         }
         if let Some(form) = &address_form {
             let cells = lists.iter().map(|list| self.to_cell(list, |index| index.search_address(form, &self.options))).collect();
-            entries.push(Entry { kind: EntryKind::Address, input: address.to_string(), compared: "Address only", cells, allowed_by: None });
+            entries.push(Entry {
+                kind: EntryKind::Address,
+                input: address.to_string(),
+                compared: "Address only",
+                cells,
+                allowed_by: None,
+                party,
+            });
         }
-        Ok(ScreeningResult {
-            outcome: overall(&entries),
-            matcher_version: self.matcher_version.clone(),
-            entries,
-            allow_list_version: allow_list.version.clone(),
-        })
+        entries
     }
 
     /// Every listed subject at Review or above for name, on each list that can be searched.

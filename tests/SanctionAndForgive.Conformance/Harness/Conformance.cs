@@ -85,6 +85,23 @@ public sealed class ConformanceFactAttribute : FactAttribute
     }
 }
 
+/// <summary>A test of what only the suite's later versions ask (docs/conformance.md, "Versions"): an improvement that
+/// lands in the Rust reference first, skipped for an implementation tested at an earlier version.</summary>
+public sealed class SinceVersionFactAttribute : FactAttribute
+{
+    public SinceVersionFactAttribute(int version)
+    {
+        if (Settings.BaseUrl is null)
+        {
+            Skip = "No implementation to test: set CONFORMANCE_BASE_URL (docs/conformance.md).";
+        }
+        else if (Settings.Version < version)
+        {
+            Skip = $"Asked from version {version}; this implementation is tested at version {Settings.Version}.";
+        }
+    }
+}
+
 /// <summary>Collections run one at a time in name order: "1 Golden" compares results with the suite's base state
 /// first, "2 Behaviour" doesn't change anything, and "3 Changes" changes state (and puts it back).</summary>
 public sealed class ByName : ITestCollectionOrderer

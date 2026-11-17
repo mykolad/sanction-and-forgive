@@ -60,8 +60,8 @@ check stays green (owner's suggestion):
 
 Version 1 changes only when a shared dictionary change moves the .NET implementation's answers (regenerate it from
 .NET: `run.ps1 -Build -UpdateGolden -Version 1` with the .NET image), so a regression in .NET or Go still fails its
-job. When .NET or Go catch up with Rust, their CI job moves to version 2. A test that only version 2 holds checks
-`Settings.Version`.
+job. When .NET or Go catch up with Rust, their CI job moves to version 2. A test of what only version 2 asks (a new
+field or endpoint) is a `[SinceVersionFact(2)]`, skipped below it: `PartiesTests` (several parties per screening, #65).
 
 ## What an implementation must provide
 

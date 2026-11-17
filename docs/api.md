@@ -31,6 +31,36 @@ A list an administrator **switched off** (below, "Admin") isn't searched at all:
 entries have no cell for it (so it doesn't make a result `Incomplete`), and the summary says "Not searched: UK
 (switched off by an administrator: <their reason>)." The audit line has `off` after its version.
 
+## A shipment's parties: `parties` (Rust only so far)
+
+A shipment has more parties than a receiver: a shipper, a consignee, a notify party, a forwarder... A screening (and
+each record of a stream) can carry them all in **`parties`**, up to 10, besides or instead of the receiver, company
+and address (#65):
+
+```json
+{
+  "reference": "TX-2026-0001",
+  "companyName": "Northwind Trading LLC",
+  "parties": [
+    { "role": "shipper", "name": "Pinecrest Exports GmbH", "kind": "company", "address": "Hamburg, Germany" },
+    { "role": "notifyParty", "name": "Anna Petrova", "kind": "person" }
+  ]
+}
+```
+
+- `role` (required): `shipper`, `consignee`, `notifyParty`, `forwarder`, `carrier`, `endUser` or `other`.
+- `name` and `address`: up to 300 characters each, at least one of them. `kind`: `company` (the default) or
+  `person`: which reading the name gets, as `companyName` or `receiverName` would.
+
+Each party's name and address are **entries** like the request's own, against every list, and the overall outcome is
+the highest of them all. A party's entries carry `party` (its number in `parties`, from 1) and `role`; the request's
+own entries carry neither, so a screening without parties answers exactly as before. The audit line puts
+`party 2 notifyParty` before such an entry's kind: the role is a word from the list above, never anything entered.
+
+Only an implementation whose `GET /api/v1/status` lists `"parties"` in **`features`** takes them (the Rust port, which
+production runs, since 2026-11-17; owner's decision on #76); the website offers "Add a party" only there. Elsewhere
+`parties` is ignored, so a caller checks `features` first.
+
 ## Batches: `POST /api/v1/screenings/stream`
 
 For many records at once. The request is **NDJSON**: one screening per line, each the same object as the single
@@ -71,7 +101,7 @@ Content-Type: application/x-ndjson
   `SamePlace` and `SameNumber`. `notes` says the rest: why a percentage was capped, or how many address parts
   aligned. The single endpoint gives the same explanation in plain words. Matching is deterministic, so screening
   one record again with the same list versions gives the same answer.
-- **`error`** for a record that couldn't be screened (not JSON, a line over 4,096 bytes, a missing reference, nothing
+- **`error`** for a record that couldn't be screened (not JSON, a line over 4,096 bytes, or 65,536 where `parties` are taken, a missing reference, nothing
   entered, a field over 300 characters): `line`, the `reference` if there was one, and `errors` by field. The
   messages never quote the input. The stream goes on.
 - **`end`** last: how many were screened, how many were errors, and whether it was `truncated`.
@@ -112,7 +142,8 @@ Receiver: eu Review 70% [EU.1234.56]; ofac-sdn NoMatch 18%; uk NotChecked | Comp
 
 The reference, the overall outcome, the matcher version, each list's version (its import id), and for each entry kind
 (Receiver, Company, Address) and list: the outcome, the percentage, and, from 20%, the best candidate's id on that list
-(the list's own id, not a name). A list that wasn't searched says `NotChecked`; one searched past its allowed age has
+(the list's own id, not a name); a party's entry starts with its number and role (`party 1 shipper Company: …`). A
+list that wasn't searched says `NotChecked`; one searched past its allowed age has
 `overdue` after its version. With the versions, the same result
 can be reproduced later from the same lists.
 
