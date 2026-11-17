@@ -1,0 +1,70 @@
+# cargo about (https://github.com/EmbarkStudios/cargo-about): the licences of the libraries compiled into the Rust
+# port's binaries, gathered into THIRD-PARTY-CODE.txt when the image is built (Dockerfile). Only what ships: the Linux
+# target, no dev- or build-dependencies. Where a library offers a choice ("MIT OR Apache-2.0"), the first accepted
+# licence in this order is the one used.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "Zlib",
+    "Unicode-3.0",
+    "MIT-0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+]
+targets = ["x86_64-unknown-linux-gnu"]
+ignore-dev-dependencies = true
+ignore-build-dependencies = true
+# Our own crate (publish = false) is under LICENSE, copied into the image beside the notices.
+private = { ignore = true }
+
+# Libraries whose licence file cargo about doesn't recognise on its own (a copyright header, several licences in one
+# file, the Apache text without its appendix), so it would fall back to the bare SPDX text, without the library's
+# copyright lines. Each names its file with the file's checksum: the notice then holds the library's own text, and a
+# new version whose file differs stops the build until it's checked here. about-check.hbs fails the build on any
+# other fallback.
+[constant_time_eq.clarify]
+license = "Apache-2.0"
+[[constant_time_eq.clarify.files]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[ryu.clarify]
+license = "Apache-2.0"
+[[ryu.clarify.files]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
+
+[sync_wrapper.clarify]
+license = "Apache-2.0"
+[[sync_wrapper.clarify.files]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+
+[curve25519-dalek.clarify]
+license = "BSD-3-Clause"
+[[curve25519-dalek.clarify.files]]
+path = "LICENSE"
+license = "BSD-3-Clause"
+checksum = "cca0bd3c4fcdba74145ef9d49c62337e2c9fbf9368288f11d0547f1b0273219f"
+
+[chrono.clarify]
+license = "MIT"
+[[chrono.clarify.files]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "946c9835d8034d24404f8cfec5f4654cee5dad17e944afc3d06d742cf2882831"
+
+[libm.clarify]
+license = "MIT"
+[[libm.clarify.files]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
