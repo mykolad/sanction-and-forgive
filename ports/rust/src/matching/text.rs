@@ -21,6 +21,9 @@ pub struct Token {
     length: u32,
     /// None: in no spelling or cognate group (most words).
     pub(crate) groups: Option<Box<TokenGroups>>,
+    /// A word of a name read as Korean, its readings (korean.rs: the spellings of one name read alike); None for any
+    /// other word, so a Jung elsewhere never meets a Chung.
+    pub korean: Option<Box<[String]>>,
 }
 
 /// The spelling-pair and cognate groups a token belongs to, looked up once when it's made.
@@ -769,7 +772,7 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         }
         folds
     };
-    Token { text: text.to_string(), forms: distinct, folds, is_cyrillic: has_cyrillic, is_number, length, groups: None }
+    Token { text: text.to_string(), forms: distinct, folds, is_cyrillic: has_cyrillic, is_number, length, groups: None, korean: None }
 }
 
 /// Section 5.1: normalise, replace multi-word legal forms, join runs of single letters (keeping the letters for
@@ -794,10 +797,33 @@ impl<'a> Tokenizer<'a> {
             self.replace_legal_phrases(join_and_split_cjk(words(&remove_hyphenated_honorifics(value)))),
         );
         let mut tokens = Vec::with_capacity(words.len());
+        // A Korean name's words carry its readings (korean.rs); the same word in any other name doesn't. Titles and stop
+        // words don't count against it (General Ri Yong Ho), as the person reading drops them. A single letter stays an
+        // initial even where it could spell a surname (I, O, U): read as a surname, Ali O. lost its review against Ali.
+        let named: Vec<String> = words
+            .iter()
+            .filter(|w| !self.data.honorifics.contains(w.as_str()) && !self.data.stop_words.contains(w.as_str()))
+            .cloned()
+            .collect();
+        let korean = super::korean::is_korean_name(&named);
+        // Each word's role in the Korean name (korean::roles over the named words), by its position among all words.
+        let mut roles: Vec<Option<super::korean::Role>> = vec![None; words.len()];
+        if korean {
+            let mut named_roles = super::korean::roles(&named).into_iter();
+            for (word, role) in words.iter().zip(roles.iter_mut()) {
+                if !self.data.honorifics.contains(word.as_str()) && !self.data.stop_words.contains(word.as_str()) {
+                    *role = named_roles.next();
+                }
+            }
+        }
         let mut i = 0;
         while i < words.len() {
             if !join_initials || !is_single_letter(&words[i]) {
-                tokens.push(RawToken { token: self.get(&words[i]), initials: None });
+                let token = match roles[i] {
+                    Some(role) => self.get_korean(&words[i], role),
+                    None => self.get(&words[i]),
+                };
+                tokens.push(RawToken { token, initials: None });
                 i += 1;
                 continue;
             }
@@ -811,6 +837,21 @@ impl<'a> Tokenizer<'a> {
             i += 1;
         }
         tokens
+    }
+
+    /// The word as part of a Korean name: its token with the Korean readings, interned apart from the plain word.
+    fn get_korean(&mut self, text: &str, role: super::korean::Role) -> TokenRef {
+        let key = format!("\u{1}ko:{role:?}:{text}");
+        if let Some(token) = self.cache.as_ref().and_then(|cache| cache.get(&key)) {
+            return token.clone();
+        }
+        let mut token = self.data.token(text);
+        token.korean = Some(super::korean::readings(text, role).into_boxed_slice());
+        let token = Arc::new(token);
+        if let Some(cache) = &mut self.cache {
+            cache.insert(key, token.clone());
+        }
+        token
     }
 
     pub fn get(&mut self, text: &str) -> TokenRef {

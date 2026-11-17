@@ -13,6 +13,7 @@ pub mod addresses;
 pub mod compare;
 pub mod data;
 pub mod index;
+pub mod korean;
 pub mod names;
 pub mod options;
 pub mod scorer;
@@ -34,7 +35,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "29cac07855fe");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "2bbc2988bdda");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -313,6 +314,85 @@ mod tests {
         for (query, listed) in [("中兴通讯", "华为技术"), ("股份有限公司", "中兴通讯股份有限公司"), ("삼성전자", "현대자동차")]
         {
             let (outcome, percent) = screen(query, listed, SubjectKind::Entity);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// Korean names in their different romanisations (data/korean.json, #93): the South's, McCune-Reischauer's, the
+    /// North's and popular spellings of one name match.
+    #[test]
+    fn korean_names_match_in_any_romanisation() {
+        for (query, listed) in [
+            ("Kim Chong Un", "Kim Jong Un"),
+            ("Kim Chŏng-ŭn", "Kim Jong Un"),
+            ("Kim Jeong Eun", "Kim Jong Un"),
+            ("Ri Yong Ho", "Lee Yong Ho"),
+            ("Yi Yong Ho", "Ri Yong Ho"),
+            ("Pak Pong Ju", "Park Pong Ju"),
+            ("Choe Ryong Hae", "Choi Ryong Hae"),
+            ("Choe Yong Hae", "Choe Ryong Hae"),
+            ("Kim Il Sung", "Kim Il-song"),
+            ("Kim Il Sung", "Kim Il Seong"),
+            ("Jang Song Thaek", "Chang Song Taek"),
+            ("Kim Yong Chol", "Kim Yong Chul"),
+            ("Kim Young Nam", "Kim Yong Nam"),
+            ("Jin Ho Park", "Jin Ho Pak"),
+            ("Choe Young Hae", "Choe Ryong Hae"),
+        ] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// A title doesn't keep a name from reading as Korean (General Ri Yong Ho / Lee Yong Ho). A single letter stays an
+    /// initial even where it could spell a surname: Ali O. is still a possible match for Ali.
+    #[test]
+    fn a_title_keeps_a_name_korean_and_a_single_letter_stays_an_initial() {
+        let (outcome, percent) = screen("General Ri Yong Ho", "Lee Yong Ho", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+        let (outcome, percent) = screen("Ali O.", "Ali", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Review), "{percent:?}");
+    }
+
+    /// A Korean word's many readings count once per alias: surname-only aliases can't outvote the full name past the
+    /// candidate limit (Lee Cheol / Ri Chol among a limit's worth of Lee Nam).
+    #[test]
+    fn korean_readings_dont_outvote_the_full_name() {
+        let named = |id: usize, name: &str| ListedSubject {
+            external_id: format!("X-{id}"),
+            kind: SubjectKind::Individual,
+            primary_name: name.to_string(),
+            names: vec![ListedName { full_name: name.to_string(), is_weak: false }],
+            addresses: Vec::new(),
+            programme: None,
+            source_url: None,
+        };
+        let options = Options::default();
+        let mut subjects: Vec<ListedSubject> = (0..options.candidate_limit + 10).map(|i| named(i, "Lee Nam")).collect();
+        subjects.push(named(usize::MAX, "Ri Chol"));
+        let list =
+            ScreenedList { code: "eu".to_string(), name: "EU".to_string(), index: Some(std::sync::Arc::new(ListIndex::build(subjects))) };
+        let request = ScreeningRequest { receiver_name: "Lee Cheol".to_string(), company_name: String::new(), address: String::new() };
+        let result = Screener::new(options).screen(&request, &[list], &AllowList::empty()).unwrap();
+        let cell = &result.entries[0].cells[0];
+        assert_eq!(cell.outcome, Some(Outcome::Match), "{:?}", cell.percent);
+    }
+
+    /// Only a Korean name's words read alike: a different given name stays different, and Jung or Chung in a name
+    /// that isn't Korean keeps its own spelling.
+    #[test]
+    fn korean_readings_never_make_different_names_match() {
+        for (query, listed) in [
+            ("Kim Jong Un", "Kim Jong Il"),
+            ("Kim Jong Un", "Kim Yo Jong"),
+            ("Ri Yong Ho", "Ri Yong Nam"),
+            ("Kim Mira", "Kim Mina"),
+            ("Kim Mi-ra", "Kim Mi-na"),
+            ("Kim Mi Ra", "Kim Mi Na"),
+            ("Carl Jung", "Carl Chung"),
+            ("Maria Jung", "Maria Chung"),
+        ] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
             assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
         }
     }

@@ -183,7 +183,10 @@ Eastern digits read as ASCII), reads Arabic name particles in Latin script alike
 Rahman; al-Sayed, Elsayed; Nasr Allah, Nasrallah), and compares Chinese and Korean names in their own script
 (`cjk.json`, #93: adjacent Han or Hangul words joined, company forms such as 股份有限公司 and 주식회사 split off,
 traditional characters read as simplified with OpenCC's character table, Apache License 2.0; its licence and the
-changes made are in `THIRD-PARTY-NOTICES.txt`, which every image carries). How such a name behaves
+changes made are in `THIRD-PARTY-NOTICES.txt`, which every image carries). It also reads Korean names in their
+different romanisations alike (`korean.json`: Kim Jong Un, Kim Chong Un, Kim Jeong Eun; Ri, Lee, Yi; Pak, Park), but
+only in a name that reads as Korean (each word one or two romanised syllables, a Korean surname first or last), so a
+Jung in another name never meets a Chung. How such a name behaves
 in the .NET app is recorded in
 `tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
 the same spelling matches in every script; Arabic vowel marks, tatweel and letter variants, Greek accents, a part of a

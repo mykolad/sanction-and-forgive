@@ -150,6 +150,16 @@ fn lookup_keys(token: &Token) -> Vec<&str> {
     }
 }
 
+/// A Korean name's word's readings (korean.rs): posted with its lookup keys, so its other spellings find it.
+fn korean_keys(token: &Token) -> impl Iterator<Item = &str> {
+    token.korean.iter().flat_map(|readings| readings.iter().map(String::as_str))
+}
+
+/// The aliases posted under k, or none.
+fn postings<'m>(map: &'m HashMap<String, Box<[u32]>>, k: &str) -> &'m [u32] {
+    map.get(k).map_or(&[][..], |list| &list[..])
+}
+
 fn address_keys(address: &AddressForm) -> Vec<String> {
     let mut out: Vec<String> =
         address.words.iter().flat_map(|w| lookup_keys(w).into_iter().map(str::to_string).collect::<Vec<_>>()).collect();
@@ -195,7 +205,7 @@ impl ListIndex {
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
                 *document_frequency.entry(token.key().to_string()).or_default() += 1;
-                for k in lookup_keys(&token) {
+                for k in lookup_keys(&token).into_iter().chain(korean_keys(&token)) {
                     by_fold.post(k, a);
                 }
             }
@@ -293,38 +303,53 @@ impl ListIndex {
         let votes = &mut state.votes;
         let voted = &mut state.voted;
         let mut joinable: Vec<u32> = Vec::new();
-        let mut vote = |postings: &HashMap<String, Box<[u32]>>, k: &str, weight: i32, joined: bool| {
-            if let Some(list) = postings.get(k) {
-                if joined {
-                    joinable.extend(list.iter());
+        let mut vote = |list: &[u32], weight: i32, joined: bool| {
+            if joined {
+                joinable.extend(list.iter());
+            }
+            // A vote through words read as one counts three quarters of one through the words themselves, so an alias
+            // the entered words find as written ranks ahead of one found partly joined (Hua Wei: the Hua Wei alias's 6
+            // votes before Hua Huawei's 3 and 3). Every vote is scaled alike otherwise: the order of aliases found
+            // without a join is the same as before.
+            let weight = weight * if joined { 3 } else { 4 };
+            for &alias in list {
+                if votes[alias as usize] == 0 {
+                    voted.push(alias);
                 }
-                // A vote through words read as one counts three quarters of one through the words themselves, so an
-                // alias the entered words find as written ranks ahead of one found partly joined (Hua Wei: the Hua Wei
-                // alias's 6 votes before Hua Huawei's 3 and 3). Every vote is scaled alike otherwise: the order of
-                // aliases found without a join is the same as before.
-                let weight = weight * if joined { 3 } else { 4 };
-                for &alias in list.iter() {
-                    if votes[alias as usize] == 0 {
-                        voted.push(alias);
-                    }
-                    votes[alias as usize] += weight;
-                }
+                votes[alias as usize] += weight;
             }
         };
         let (by_fold, by_joined) = (&self.aliases_by_fold, &self.aliases_by_joined);
         let tokens = distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned());
         for token in &tokens {
             for k in lookup_keys(token) {
-                vote(by_fold, k, 3, false);
+                vote(postings(by_fold, k), 3, false);
+            }
+            // A Korean name's word through its readings: each alias once, and none its own keys found already, however
+            // many readings the word has (Lee Cheol mustn't outvote Ri Chol with surname-only aliases).
+            if token.korean.is_some() {
+                let mut found: Vec<u32> = lookup_keys(token).iter().flat_map(|k| postings(by_fold, k).iter().copied()).collect();
+                found.sort_unstable();
+                found.dedup();
+                // A set for membership (thousands of aliases can share a surname's reading), the list for the order.
+                let (mut extra, mut seen): (Vec<u32>, HashSet<u32>) = (Vec::new(), HashSet::default());
+                for k in korean_keys(token) {
+                    for &alias in postings(by_fold, k) {
+                        if found.binary_search(&alias).is_err() && seen.insert(alias) {
+                            extra.push(alias);
+                        }
+                    }
+                }
+                vote(&extra, 3, false);
             }
             for &group in token.cognate_groups() {
                 for fold in &self.data.cognate_folds[group] {
-                    vote(by_fold, fold, 2, false);
+                    vote(postings(by_fold, fold), 2, false);
                 }
             }
             for form in &token.forms {
                 for spelling in self.data.spelling_members(form) {
-                    vote(by_fold, &fold_key(spelling), 2, false);
+                    vote(postings(by_fold, &fold_key(spelling)), 2, false);
                 }
             }
             let mut near: Vec<&str> = Vec::new();
@@ -336,7 +361,7 @@ impl ListIndex {
                 }
             }
             for other in near {
-                vote(by_fold, other, 1, false);
+                vote(postings(by_fold, other), 1, false);
             }
         }
         // Then words one side writes as two (NameForm::joined), each key once though the company and person readings
@@ -347,7 +372,7 @@ impl ListIndex {
             for k in lookup_keys(token) {
                 if !keys.iter().any(|seen| seen == k) {
                     keys.push(k.to_string());
-                    vote(by_joined, k, 3, true);
+                    vote(postings(by_joined, k), 3, true);
                 }
             }
         }
@@ -355,7 +380,7 @@ impl ListIndex {
         for k in query.entity.joined.iter().chain(query.person.joined.iter()).filter(|k| !k.is_empty()) {
             let key = fold_key(k);
             if !joined.contains(&key) {
-                vote(by_fold, &key, 3, true);
+                vote(postings(by_fold, &key), 3, true);
                 joined.push(key);
             }
         }

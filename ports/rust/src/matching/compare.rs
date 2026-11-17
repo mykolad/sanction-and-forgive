@@ -126,6 +126,12 @@ fn compare_once(query: &Token, listed: &Token) -> Alignment {
     if overlaps(query.spelling_groups(), listed.spelling_groups()) {
         return Alignment::new(0.98, AlignMethod::SpellingPair);
     }
+    // Two spellings of one Korean name's word (korean.rs): a reading in common.
+    if let (Some(q), Some(l)) = (&query.korean, &listed.korean) {
+        if q.iter().any(|r| l.contains(r)) {
+            return Alignment::new(0.98, AlignMethod::Transliteration);
+        }
+    }
     if query.folds.iter().any(|fold| listed.folds.contains(fold)) {
         let method = if query.is_cyrillic || listed.is_cyrillic { AlignMethod::FoldKey } else { AlignMethod::FoldKeyLatin };
         return Alignment::new(0.96, method);
