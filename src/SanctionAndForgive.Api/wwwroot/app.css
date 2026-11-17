@@ -299,6 +299,8 @@ table.allow .removed td { color: var(--muted); }
   .print-record h2 { font-size: 12pt; margin: 12pt 0 4pt; border-bottom: 1px solid #000; }
   .print-record h3 { font-size: 11pt; margin: 8pt 0 2pt; }
   .print-record p, .print-record li { margin: 2pt 0; }
+  /* On paper a link is its address: the licences' and the official records'. */
+  .print-record a[href]::after { content: " (" attr(href) ")"; word-break: break-all; }
   .print-sub { color: #333; font-size: 9pt; }
   .print-meta { display: grid; grid-template-columns: max-content 1fr; gap: 2pt 10pt; margin: 6pt 0; }
   .print-meta dt { font-weight: 700; }

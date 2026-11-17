@@ -319,8 +319,17 @@ function buildRecord() {
     el("p", {}, `Matcher ${result.matcherVersion} · allow-list ${result.allowListVersion} · lists: `,
       result.lists.map((list) => `${list.code} ${list.version === null || list.version === undefined ? "–" : list.version} (${list.state})`).join(", ")),
     el("p", { class: "print-disclaimer" }, result.disclaimer),
+    // The lists' licence notices (OGL, trade.gov's, the EU's…) travel with the data they cover: the page's own
+    // attribution, copied (static markup of this page, never anything from the API or the user).
+    el("section", {}, el("h2", {}, "Sources and licences"), attributionCopy()),
     el("p", { class: "print-sub" }, `Printed from ${location.origin}. Check any match against the official publication of the list it comes from.`)].filter(Boolean));
   document.body.classList.add("has-record");
+}
+
+function attributionCopy() {
+  const copy = $("attribution").cloneNode(true);
+  copy.removeAttribute("id");
+  return copy;
 }
 
 function printRecord() {
