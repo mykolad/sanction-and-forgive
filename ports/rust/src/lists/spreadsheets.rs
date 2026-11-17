@@ -338,14 +338,22 @@ pub fn xlsx_rows(input: &mut dyn BufRead, sheet_name: &str) -> Result<Vec<Vec<St
         match event {
             Event::Eof => break,
             Event::Start(e) | Event::Empty(e) if is(&resolved, XLSX_MAIN) && e.local_name().as_ref() == b"sheet" => {
-                if relationship.is_none() && attribute(&reader, &e, b"", b"name").as_deref() == Some(sheet_name) {
+                // An empty name takes the first sheet (a workbook whose sheet keeps its program's name).
+                if relationship.is_none() && (sheet_name.is_empty() || attribute(&reader, &e, b"", b"name").as_deref() == Some(sheet_name))
+                {
                     relationship = attribute(&reader, &e, XLSX_RELATIONSHIPS, b"id");
                 }
             }
             _ => {}
         }
     }
-    let relationship = relationship.ok_or_else(|| format_error(format!("The workbook has no sheet named \"{sheet_name}\".")))?;
+    let relationship = relationship.ok_or_else(|| {
+        format_error(if sheet_name.is_empty() {
+            "The workbook has no sheet.".to_string()
+        } else {
+            format!("The workbook has no sheet named \"{sheet_name}\".")
+        })
+    })?;
 
     let relationships = part("xl/_rels/workbook.xml.rels")?;
     let mut reader = NsReader::from_reader(relationships.as_slice());
@@ -605,6 +613,53 @@ pub fn parse_new_zealand(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, 
     Ok(out)
 }
 
+pub const BELGIUM_PROGRAMME: &str = "Belgian national list (royal decree of 28 December 2006, financing of terrorism)";
+
+/// Belgium's national terrorism list (XLSX, its first sheet): BelgiumParser in the reference. A row per number (first
+/// column); a number without a name is a place kept for someone no longer listed. A row with a given name is a person,
+/// one without is read both ways; the national register number isn't kept, the date of birth goes in the remarks, the
+/// publication link is the official record.
+pub fn parse_belgium(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
+    let rows = xlsx_rows(input, "")?;
+    let is_cell = |cell: &str, name: &str| cell.trim().eq_ignore_ascii_case(name);
+    let header_at = rows
+        .iter()
+        .position(|row| row.iter().any(|c| is_cell(c, "Naam")) && row.iter().any(|c| is_cell(c, "Voornaam(voornamen)")))
+        .ok_or_else(|| format_error("No header row (Naam, Voornaam(voornamen), …) in Belgium's national list."))?;
+    let header = &rows[header_at];
+    let find = |name: &str| header.iter().position(|cell| is_cell(cell, name));
+    let (surname, given) = (find("Naam").unwrap_or(0), find("Voornaam(voornamen)").unwrap_or(0));
+    let (born, decree, publication) = (find("Geboortedatum"), find("Datum KB"), find("Link naar de publicatie"));
+
+    let mut out = Vec::new();
+    for row in &rows[header_at + 1..] {
+        let cell = |index: Option<usize>| index.and_then(|i| row.get(i)).and_then(|v| clean(Some(v)));
+        let (last, first) = (cell(Some(surname)), cell(Some(given)));
+        if last.is_none() && first.is_none() {
+            continue;
+        }
+        let number = cell(Some(0)).ok_or_else(|| {
+            format_error(format!(
+                "A row of Belgium's national list ({}) has no number.",
+                last.clone().or_else(|| first.clone()).unwrap_or_default()
+            ))
+        })?;
+        let Some(last) = last else {
+            return Err(format_error(format!("Row {number} of Belgium's national list has no surname.")));
+        };
+        let kind = if first.is_some() { SubjectType::Individual } else { SubjectType::Unknown };
+        let mut b = Builder::new(&number, kind);
+        b.programmes = Some(BELGIUM_PROGRAMME.to_string());
+        b.listed_on = excel_date(cell(decree).as_deref());
+        b.remarks = excel_date(cell(born).as_deref()).map(|date| format!("born {}", date.format("%Y-%m-%d")));
+        b.source_url = cell(publication)
+            .filter(|link| (link.starts_with("https://") || link.starts_with("http://")) && !link.chars().any(char::is_whitespace));
+        b.add_name(join(" ", &[first, Some(last)]).as_deref(), false, true);
+        out.extend(b.build());
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -658,6 +713,35 @@ mod tests {
             "x".repeat(16 * 1024)
         );
         assert!(ods(&content).is_err());
+    }
+
+    /// An empty sheet name reads the workbook's first sheet, whatever it's called (Belgium's Blad1).
+    #[test]
+    fn an_empty_sheet_name_reads_the_first_sheet() {
+        let workbook = r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Blad1" sheetId="1" r:id="rId1"/><sheet name="Other" sheetId="2" r:id="rId2"/></sheets></workbook>"#;
+        let relationships = r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="worksheet" Target="worksheets/sheet2.xml"/></Relationships>"#;
+        let sheet = |text: &str| {
+            format!(
+                r#"<worksheet xmlns="{MAIN}"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>"#
+            )
+        };
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            for (name, content) in [
+                ("xl/workbook.xml", workbook.to_string()),
+                ("xl/_rels/workbook.xml.rels", relationships.to_string()),
+                ("xl/worksheets/sheet1.xml", sheet("first")),
+                ("xl/worksheets/sheet2.xml", sheet("second")),
+            ] {
+                zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+                zip.write_all(content.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        let bytes = buffer.into_inner();
+        assert_eq!(xlsx_rows(&mut std::io::Cursor::new(bytes.clone()), "").unwrap(), vec![vec!["first"]]);
+        assert_eq!(xlsx_rows(&mut std::io::Cursor::new(bytes), "Other").unwrap(), vec![vec!["second"]]);
     }
 
     const WORKBOOK: &str = r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Register" sheetId="1" r:id="rId1"/></sheets></workbook>"#;

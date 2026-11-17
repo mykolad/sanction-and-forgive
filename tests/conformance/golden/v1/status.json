@@ -4,6 +4,15 @@
   "matcherVersion": "*",
   "lists": [
     {
+      "code": "be-terrorism",
+      "name": "Belgium national terrorism list (FPS Finance)",
+      "asOf": "*",
+      "state": "Current",
+      "version": "*",
+      "recordCount": 40,
+      "url": "https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national"
+    },
+    {
       "code": "ca-sema",
       "name": "Canada autonomous sanctions (SEMA)",
       "asOf": "*",

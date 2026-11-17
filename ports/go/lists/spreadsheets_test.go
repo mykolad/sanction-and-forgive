@@ -204,3 +204,35 @@ func TestExcelDateIsNilForWhatIsntADate(t *testing.T) {
 		t.Fatalf("44638.5: date = %v", date)
 	}
 }
+
+// An empty sheet name reads the workbook's first sheet, whatever it's called (Belgium's Blad1).
+func TestXlsxRows_AnEmptySheetNameReadsTheFirstSheet(t *testing.T) {
+	sheet := func(text string) string {
+		return `<worksheet xmlns="` + mainNamespace + `"><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>` + text + `</t></is></c></row></sheetData></worksheet>`
+	}
+	var buffer bytes.Buffer
+	archive := zip.NewWriter(&buffer)
+	for _, part := range [][2]string{
+		{"xl/workbook.xml", `<workbook xmlns="` + mainNamespace + `" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Blad1" sheetId="1" r:id="rId1"/><sheet name="Other" sheetId="2" r:id="rId2"/></sheets></workbook>`},
+		{"xl/_rels/workbook.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="worksheet" Target="worksheets/sheet2.xml"/></Relationships>`},
+		{"xl/worksheets/sheet1.xml", sheet("first")},
+		{"xl/worksheets/sheet2.xml", sheet("second")},
+	} {
+		writer, err := archive.Create(part[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write([]byte(part[1])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"": "first", "Other": "second"} {
+		rows, err := XlsxRows(bytes.NewReader(buffer.Bytes()), name)
+		if err != nil || len(rows) != 1 || rows[0][0] != want {
+			t.Errorf("XlsxRows(%q) = %v, %v; want %s", name, rows, err, want)
+		}
+	}
+}

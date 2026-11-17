@@ -24,6 +24,7 @@ left out of the counts and the import, since the MVP doesn't screen them.
 | `nz-mfat` | New Zealand Russia Sanctions Register (MFAT), from 2026-11-16 | XLSX, 21.6 MB | 1,918 (1,389 / 529 / 0) | 2,896 (0, 0, 0) | 124 | Active |
 | `jp-mof` | Japan asset-freeze list (Ministry of Finance), from 2026-11-16 | CSV, 3.2 MB | 2,897 (2,028 / 869 / 0) | 15,034 (345, 0, 6,648) | 1,707 | Active |
 | `us-uflpa` | US UFLPA Entity List (DHS), from 2026-11-16 | HTML page, 138 KB | 192 (0 / 192 / 0) | 325 (0, 0, 0) | 0 | Active |
+| `be-terrorism` | Belgium national terrorism list (FPS Finance), from 2026-11-17 | XLSX, 46 KB | 137 (137 / 0 / 0) | 137 (0, 0, 0) | 0 | Active |
 | **All fetched** | | 246 MB | **50,107** | **147,997** (7,062 weak, 20,175 Cyrillic) | 44,519 | |
 
 The handover estimated 60-90k subjects. Without Australia and NSDC there are about 50k. NSDC is probably the
@@ -108,6 +109,17 @@ largest list, so the total is likely to land inside that range once it's added.
   under two sections, and two more differ only by a final full stop: one record each, 192 in all, with every section
   and the earliest date. No identifiers and no per-record page: the id is the name. A page whose tables lose their
   header, or a row that isn't a name and a date, fails the import.
+- **Belgium (`be-terrorism`, 2026-11-17):** the national list of persons and entities whose funds are frozen in the
+  fight against the financing of terrorism (royal decree of 28 December 2006), kept by the FPS Finance's Treasury and
+  linked from [its page](https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national)
+  as an XLSX under a dated name (`20260608 - Nationale lijst_KB 30.05.2026 (4).xlsx`). The catalogue's URL is that page
+  and its `LinkPattern` (`/[0-9]{8}[^/]*[Nn]ationale[^/]*\.xlsx$`) finds the newest file, as for Japan. One sheet,
+  `Blad1` (read as the first sheet, whatever it's called): a title and three notes, then `Naam`, `Voornaam(voornamen)`,
+  `Rijkregisternummer`, `Geboortedatum`, `Datum KB`, `Inwerkingtreding`, `Laatste bevestiging` and `Link naar de
+  publicatie` (the royal decree in the Belgian Official Journal, kept as the official record). The first column numbers
+  the rows, 1 to 316; 179 numbers have no name, places kept for people no longer listed, and are left out. All 137
+  parties are people (a row without a given name, an entity should one be listed, would be read both ways). The national register number (`Rijkregisternummer`) isn't kept; the date of birth goes in the
+  remarks. A named row without its number or surname fails the import.
 
 ## Scripts of the listed names
 
@@ -178,6 +190,19 @@ the same spelling matches in every script; Arabic vowel marks, tatweel and lette
 Chinese or Korean name, a space inside one, traditional characters for simplified ones, and a Latin spelling of a name
 listed only in another script don't.
 
+## Feeds looked at and not imported (#89, 2026-11-17)
+
+- **Latvia (FIU, `sankcijas.fid.gov.lv`):** the national list downloads as XML or ZIP from the FIU's search page through
+  a form (a POST with the page's token to `/lejupieladet-sarakstu/lv`), not from a link. Not catalogued: the owner
+  decides whether to fetch it that way or to add it as a manual source from a downloaded file.
+- **Lithuania (FNTT):** the list of entities treated as owned or controlled by sanctioned persons answers an honest
+  client with 403. `NeedsAccess` if catalogued.
+- **Canada's listed terrorist entities (Public Safety Canada):** an Atom feed, `https://www.publicsafety.gc.ca/cnt/_xml/lstd-ntts-eng.xml`,
+  89 entities, aliases in each entry's summary. The site's terms allow non-commercial reproduction only, as for
+  `ca-sema`: it waits on the same decision (#71).
+- **Turkey (MASAK):** the asset-freeze decisions are published in the Official Gazette and on the Treasury's site as
+  pages; no single file was found.
+
 ## Terms of reuse
 
 Read on 2026-11-06. Not legal advice. The demo shows matches to a company, which is commercial use. It doesn't
@@ -200,6 +225,7 @@ resell the lists.
 | New Zealand | Yes: MFAT's site content is Crown copyright, licensed under CC BY 4.0 (read 2026-11-16). | Credit the Ministry. The website's footer: "New Zealand: Russia Sanctions Register, Ministry of Foreign Affairs and Trade, licensed under CC BY 4.0." | [MFAT copyright](https://www.mfat.govt.nz/en/copyright) |
 | Japan | Yes: the Ministry of Finance's content is under the Public Data License 1.0 (PDL1.0) unless marked otherwise (its copyright page, read 2026-11-16). | Name the source; say if it was edited. The website's footer: "Japan: 資産凍結等対象者一覧 (list of parties subject to asset freezes), Ministry of Finance (財務省), used under the Public Data License 1.0; names and addresses are read for matching, not changed." | [MOF copyright and links](https://www.mof.go.jp/about_mof/notice/index.html), [PDL 1.0](https://www.digital.go.jp/resources/open_data/public_data_license_v1.0) |
 | US UFLPA | Yes: a work of the US federal government, not subject to copyright in the US (17 U.S.C. 105). | None required. | [USA.gov: government works](https://www.usa.gov/government-copyright) |
+| Belgium | Yes: the federal government's information is "free of rights and may be used for private, association, scientific and commercial purposes" (CC0), read 2026-11-17. Multimedia content in downloadable documents (photos, brochures) needs approval; the list is data. | None required; naming the source and its date is recommended. | [FPS Finance terms of use](https://fin.belgium.be/en/terms-use) |
 
 The UN's listings are also on the EU and UK lists, which implement them. Leaving out the UN row loses its own as-of
 date in the result, not coverage.

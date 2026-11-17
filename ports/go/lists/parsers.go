@@ -40,6 +40,8 @@ func ParserFor(code string) Parser {
 		return parseNetherlands
 	case "nz-mfat":
 		return parseNewZealand
+	case "be-terrorism":
+		return parseBelgium
 	case "jp-mof":
 		return parseJapan
 	case "us-uflpa":
