@@ -47,6 +47,7 @@ tests/SanctionAndForgive.Conformance  Black-box suite for any implementation (an
 ports/go                  The whole application in Go (ports/go/README.md): passes the conformance suite
 ports/rust                The whole application in Rust (ports/rust/README.md): passes the conformance suite
 tests/load                k6 script and input generator
+samples/                  Integration samples for a booking system (.http, Python); docs/decisions.md: what each answer means
 infra/                    Bicep (infra/README.md)
 tools/lists.ps1           The script the owner runs to manage lists
 ```
