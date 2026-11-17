@@ -35,7 +35,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "73954b781d31");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "2bbc2988bdda");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -336,6 +336,7 @@ mod tests {
             ("Jang Song Thaek", "Chang Song Taek"),
             ("Kim Yong Chol", "Kim Yong Chul"),
             ("Kim Young Nam", "Kim Yong Nam"),
+            ("Jin Ho Park", "Jin Ho Pak"),
             ("Choe Young Hae", "Choe Ryong Hae"),
         ] {
             let (outcome, percent) = screen(query, listed, SubjectKind::Individual);

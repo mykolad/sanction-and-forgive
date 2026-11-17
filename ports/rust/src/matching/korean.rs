@@ -137,10 +137,15 @@ pub enum Role {
     GivenRest,
 }
 
-/// Each word's role in a Korean name (is_korean_name): the surname first if the first word spells one, else last; the
-/// given name's first word next to it; the rest after.
+/// Each word's role in a Korean name (is_korean_name): the surname at the end that spells one, and when both ends do,
+/// the more common surname (korean.json lists them by frequency; a tie goes to the first): Jin Ho Park is Park's, Kim
+/// Mi Ra is Kim's. The given name's first word next to it; the rest after.
 pub fn roles(words: &[String]) -> Vec<Role> {
-    let surname_first = KOREAN.surnames.contains_key(&latin(&words[0]));
+    let rank = |word: &String| KOREAN.surnames.get(&latin(word)).and_then(|groups| groups.iter().min().copied());
+    let surname_first = match (rank(&words[0]), rank(&words[words.len() - 1])) {
+        (Some(first), Some(last)) => first <= last,
+        (first, _) => first.is_some(),
+    };
     let surname_at = if surname_first { 0 } else { words.len() - 1 };
     let given_start = if surname_first { 1 } else { 0 };
     (0..words.len())
