@@ -661,8 +661,12 @@ impl<'a> Tokenizer<'a> {
 }
 
 fn is_single_letter(word: &str) -> bool {
-    let mut chars = word.chars();
-    matches!((chars.next(), chars.next()), (Some(c), None) if is_letter(c))
+    let one_letter = |text: &str| {
+        let mut chars = text.chars();
+        matches!((chars.next(), chars.next()), (Some(c), None) if is_letter(c))
+    };
+    // An Arabic letter written with a mark or a tatweel is still one letter: its reading decides, its text stays.
+    one_letter(word) || (word.chars().all(is_arabic) && one_letter(&arabic_form(word)))
 }
 
 /// Removes г-н and г-жа (any case), with an optional full stop, where no letter touches them: the reference's
