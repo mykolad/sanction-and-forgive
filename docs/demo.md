@@ -17,8 +17,9 @@ after a screening (to change one field and screen again), so a company left from
 consolidated, UK and New Zealand. Select the UK cell: the listed name, the alias matched, the programme, the official
 record, and *How it aligned* word by word.
 
-*Why "possible match" and not "this is them"?* The service matches names, nothing else: a person confirms it against
-the official record, which the cell links to.
+*Why "possible match" and not "this is them"?* The service compares what was entered (names, and an address when one
+is given) with the lists' entries; it doesn't verify who anyone is. A person confirms a match against the official
+record, which the cell links to.
 
 ## 2. A typo and another legal form
 
@@ -87,8 +88,8 @@ person's decision, logged with their name, never automatic.
 
 **List status**: every list with its record count, when it was last checked and last changed, the publisher's page,
 the file and the terms; then the lists not imported and why (terms not cleared, no automatic download). *History* on
-a list shows each update with how many records were added, removed or changed. An update that removed more than 20%
-of a list is held for review and the old one keeps serving.
+a list shows each update with how many records were added, removed or changed. An update whose record count drops by
+more than 20% is held for review and the old list keeps serving.
 
 *What if a list can't be updated?* It's still searched as last downloaded, marked *Searched, out of date* here (the
 API's state `Overdue`) after 72 hours, and every result says so in its summary.
