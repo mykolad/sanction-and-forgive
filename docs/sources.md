@@ -118,7 +118,7 @@ largest list, so the total is likely to land inside that range once it's added.
   `Rijkregisternummer`, `Geboortedatum`, `Datum KB`, `Inwerkingtreding`, `Laatste bevestiging` and `Link naar de
   publicatie` (the royal decree in the Belgian Official Journal, kept as the official record). The first column numbers
   the rows, 1 to 316; 179 numbers have no name, places kept for people no longer listed, and are left out. All 137
-  parties are people. The national register number (`Rijkregisternummer`) isn't kept; the date of birth goes in the
+  parties are people (a row without a given name, an entity should one be listed, would be read both ways). The national register number (`Rijkregisternummer`) isn't kept; the date of birth goes in the
   remarks. A named row without its number or surname fails the import.
 
 ## Scripts of the listed names
