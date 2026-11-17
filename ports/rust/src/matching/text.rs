@@ -2,7 +2,7 @@
 //! Strings are handled as chars; .NET counts UTF-16 units, the same for every character the lists and the dictionaries
 //! use (the Basic Multilingual Plane).
 
-use super::HashMap;
+use super::{HashMap, HashSet};
 use std::sync::Arc;
 
 use unicode_general_category::{get_general_category, GeneralCategory};
@@ -330,6 +330,7 @@ fn look_alike(c: char) -> Option<char> {
 struct ArabicTable {
     drop: Vec<(u32, u32)>,
     letters: HashMap<char, String>,
+    abd_names: HashSet<String>,
 }
 
 static ARABIC: std::sync::LazyLock<ArabicTable> = std::sync::LazyLock::new(|| {
@@ -358,7 +359,13 @@ static ARABIC: std::sync::LazyLock<ArabicTable> = std::sync::LazyLock::new(|| {
             (c, value.as_str().expect("a letter's reading is text").to_string())
         })
         .collect();
-    ArabicTable { drop, letters }
+    let abd_names = document["abdNames"]
+        .as_array()
+        .expect("arabic.json has abdNames")
+        .iter()
+        .map(|name| name.as_str().expect("a name is text").to_string())
+        .collect();
+    ArabicTable { drop, letters, abd_names }
 });
 
 /// An Eastern Arabic digit as its ASCII digit (arabic.json reads ٢ and ۲ as 2); any other character as it is.
@@ -394,6 +401,182 @@ pub fn arabic_form(text: &str) -> String {
     out
 }
 
+/// The article of Arabic names as romanised: al, el, ul, and the forms it takes before a "sun letter" (ar-Rashid,
+/// as-Sayyid, ash-Shami, at-Tahir, ad-Din, an-Nur, az-Zahra), which count only before a word starting with that
+/// consonant, so English words (As, At, An) aren't taken for it.
+fn is_article(word: &str, next: &str) -> bool {
+    match word {
+        "al" | "el" | "ul" => true,
+        "ash" => next.starts_with("sh"),
+        "ar" | "as" | "at" | "ad" | "an" | "az" => word[1..].chars().next() == next.chars().next(),
+        _ => false,
+    }
+}
+
+/// A word's Latin reading for the particle rules: as written when it's plain Latin, without its diacritics, or, for a
+/// Cyrillic word, the first table's transliteration; None for another script or a number. The rules decide on it, so
+/// "Abu Bákr" and "Абу Бакр" are merged where "Abu Bakr" is.
+fn particle_reading(tables: &[TransliterationTable], word: &str) -> Option<String> {
+    let reading =
+        if word.chars().any(is_cyrillic) { strip_diacritics(&tables.first()?.transliterate(word)) } else { strip_diacritics(word) };
+    (reading.len() >= 2 && reading.chars().all(|c| c.is_ascii_lowercase() || c == '-')).then_some(reading)
+}
+
+/// Arabic name particles as one word with the word they belong to, joined by a hyphen (a token never has one
+/// otherwise), the words' own text kept: first Abd with its name ("abd al rahman" → abd-al-rahman, "abdel rahman" →
+/// abdel-rahman), the article with its word ("al sayyid" → al-sayyid) and Allah with the name before it ("nasr allah" →
+/// nasr-allah); then Abu with the word after it, merged or not ("abu abd allah" → abu-abd-allah). Each rule decides on
+/// the words' Latin readings (particle_reading). Rust only for now (#92); create_token reads them (arabic_readings).
+pub fn merge_arabic_particles(tables: &[TransliterationTable], words: Vec<String>) -> Vec<String> {
+    const ABD: [&str; 9] = ["abd", "abdel", "abdul", "abdoul", "abdal", "abdil", "abdur", "abdus", "abdu"];
+    const ABU: [&str; 3] = ["abu", "abou", "abo"];
+    const ALLAH: [&str; 5] = ["allah", "ullah", "ollah", "illah", "ellah"];
+    let readings: Vec<Option<String>> = words.iter().map(|word| particle_reading(tables, word)).collect();
+    let reading = |i: usize| readings.get(i).and_then(|r| r.as_deref());
+    let mut merged: Vec<(String, Option<String>)> = Vec::with_capacity(words.len());
+    let mut i = 0;
+    while i < words.len() {
+        match (reading(i), reading(i + 1), reading(i + 2)) {
+            (Some(word), Some(next), Some(after)) if ABD.contains(&word) && is_article(next, after) && is_abd_name(after) => {
+                merged.push((format!("{}-{}-{}", words[i], words[i + 1], words[i + 2]), Some(format!("{word}-{next}-{after}"))));
+                i += 3;
+            }
+            (Some(word), Some(next), _) if ABD.contains(&word) && !is_article(next, "") && is_abd_name(next) => {
+                merged.push((format!("{}-{}", words[i], words[i + 1]), Some(format!("{word}-{next}"))));
+                i += 2;
+            }
+            (Some(word), Some(next), _) if is_article(word, next) => {
+                merged.push((format!("{}-{}", words[i], words[i + 1]), Some(format!("{word}-{next}"))));
+                i += 2;
+            }
+            (Some(word), _, _) if ALLAH.contains(&word) && merged.last().is_some_and(|(_, last)| last.is_some()) => {
+                let (text, last) = merged.pop().unwrap();
+                merged.push((format!("{text}-{}", words[i]), Some(format!("{}-{word}", last.unwrap()))));
+                i += 1;
+            }
+            _ => {
+                merged.push((words[i].clone(), readings[i].clone()));
+                i += 1;
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(merged.len());
+    let mut j = 0;
+    while j < merged.len() {
+        let is_abu = merged[j].1.as_deref().is_some_and(|r| ABU.contains(&r));
+        match merged.get(j + 1) {
+            Some((next, Some(_))) if is_abu => {
+                out.push(format!("{}-{next}", merged[j].0));
+                j += 2;
+            }
+            _ => {
+                out.push(merged[j].0.clone());
+                j += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Whether a word is one of the names that follow Abd (arabic.json abdNames), however its article is written.
+/// Compared by fold key too, so a transliteration's spelling counts: "рахман" reads rakhman, which folds as rahman does.
+fn is_abd_name(word: &str) -> bool {
+    static FOLDED: std::sync::LazyLock<HashSet<String>> =
+        std::sync::LazyLock::new(|| ARABIC.abd_names.iter().map(|name| fold_key(name)).collect());
+    [word.to_string(), abd_rest(word)].iter().any(|candidate| ARABIC.abd_names.contains(candidate) || FOLDED.contains(&fold_key(candidate)))
+}
+
+/// The canonical reading of a word after "abd": the article (al, el, ul, il, or an assimilated "ur", "us"...) and a
+/// vowel that only links it dropped, "allah" in any spelling as allah: alrahman, elrahman, urrahman, urahman → rahman;
+/// ullah, allah, ellah → allah.
+fn abd_rest(rest: &str) -> String {
+    let b = rest.as_bytes();
+    let vowel = |c: u8| matches!(c, b'a' | b'e' | b'i' | b'o' | b'u');
+    // The article (al, el, ul, il) or an assimilated one (ur-r, us-s), then a linking vowel alone.
+    let stripped = if b.len() > 5 && rest.starts_with("oul") {
+        // The French spelling of the article: Abdoul Rahman, Abdoulrahman.
+        &rest[3..]
+    } else if b.len() > 4 && vowel(b[0]) && (b[1] == b'l' || (!vowel(b[1]) && b[1] == b[2])) {
+        &rest[2..]
+    } else if b.len() > 4 && vowel(b[0]) && !vowel(b[1]) {
+        &rest[1..]
+    } else {
+        rest
+    };
+    let allah = |text: &str| matches!(text, "lah" | "llah" | "allah" | "ullah" | "ellah" | "illah" | "ollah");
+    if allah(stripped) || allah(rest) {
+        "allah".to_string()
+    } else {
+        stripped.to_string()
+    }
+}
+
+/// "allah" at the end of a name in any spelling (nasrullah, nasrollah, hizballah) as allah.
+fn allah_ending(word: &str) -> Option<String> {
+    ["ullah", "ollah", "ellah", "illah"]
+        .iter()
+        .find_map(|ending| word.strip_suffix(ending).filter(|stem| stem.len() >= 3).map(|stem| format!("{stem}allah")))
+}
+
+/// The extra readings of a romanised Arabic name word (#92), from its Latin form (diacritics stripped or
+/// transliterated): a word merged from particles (merge_arabic_particles) as written together, and canonical forms a
+/// merged and a typed-together word share: Abu, Abou and Abo as abu before the next word's readings; abd + its name
+/// without the article (abdulrahman, abd-al-rahman → abdrahman); an article as al (elsayed, ulsayed, arrashid →
+/// alsayed, alrashid) and, written apart, the word without it (al-sayyid → sayyid); Allah in any spelling.
+pub(crate) fn arabic_readings(text: &str) -> Vec<String> {
+    let mut readings = Vec::new();
+    let joined: String = text.chars().filter(|&c| c != '-').collect();
+    if let Some((first, rest)) = text.split_once('-') {
+        if matches!(first, "abu" | "abou" | "abo") {
+            let rest_joined: String = rest.chars().filter(|&c| c != '-').collect();
+            readings.push(joined.clone());
+            readings.push(format!("abu{rest_joined}"));
+            readings.extend(arabic_readings(rest).into_iter().map(|reading| format!("abu{reading}")));
+            return readings;
+        }
+    }
+    if text.contains('-') {
+        readings.push(joined.clone());
+        if let [first, word] = text.split('-').collect::<Vec<_>>()[..] {
+            if is_article(first, word) {
+                readings.push(format!("al{word}"));
+                readings.push(word.to_string());
+            }
+        }
+    }
+    if let Some(rest) = joined.strip_prefix("abou").filter(|rest| rest.len() >= 3) {
+        readings.push(format!("abu{rest}"));
+    }
+    if let Some(rest) = joined.strip_prefix("abd").map(abd_rest).filter(|rest| is_abd_name(rest)) {
+        readings.push(format!("abd{rest}"));
+    }
+    if let Some(rest) = joined_article_rest(&joined) {
+        readings.push(format!("al{rest}"));
+    }
+    if let Some(reading) = allah_ending(&joined) {
+        readings.push(reading);
+    }
+    readings
+}
+
+/// The word after an article written together with it, guarded against names that only start like one: el and ul
+/// before a consonant (elsayed, ulhaq), and a sun-letter article, whose consonant is written twice (arrashid,
+/// assayed, ashshami, annur); what's left has at least four letters (Attar and Assad stay names).
+fn joined_article_rest(joined: &str) -> Option<&str> {
+    let vowel = |c: u8| matches!(c, b'a' | b'e' | b'i' | b'o' | b'u');
+    let b = joined.as_bytes();
+    let rest = if (joined.starts_with("el") || joined.starts_with("ul")) && b.len() > 2 && !vowel(b[2]) {
+        &joined[2..]
+    } else if joined.starts_with("ashsh") {
+        &joined[3..]
+    } else if b.len() > 3 && b[0] == b'a' && b[1] == b[2] && matches!(b[1], b't' | b'd' | b'r' | b'z' | b's' | b'n') {
+        &joined[2..]
+    } else {
+        return None;
+    };
+    (rest.len() >= 4).then_some(rest)
+}
+
 /// Builds a token: every Latin reading and its fold key. Never strips marks before transliterating. An Arabic-script
 /// word gets its own script's form (arabic_form), so spellings that differ by marks or letter variants align.
 pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token {
@@ -414,13 +597,23 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         for form in forms.iter_mut() {
             *form = strip_diacritics(form);
         }
+        if text.contains('-') {
+            // Words merged from Arabic name particles: each reading's readings (arabic_readings).
+            forms = forms.iter().flat_map(|form| arabic_readings(form)).collect();
+        }
     } else if !has_latin && !is_number && chars.iter().any(|&c| is_arabic(c)) {
         let form = arabic_form(text);
         // Its length is the form's: a dropped mark or tatweel mustn't make a short name long enough to pass its cap.
         length = form.chars().count() as u32;
         forms.push(form);
+    } else if text.contains('-') {
+        // A word merged from Arabic name particles: its readings, not the hyphenated text.
+        forms.extend(arabic_readings(&strip_diacritics(text)));
     } else if has_latin || is_number {
         forms.push(strip_diacritics(text));
+        if !is_number {
+            forms.extend(arabic_readings(&strip_diacritics(text)));
+        }
         for second in second_forms(text) {
             forms.push(strip_diacritics(&second));
         }
@@ -465,7 +658,7 @@ impl<'a> Tokenizer<'a> {
     }
 
     pub fn tokenize(&mut self, value: &str, join_initials: bool) -> Vec<RawToken> {
-        let words = self.replace_legal_phrases(words(&remove_hyphenated_honorifics(value)));
+        let words = merge_arabic_particles(&self.data.tables, self.replace_legal_phrases(words(&remove_hyphenated_honorifics(value))));
         let mut tokens = Vec::with_capacity(words.len());
         let mut i = 0;
         while i < words.len() {

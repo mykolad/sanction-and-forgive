@@ -80,6 +80,9 @@ impl MatcherData {
     /// A token with its groups.
     pub fn token(&self, text: &str) -> Token {
         let mut token = create_token(&self.tables, text);
+        if text.contains('-') {
+            self.add_compound_spellings(&mut token, text);
+        }
         let mut spelling = Vec::new();
         for form in &token.forms {
             if let Some(&group) = self.spelling_groups.get(form) {
@@ -119,6 +122,32 @@ impl MatcherData {
             }
         }
         None
+    }
+
+    /// A word merged from Arabic name particles (merge_arabic_particles) keeps its parts' spelling equivalences: its
+    /// compound readings again, each part as the first member of its spelling group, so Abdul Karim and Abdul Kareem, or
+    /// Abu Muhammad and Abu Mohammed, share a reading as their parts did.
+    fn add_compound_spellings(&self, token: &mut Token, text: &str) {
+        let parts: Vec<String> = text
+            .split('-')
+            .map(|part| {
+                let forms = create_token(&self.tables, part).forms;
+                forms
+                    .iter()
+                    .find_map(|form| self.spelling_groups.get(form).map(|&group| self.spelling_group_members[group][0].clone()))
+                    .or_else(|| forms.first().cloned())
+                    .unwrap_or_else(|| part.to_string())
+            })
+            .collect();
+        for reading in super::text::arabic_readings(&parts.join("-")) {
+            if !token.forms.contains(&reading) {
+                let fold = super::text::fold_key(&reading);
+                token.forms.push(reading);
+                if !token.folds.contains(&fold) {
+                    token.folds.push(fold);
+                }
+            }
+        }
     }
 
     /// The other spellings of spelling's group, or none.
