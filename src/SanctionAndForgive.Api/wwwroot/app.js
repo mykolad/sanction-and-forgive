@@ -154,6 +154,7 @@ async function screen(event) {
     showState("");
     shown = { result, entered: { Receiver: body.receiverName, Company: body.companyName, Address: body.address }, at: new Date() };
     render(result);
+    buildRecord();
   } catch {
     if (request === current) showState("The service isn't answering. Try again in a moment.", true);
   } finally {
@@ -253,9 +254,15 @@ function showDetail(button, cell, entry, list) {
 
 // A record of the screening for a compliance file, built from the result on the page: what was entered (from the
 // page: the server doesn't keep it), against which lists as of when, what came back and why, the versions that
-// reproduce it, and the disclaimer. The browser prints it, or saves it as a PDF; nothing is sent or stored.
-function printRecord() {
-  if (!shown) return;
+// reproduce it, and the disclaimer. Built with each result and again before any print (the button, or the browser's
+// own Print), and emptied with the result; the browser prints it or saves it as a PDF. Nothing is sent or stored.
+function buildRecord() {
+  const record = $("print-record");
+  if (!shown) {
+    record.replaceChildren();
+    document.body.classList.remove("has-record");
+    return;
+  }
   const { result, entered, at } = shown;
   const when = (date) => date.toLocaleString(undefined, { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
   const cellText = (cell) => {
@@ -270,8 +277,20 @@ function printRecord() {
     .filter((cell) => cell.bestCandidate && cell.state !== "NotChecked" && (cell.outcome === "Match" || cell.outcome === "Review"))
     .map((cell) => ({ entry, cell, list: listByCode.get(cell.list) })));
 
-  const record = $("print-record");
-  record.replaceChildren(
+  // One candidate in full: the best of a cell, or another possible match on the same list.
+  const candidateBlock = (entry, cell, list, candidate, percent, outcome) => el("div", { class: "print-hit" },
+    el("h3", {}, candidate.listedName),
+    el("p", {}, `${list ? list.name : cell.list} · ${KIND[entry.kind] || entry.kind} · ${percentText(percent)} match likelihood (${LABELS[outcome]})`),
+    cell.allowed && entry.allowedBy ? el("p", {}, `Allowed by the allow-list: “${entry.allowedBy.name}”: ${entry.allowedBy.reason}.`) : null,
+    el("dl", { class: "print-meta" },
+      el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
+      el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
+      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses && candidate.listedAddresses.length ? candidate.listedAddresses.join("; ") : "None listed"),
+      el("dt", {}, "Address"), el("dd", {}, addressText(candidate.addressState, entry)),
+      el("dt", {}, "Official record"), el("dd", {}, candidate.sourceUrl || `${list ? list.name : cell.list}, id ${candidate.externalId}`)),
+    el("ul", {}, (candidate.alignment || []).map((line) => el("li", {}, line))));
+
+  record.replaceChildren(...[
     el("h1", {}, "Sanctions list screening record"),
     el("p", { class: "print-sub" }, "Sanction & Forgive: a demo list check, not a legal determination"),
     el("dl", { class: "print-meta" },
@@ -288,30 +307,29 @@ function printRecord() {
         list.state === "SwitchedOff"
           ? el("td", { colspan: String(result.entries.length) }, "Not searched: switched off by an administrator")
           : result.entries.map((entry) => el("td", {}, cellText(entry.cells.find((cell) => cell.list === list.code)))))))),
+    // Only what the lists found: whether anything was searched at all is the result's summary above, never inferred.
     hits.length
       ? el("section", {}, el("h2", {}, "Possible matches, and how the names aligned"),
-        hits.map(({ entry, cell, list }) => {
-          const candidate = cell.bestCandidate;
-          return el("div", { class: "print-hit" },
-            el("h3", {}, `${candidate.listedName}`),
-            el("p", {}, `${list ? list.name : cell.list} · ${KIND[entry.kind] || entry.kind} · ${percentText(cell.percent)} match likelihood (${LABELS[cell.allowed ? "Allowed" : cell.outcome]})`),
-            cell.allowed && entry.allowedBy ? el("p", {}, `Allowed by the allow-list: “${entry.allowedBy.name}”: ${entry.allowedBy.reason}.`) : null,
-            el("dl", { class: "print-meta" },
-              el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
-              el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
-              el("dt", {}, "Address"), el("dd", {}, addressText(candidate.addressState, entry)),
-              el("dt", {}, "Official record"), el("dd", {}, candidate.sourceUrl || `${list ? list.name : cell.list}, id ${candidate.externalId}`)),
-            el("ul", {}, candidate.alignment.map((line) => el("li", {}, line))),
-            cell.otherHits.length ? el("p", {}, `Other possible matches on this list: ${cell.otherHits.map((hit) => `${hit.listedName} (${percentText(hit.percent)})`).join("; ")}`) : null);
-        }))
-      : el("p", {}, "No possible match: no match found in the lists above, as of their dates."),
+        hits.flatMap(({ entry, cell, list }) => [
+          candidateBlock(entry, cell, list, cell.bestCandidate, cell.percent, cell.allowed ? "Allowed" : cell.outcome),
+          ...cell.otherHits.map((hit) => candidateBlock(entry, cell, list, hit, hit.percent, hit.outcome)),
+        ]))
+      : null,
     el("h2", {}, "Versions"),
     el("p", {}, `Matcher ${result.matcherVersion} · allow-list ${result.allowListVersion} · lists: `,
       result.lists.map((list) => `${list.code} ${list.version === null || list.version === undefined ? "–" : list.version} (${list.state})`).join(", ")),
     el("p", { class: "print-disclaimer" }, result.disclaimer),
-    el("p", { class: "print-sub" }, `Printed from ${location.origin}. Check any match against the official publication of the list it comes from.`));
+    el("p", { class: "print-sub" }, `Printed from ${location.origin}. Check any match against the official publication of the list it comes from.`)].filter(Boolean));
+  document.body.classList.add("has-record");
+}
+
+function printRecord() {
+  buildRecord();
   window.print();
 }
+
+// The browser's own Print (Ctrl+P) prints the record of the result on the page, or the page itself when there's none.
+window.addEventListener("beforeprint", buildRecord);
 
 function addressText(state, entry) {
   if (entry.kind === "Address") return "Compared on its own (address only)";
@@ -327,6 +345,7 @@ $("clear-button").addEventListener("click", () => {
   $("screen-button").disabled = false;
   form.reset();
   shown = null;
+  buildRecord();
   $("result").hidden = true;
   showState("");
   $("receiverName").focus();
