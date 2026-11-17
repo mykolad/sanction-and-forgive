@@ -184,31 +184,50 @@ function render(result) {
   summary.replaceChildren(el("span", { class: "badge" }, OVERALL[result.outcome] || result.outcome), el("span", {}, result.summary,
     el("span", { class: "reference" }, `Reference ${result.reference}`)));
 
-  const table = $("result-table");
-  const head = el("tr", {}, el("th", { scope: "col" }, "List"),
-    result.entries.map((entry) => el("th", { scope: "col" }, entryTitle(entry), el("span", { class: "entry-input" }, entry.input))));
-  table.tHead.replaceChildren(head);
+  // One table per party (the shipment's own entries first, untitled when there are no parties); the outcome above is
+  // the shipment's.
+  const groups = [];
+  for (const entry of result.entries) {
+    const key = entry.party || 0;
+    let group = groups.find((candidate) => candidate.key === key);
+    if (!group) groups.push(group = { key, role: entry.role, entries: [] });
+    group.entries.push(entry);
+  }
+  groups.sort((a, b) => a.key - b.key);
+  $("result-tables").replaceChildren(...groups.map((group) => el("div", { class: "table-scroll" },
+    resultTable(result, group.entries, groups.length > 1
+      ? group.key ? `Party ${group.key}: ${ROLES[group.role] || group.role}` : "The shipment's receiver, company and address"
+      : null))));
 
-  const body = table.tBodies[0];
-  body.replaceChildren();
+  $("disclaimer").textContent = result.disclaimer;
+  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// A table of lists (rows) × entries (columns), with a caption when it's one party's of several.
+function resultTable(result, entries, caption) {
+  const body = el("tbody");
   for (const list of result.lists) {
     const row = el("tr", {}, el("td", { class: "list-name" }, list.name,
       el("span", { class: list.state === "Overdue" ? "as-of overdue" : "as-of" }, listAsOf(list))));
     if (list.state === "SwitchedOff") {
       // Not searched at all, so no cells: one note across the row (the summary gives the administrator's reason).
-      row.append(el("td", { colspan: String(result.entries.length), class: "switched-off" }, "Not searched: switched off by an administrator"));
+      row.append(el("td", { colspan: String(entries.length), class: "switched-off" }, "Not searched: switched off by an administrator"));
       body.append(row);
       continue;
     }
-    for (const entry of result.entries) {
+    for (const entry of entries) {
       const cell = entry.cells.find((candidate) => candidate.list === list.code);
       row.append(el("td", {}, cellButton(cell, entry, list)));
     }
     body.append(row);
   }
-
-  $("disclaimer").textContent = result.disclaimer;
-  $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+  // Within a party's table the party is in the caption: the columns say only the kind.
+  const title = (entry) => caption && entry.party ? (entry.kind === "Receiver" ? "Person" : KIND[entry.kind] || entry.kind) : entryTitle(entry);
+  return el("table", { class: "result-table" },
+    caption ? el("caption", { class: "party-caption" }, caption) : null,
+    el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "List"),
+      entries.map((entry) => el("th", { scope: "col" }, title(entry), el("span", { class: "entry-input" }, entry.input))))),
+    body);
 }
 
 // An entry's column title: its kind, and for a party its number and role ("Party 2, consignee: Company"); a party's

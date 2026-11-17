@@ -370,7 +370,9 @@ fn busy() -> Response {
     response
 }
 
-const MAX_LINE_BYTES: usize = 4096;
+/// A stream record's longest line: room for the largest valid one (#65): 23 fields of 300 characters (the three, and
+/// ten parties' names and addresses), every character JSON-escaped to six bytes, about 43 KB, plus the rest.
+const MAX_LINE_BYTES: usize = 65536;
 
 enum ReadLine {
     Line(String),
@@ -519,7 +521,7 @@ async fn stream(State(s): State<Shared>, request: Request) -> Response {
                 break;
             }
             let problem = match &text {
-                None => (None, Some(one_error("", "The line is longer than 4096 bytes."))),
+                None => (None, Some(one_error("", "The line is longer than 65536 bytes."))),
                 Some(t) if t.is_empty() => continue,
                 Some(t) => parse_line(t),
             };

@@ -66,12 +66,8 @@
         <button type="button" class="secondary" id="print-button">Print or save the record</button>
       </div>
       <p class="likelihood-note"><strong>Match likelihood</strong> is an estimate that the entry is the listed party, based on the data entered. It isn't the chance that a shipment is lawful.</p>
-      <div class="table-scroll">
-        <table id="result-table">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      <!-- One table of lists × entries: the shipment's own, then one per party (app.js render). -->
+      <div id="result-tables"></div>
       <p class="table-hint">Select a cell to see the listed party and how the names aligned.</p>
       <aside id="detail" class="detail" hidden></aside>
       <p id="disclaimer" class="disclaimer"></p>

@@ -101,7 +101,7 @@ Content-Type: application/x-ndjson
   `SamePlace` and `SameNumber`. `notes` says the rest: why a percentage was capped, or how many address parts
   aligned. The single endpoint gives the same explanation in plain words. Matching is deterministic, so screening
   one record again with the same list versions gives the same answer.
-- **`error`** for a record that couldn't be screened (not JSON, a line over 4,096 bytes, a missing reference, nothing
+- **`error`** for a record that couldn't be screened (not JSON, a line over 4,096 bytes, or 65,536 where `parties` are taken, a missing reference, nothing
   entered, a field over 300 characters): `line`, the `reference` if there was one, and `errors` by field. The
   messages never quote the input. The stream goes on.
 - **`end`** last: how many were screened, how many were errors, and whether it was `truncated`.

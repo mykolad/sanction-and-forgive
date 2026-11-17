@@ -84,4 +84,20 @@ public sealed class PartiesTests
         var entry = lines.Single(line => line.GetProperty("type").GetString() == "result").GetProperty("entries")[0];
         Assert.Equal((1, "forwarder"), (entry.GetProperty("party").GetInt32(), entry.GetProperty("role").GetString()));
     }
+
+    /// <summary>The largest valid record a stream can carry: ten parties, each name and address 300 Cyrillic letters
+    /// (two UTF-8 bytes each, over 12 KB on one line), answered like the single endpoint would.</summary>
+    [SinceVersionFact(2)]
+    public async Task TheStream_TakesTheLargestValidRecord()
+    {
+        await Suite.ReadyAsync();
+        var longest = new string('Ж', 300);
+        var parties = Enumerable.Range(0, 10).Select(_ => new { role = "other", name = longest, address = longest }).ToArray();
+
+        var lines = await Suite.StreamAsync([new { reference = "parties-largest", receiverName = longest, companyName = longest, address = longest, parties }]);
+
+        var result = lines.Single(line => line.GetProperty("type").GetString() is "result" or "error");
+        Assert.Equal("result", result.GetProperty("type").GetString());
+        Assert.Equal(23, result.GetProperty("entries").GetArrayLength());
+    }
 }
