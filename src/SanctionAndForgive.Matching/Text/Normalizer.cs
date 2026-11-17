@@ -10,6 +10,10 @@ internal static class Normalizer
 {
     private const string Apostrophes = "'’ʼʻ`′‘";
 
+    /// <summary>The letters a word's marks don't come off by decomposing (<c>Data/letters.json</c>, hashed into the
+    /// matcher version with the other dictionaries): what each folds to, and the second spellings.</summary>
+    private static readonly (Dictionary<char, string> Folds, List<Dictionary<char, string>> SecondForms) Letters = LoadLetters();
+
     /// <summary>The words of <paramref name="value"/>, normalised, in order.</summary>
     public static List<string> Words(string value)
     {
@@ -41,38 +45,95 @@ internal static class Normalizer
         return words;
     }
 
-    /// <summary>A Latin word without diacritics: <c>Ştefan</c> → <c>stefan</c>, <c>straße</c> → <c>strasse</c>.</summary>
+    /// <summary>A Latin word without diacritics: <c>Ştefan</c> → <c>stefan</c>, <c>straße</c> → <c>strasse</c>,
+    /// <c>þór</c> → <c>thor</c>, <c>ǿrn</c> → <c>orn</c>. The folds (letters.json) apply first, then again to what
+    /// decomposition leaves (ǿ is ø with an acute), and the marks are dropped.</summary>
     public static string StripDiacritics(string value)
     {
-        var decomposed = value.Normalize(NormalizationForm.FormD);
+        var folded = new StringBuilder(value.Length + 4);
+        foreach (var c in value)
+        {
+            if (Letters.Folds.TryGetValue(c, out var fold))
+            {
+                folded.Append(fold);
+            }
+            else
+            {
+                folded.Append(c);
+            }
+        }
+
+        var decomposed = folded.ToString().Normalize(NormalizationForm.FormD);
         var builder = new StringBuilder(decomposed.Length);
         foreach (var c in decomposed)
         {
-            switch (c)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
             {
-                case 'ß': builder.Append("ss"); break;
-                case 'ø': builder.Append('o'); break;
-                case 'đ': builder.Append('d'); break;
-                case 'ł': builder.Append('l'); break;
-                case 'æ': builder.Append("ae"); break;
-                case 'œ': builder.Append("oe"); break;
-                case 'ı': builder.Append('i'); break;
-                default:
-                    if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
-                    {
-                        builder.Append(c);
-                    }
+                continue;
+            }
 
-                    break;
+            if (Letters.Folds.TryGetValue(c, out var fold))
+            {
+                builder.Append(fold);
+            }
+            else
+            {
+                builder.Append(c);
             }
         }
 
         return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
+    /// <summary>A word's second spellings (letters.json): one per language group whose letters it has, and one with
+    /// every such group together: <c>müller</c> → <c>mueller</c>; <c>åström</c> → <c>åstroem</c>, <c>aaström</c>,
+    /// <c>aastroem</c>. None if it has none of those letters.</summary>
+    public static List<string> SecondForms(string value)
+    {
+        var groups = Letters.SecondForms.Where(group => value.Any(group.ContainsKey)).ToList();
+        var forms = groups.Select(group => Replace(value, [group])).ToList();
+        if (groups.Count > 1)
+        {
+            forms.Add(Replace(value, groups));
+        }
+
+        return forms;
+
+        static string Replace(string value, List<Dictionary<char, string>> groups)
+        {
+            var builder = new StringBuilder(value.Length + 4);
+            foreach (var c in value)
+            {
+                var second = groups.Select(group => group.GetValueOrDefault(c)).FirstOrDefault(found => found is not null);
+                if (second is not null)
+                {
+                    builder.Append(second);
+                }
+                else
+                {
+                    builder.Append(c);
+                }
+            }
+
+            return builder.ToString();
+        }
+    }
+
     public static bool IsCyrillic(char c) => c is >= 'Ѐ' and <= 'ԯ';
 
     public static bool IsLatin(char c) => c is >= 'a' and <= 'z' or >= 'À' and <= 'ɏ' or >= 'Ḁ' and <= 'ỿ';
+
+    private static (Dictionary<char, string> Folds, List<Dictionary<char, string>> SecondForms) LoadLetters()
+    {
+        using var stream = typeof(Normalizer).Assembly.GetManifestResourceStream("SanctionAndForgive.Matching.Data.letters.json")
+            ?? throw new InvalidOperationException("The matcher's letters.json isn't embedded.");
+        using var document = System.Text.Json.JsonDocument.Parse(stream);
+        static Dictionary<char, string> Table(System.Text.Json.JsonElement table) =>
+            table.EnumerateObject().ToDictionary(
+                letter => letter.Name.Length == 1 ? letter.Name[0] : throw new InvalidOperationException($"letters.json: '{letter.Name}' isn't one letter."),
+                letter => letter.Value.GetString()!);
+        return (Table(document.RootElement.GetProperty("folds")), [.. document.RootElement.GetProperty("secondForms").EnumerateArray().Select(Table)]);
+    }
 
     private static void Flush(List<string> words, StringBuilder word)
     {
