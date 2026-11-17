@@ -43,6 +43,12 @@
             <textarea id="address" name="address" maxlength="300" rows="2" spellcheck="false" placeholder="ул. Ленина 5, Москва — or just a city or a country"></textarea>
           </label>
         </div>
+        <!-- Offered only when the API's status lists the "parties" feature (app.js). -->
+        <fieldset id="parties" class="parties" hidden>
+          <legend class="field-label">Other parties of the shipment <span class="hint">shipper, consignee, notify party…: each against every list</span></legend>
+          <div id="party-rows" class="party-rows"></div>
+          <button type="button" class="secondary" id="add-party">Add a party</button>
+        </fieldset>
         <p class="form-note">Every field is optional; fill in at least one. Nothing you enter is stored.</p>
         <div class="actions">
           <button type="submit" class="primary" id="screen-button">Screen</button>
@@ -60,12 +66,8 @@
         <button type="button" class="secondary" id="print-button">Print or save the record</button>
       </div>
       <p class="likelihood-note"><strong>Match likelihood</strong> is an estimate that the entry is the listed party, based on the data entered. It isn't the chance that a shipment is lawful.</p>
-      <div class="table-scroll">
-        <table id="result-table">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
+      <!-- One table of lists × entries: the shipment's own, then one per party (app.js render). -->
+      <div id="result-tables"></div>
       <p class="table-hint">Select a cell to see the listed party and how the names aligned.</p>
       <aside id="detail" class="detail" hidden></aside>
       <p id="disclaimer" class="disclaimer"></p>
