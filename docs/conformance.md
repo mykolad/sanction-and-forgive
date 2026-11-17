@@ -152,18 +152,20 @@ from that database's own lists (names as listed, in lower case, with a letter dr
 address) and compares every result with the reference's, field for field. Against a copy of the real lists it found
 two things the golden set didn't: .NET's invariant casing leaves the Turkish `İ` and `ı` as they are, and Go's
 `math.Log` differs from the C library's in the last bit for some arguments, which turned a 99% into a 98% on a band's
-edge (the Go image now calls the C library's `log`, as .NET does). Run it with both images on the real lists:
+edge (the Go image now calls the C library's `log`, as .NET does). Run it with both images on the real lists, the
+Rust reference's (`run.ps1 -Build` builds it) and the one under test, here .NET's; an implementation still at version 1
+differs from the reference wherever Rust is ahead:
 
 ```powershell
 $cs = "Server=host.docker.internal,14333;Database=sanctions_local;User ID=sa;Password=Throwaway-container-2026!;TrustServerCertificate=True"
-docker run -d --name ref --add-host=host.docker.internal:host-gateway -p 5299:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive:conformance
-docker run -d --name go --add-host=host.docker.internal:host-gateway -p 5399:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive-go:conformance
+docker run -d --name ref --add-host=host.docker.internal:host-gateway -p 5299:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive-rust:conformance
+docker run -d --name dotnet --add-host=host.docker.internal:host-gateway -p 5399:8080 -e "ConnectionStrings__Lists=$cs" -e Screening__StreamMaxRecords=100000 -e RateLimiting__PerMinute=0 sanction-and-forgive:conformance
 $env:CONFORMANCE_BASE_URL = 'http://localhost:5399'; $env:CONFORMANCE_REFERENCE_URL = 'http://localhost:5299'
 dotnet test tests/SanctionAndForgive.Conformance --filter FullyQualifiedName~ReferenceTests
 ```
 
 It also prints each one's time per screening, one stream at a time. On the real lists (both as Linux containers on
-one desktop, all ten lists loaded): on 2026-11-09, .NET 14.3 ms and Go 16.5 ms, about 350 MiB each; on 2026-11-10,
+one desktop, all ten lists loaded, .NET then the reference): on 2026-11-09, .NET 14.3 ms and Go 16.5 ms, about 350 MiB each; on 2026-11-10,
 after the Go port's tuning (`ports/go/README.md`), Go 7.3 ms against .NET's 14.5 ms, 346 MiB in a 512 MiB container,
 every result still the reference's.
 
