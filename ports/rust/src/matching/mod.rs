@@ -33,7 +33,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "9ffa31f8de38");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "6c8b02cd3d46");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -76,6 +76,56 @@ mod tests {
         }
         let (outcome, _) = screen("شركة النور ٢٠٠٠", "شركة النور 2000", SubjectKind::Entity);
         assert_eq!(outcome, Some(Outcome::Match));
+    }
+
+    /// Arabic name particles in Latin script (#92): Abd and its article, the article written apart or joined, Abu, and
+    /// Allah, in the ways the lists and users write them.
+    #[test]
+    fn arabic_name_particles_read_alike_however_theyre_written() {
+        for (query, listed, expected) in [
+            ("Mohammed Abdel Rahman", "Muhammad Abd al-Rahman", Outcome::Match),
+            ("Mohamed Abdelrahman", "Muhammad Abd al-Rahman", Outcome::Match),
+            ("Muhammad Abdulrahman", "Muhammad Abd al-Rahman", Outcome::Match),
+            ("Muhammad Abdurrahman", "Muhammad Abd al-Rahman", Outcome::Match),
+            ("Abd al Rahman Hassan", "Abdul Rahman Hasan", Outcome::Match),
+            ("Khaled Abdel Aziz", "Khalid Abd al-Aziz", Outcome::Match),
+            ("Khaled Abdulaziz", "Khalid Abd al-Aziz", Outcome::Match),
+            ("Omar Abdul Qadir", "Umar Abd al-Qadir", Outcome::Match),
+            ("Abdullah Hussein", "Abd Allah Husayn", Outcome::Match),
+            ("Abubakr Albaghdadi", "Abu Bakr al-Baghdadi", Outcome::Match),
+            ("Abu Bakr Baghdadi", "Abu Bakr al-Baghdadi", Outcome::Match),
+            ("Hassan Nasrallah", "Hasan Nasr Allah", Outcome::Match),
+            ("Hassan Nasrullah", "Hasan Nasr Allah", Outcome::Match),
+            ("Ahmed El-Sayed", "Ahmad al-Sayed", Outcome::Match),
+            ("Ahmed Elsayed", "Ahmad al-Sayed", Outcome::Match),
+            ("Harun ar-Rashid", "Harun al-Rashid", Outcome::Match),
+        ] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(expected), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// The particles are read only where they are particles: a name that merely starts like one keeps its own reading.
+    #[test]
+    fn words_that_only_look_like_particles_keep_their_meaning() {
+        for (query, listed, kind) in [
+            ("Alfred Smith", "Fred Smith", SubjectKind::Individual),
+            ("Elmar Hansen", "Mar Hansen", SubjectKind::Individual),
+            ("As Trading", "Trading", SubjectKind::Entity),
+            ("Abdi Hassan", "Abd Hassan", SubjectKind::Individual),
+            ("Abdul Hassan", "Hassan", SubjectKind::Individual),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// Abd is merged only before a name that follows it in Arabic names: "Abdul Karimov" is a given name and a surname,
+    /// and still matches the list's family-name-first spelling.
+    #[test]
+    fn abd_before_a_surname_stays_a_given_name() {
+        let (outcome, percent) = screen("Abdul Karimov", "Karimov Abdul", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
     }
 
     /// The same normalisation never makes different names match.
