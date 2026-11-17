@@ -96,6 +96,7 @@ function parseCsv(text, separator) {
   let field = "";
   let quoted = false;
   let started = false;
+  let quoteAt = 0;
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i];
     if (quoted) {
@@ -113,6 +114,7 @@ function parseCsv(text, separator) {
     }
     if (c === '"' && field.length === 0) {
       quoted = true;
+      quoteAt = i;
       started = true;
     } else if (c === separator) {
       row.push(field);
@@ -130,9 +132,12 @@ function parseCsv(text, separator) {
       started = true;
     }
   }
+  // A quote never closed would swallow every row after it: refused, never read as one long field.
+  if (quoted) throw new Error(`A quoted value opened on line ${text.slice(0, quoteAt).split(/\r\n|\r|\n/).length} is never closed, so the rows after it can't be read. Check the file.`);
+  // The last record without a line break after it counts as any other (even with nothing in it: it's skipped later).
   if (started || field !== "" || row.length > 0) {
     row.push(field);
-    if (row.some((value) => value !== "")) rows.push(row);
+    rows.push(row);
   }
   return rows;
 }
@@ -151,7 +156,13 @@ async function readFile() {
   const { text, encoding } = decode(await file.arrayBuffer(), $("encoding").value);
   const clean = text.replace(/^﻿/, "");
   const separator = separatorOf(clean);
-  const rows = parseCsv(clean, separator);
+  let rows;
+  try {
+    rows = parseCsv(clean, separator);
+  } catch (error) {
+    showState(error.message, true);
+    return;
+  }
   if (rows.length === 0) {
     showState("The file has no rows.", true);
     return;
@@ -285,6 +296,10 @@ async function* ndjson(response) {
   }
 }
 
+function snapshotKey(header) {
+  return JSON.stringify([header.matcherVersion, header.allowListVersion, header.lists.map((list) => [list.code, list.version, list.asOf, list.state])]);
+}
+
 // Sends one chunk of records, and whatever of it isn't answered again (the stream's limits, or a connection or answer
 // that broke off), until every record has a result or an error. Busy and warming-up answers are waited out.
 async function screenChunk(records, signal, onAnswer) {
@@ -318,8 +333,12 @@ async function screenChunk(records, signal, onAnswer) {
     try {
       for await (const message of ndjson(response)) {
         if (message.type === "header") {
-          headers.push(message);
-          snapshot = headers.length - 1;
+          // Each stream pins a snapshot; one the same as an earlier stream's (lists, matcher, allow-list) is that one.
+          snapshot = headers.findIndex((header) => snapshotKey(header) === snapshotKey(message));
+          if (snapshot < 0) {
+            headers.push(message);
+            snapshot = headers.length - 1;
+          }
         } else if (message.type === "result" || message.type === "error") {
           const record = pending[message.line - 1];
           if (record) onAnswer(record, message, snapshot);
@@ -415,7 +434,8 @@ async function screen() {
     lock(false);
     $("cancel-button").hidden = true;
     $("progress-panel").hidden = true;
-    showPreview();
+    // The columns haven't changed (they were locked): Start again, keeping the message above.
+    $("screen-button").disabled = false;
   }
 }
 
@@ -520,7 +540,7 @@ function showResults() {
         ? `No match found for the other ${noMatch.toLocaleString()}${allowed ? ` (${allowed.toLocaleString()} of them only with possible matches the allow-list allows)` : ""} in: ${latest.searched.join("; ") || "no list"}. `
         : null,
       latest.notices.join(" "),
-      snapshots.length > 1 ? " A list was updated while the file was screened: each row's list versions are in the results file." : null));
+      snapshots.length > 1 ? " The lists or the allow-list changed while the file was screened: each row's versions are in the results file." : null));
 
   const flagged = screened.filter((result) => result.outcome !== "NoMatch" || hasAllowed(result));
   $("flagged-title").textContent = flagged.length === 0
@@ -585,10 +605,10 @@ function download() {
     output.push(line([result.row, result.reference, outcome, result.values.receiver, result.values.company, result.values.address, ...cells,
       result.snapshot >= 0 ? `snapshot ${snapshots.indexOf(result.snapshot) + 1}` : ""]));
   }
-  output.push("", line(["Lists as searched"]), line(["Snapshot", "List", "Code", "Version", "As of", "State", "Matcher version"]));
+  output.push("", line(["Lists as searched"]), line(["Snapshot", "List", "Code", "Version", "As of", "State", "Matcher version", "Allow-list version"]));
   snapshots.forEach((snapshot, i) => {
     for (const list of listsOf(snapshot)) {
-      output.push(line([`snapshot ${i + 1}`, list.name, list.code, list.version, utc(list.asOf), list.state, headers[snapshot].matcherVersion]));
+      output.push(line([`snapshot ${i + 1}`, list.name, list.code, list.version, utc(list.asOf), list.state, headers[snapshot].matcherVersion, headers[snapshot].allowListVersion]));
     }
   });
   output.push("", line(["Screened", new Date().toISOString()]));
