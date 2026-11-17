@@ -15,7 +15,7 @@ public static class FeedFiles
     public static readonly IReadOnlyList<(string Code, int Count)> Feeds =
     [
         ("eu", 160), ("ofac-sdn", 200), ("ofac-cons", 60), ("un", 80), ("uk", 140), ("us-export", 120),
-        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60), ("jp-mof", 60), ("us-uflpa", 50),
+        ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60), ("jp-mof", 60), ("us-uflpa", 50), ("be-terrorism", 40),
     ];
 
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
@@ -27,7 +27,7 @@ public static class FeedFiles
         Fixtures.For(code, Feeds.Single(feed => feed.Code == code).Count);
 
     /// <summary>The file name for a feed (its extension says the format).</summary>
-    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", "nz-mfat" => "xlsx", "jp-mof" => "csv", "us-uflpa" => "html", _ => "xml" }}";
+    public static string FileName(string code, string variant) => $"{code}.{variant}.{code switch { "us-export" or "fr-tresor" => "json", "nl-terrorism" => "ods", "nz-mfat" or "be-terrorism" => "xlsx", "jp-mof" => "csv", "us-uflpa" => "html", _ => "xml" }}";
 
     /// <summary>Writes <paramref name="subjects"/> as <paramref name="code"/>'s feed to <paramref name="path"/>.</summary>
     public static void Write(string code, IReadOnlyList<FixtureSubject> subjects, string path)
@@ -45,6 +45,9 @@ public static class FeedFiles
                 return;
             case "nz-mfat":
                 NewZealand(subjects, path);
+                return;
+            case "be-terrorism":
+                Belgium(subjects, path);
                 return;
             case "us-uflpa":
                 File.WriteAllText(path, Uflpa(subjects), new UTF8Encoding(false));
@@ -616,6 +619,90 @@ public static class FeedFiles
 
         lines.Add(Csv(JapanHeader.Select(_ => string.Empty)));
         return string.Join("\r\n", lines) + "\r\n";
+    }
+
+    /// <summary>Belgium's national list as the FPS Finance publishes it: one sheet, named as the program named it
+    /// (Blad1), a title and notes, a header with an empty first column, then a row per number: people only, and now
+    /// and then a number with no name, a place kept for someone no longer listed. The national register number is
+    /// there (fictional), for the parsers to leave out.</summary>
+    private static void Belgium(IReadOnlyList<FixtureSubject> subjects, string path)
+    {
+        static string Serial(DateOnly date) => (date.DayNumber - new DateOnly(1899, 12, 30).DayNumber).ToString(CultureInfo.InvariantCulture);
+        var rows = new List<string[]>
+        {
+            new[] { string.Empty, "GECONSOLIDEERDE NATIONALE LIJST VAN PERSONEN EN ENTITEITEN (fictief)" },
+            new[] { string.Empty, string.Empty, "Deze lijst is fictief (conformance)." },
+            new[] { string.Empty, "Naam", "Voornaam(voornamen)", "Rijkregisternummer", "Geboortedatum", "Datum KB", "Inwerkingtreding", "Laatste bevestiging", "Link naar de publicatie" },
+        };
+        var number = 0;
+        foreach (var subject in subjects.Where(subject => subject.Person))
+        {
+            if (++number % 7 == 0)
+            {
+                rows.Add([number.ToString(CultureInfo.InvariantCulture)]);
+                number++;
+            }
+
+            var born = new DateOnly(1970, 1, 1).AddDays(subject.Number * 97 % 9000);
+            rows.Add(
+            [
+                number.ToString(CultureInfo.InvariantCulture), subject.Family.ToUpperInvariant(), subject.Given!,
+                $"{born:yy.MM.dd}-{subject.Number % 1000:000}.{subject.Number % 97:00}", Serial(born), Serial(subject.ListedOn),
+                Serial(subject.ListedOn.AddDays(9)), "22 mei 2026", $"https://www.ejustice.just.fgov.be/eli/arrete/fictief/{subject.Number}",
+            ]);
+        }
+
+        const string main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var shared = new List<string>();
+        var sheet = new StringBuilder($"<worksheet xmlns=\"{main}\"><sheetData>");
+        for (var r = 0; r < rows.Count; r++)
+        {
+            sheet.Append(CultureInfo.InvariantCulture, $"<row r=\"{r + 1}\">");
+            for (var c = 0; c < rows[r].Length; c++)
+            {
+                var cell = rows[r][c];
+                if (cell.Length == 0)
+                {
+                    continue;
+                }
+
+                var reference = $"{(char)('A' + c)}{r + 1}";
+                if (r > 2 && c is 0 or 4 or 5 or 6)
+                {
+                    sheet.Append(CultureInfo.InvariantCulture, $"<c r=\"{reference}\"><v>{cell}</v></c>");
+                }
+                else
+                {
+                    shared.Add(cell);
+                    sheet.Append(CultureInfo.InvariantCulture, $"<c r=\"{reference}\" t=\"s\"><v>{shared.Count - 1}</v></c>");
+                }
+            }
+
+            sheet.Append("</row>");
+        }
+
+        sheet.Append("</sheetData></worksheet>");
+        var strings = new StringBuilder($"<sst xmlns=\"{main}\">");
+        foreach (var text in shared)
+        {
+            strings.Append(CultureInfo.InvariantCulture, $"<si><t xml:space=\"preserve\">{System.Security.SecurityElement.Escape(text)}</t></si>");
+        }
+
+        strings.Append("</sst>");
+        var parts = new (string Name, string Content)[]
+        {
+            ("xl/workbook.xml", $"<workbook xmlns=\"{main}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Blad1\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>"),
+            ("xl/_rels/workbook.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>"),
+            ("xl/sharedStrings.xml", strings.ToString()),
+            ("xl/worksheets/sheet1.xml", sheet.ToString()),
+        };
+        using var file = File.Create(path);
+        using var zip = new System.IO.Compression.ZipArchive(file, System.IO.Compression.ZipArchiveMode.Create);
+        foreach (var (name, text) in parts)
+        {
+            using var entry = zip.CreateEntry(name).Open();
+            entry.Write(Encoding.UTF8.GetBytes(text));
+        }
     }
 
     private static void NewZealand(IReadOnlyList<FixtureSubject> subjects, string path)

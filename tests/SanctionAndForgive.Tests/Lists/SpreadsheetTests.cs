@@ -34,7 +34,13 @@ public class SpreadsheetTests
     /// <summary>A workbook with the named sheet (and another before it, to be passed over): cells as written, every
     /// text cell a shared string except those starting with "inline:", which are inline strings; a cell that's a number
     /// is a number.</summary>
-    internal static MemoryStream Xlsx(string sheetName, params string[][] rows)
+    /// <summary>A workbook whose first sheet is a "Legend" and whose second, named sheetName, holds rows.</summary>
+    internal static MemoryStream Xlsx(string sheetName, params string[][] rows) => RowsWorkbook(sheetName, legendFirst: true, rows);
+
+    /// <summary>The same with the rows' sheet first, the legend after it.</summary>
+    internal static MemoryStream XlsxFirstSheet(string sheetName, params string[][] rows) => RowsWorkbook(sheetName, legendFirst: false, rows);
+
+    private static MemoryStream RowsWorkbook(string sheetName, bool legendFirst, string[][] rows)
     {
         const string main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
         var shared = new List<string>();
@@ -78,7 +84,8 @@ public class SpreadsheetTests
         }
 
         strings.Append("</sst>");
-        var workbook = $"<workbook xmlns=\"{main}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Legend\" sheetId=\"1\" r:id=\"rId1\"/><sheet name=\"{SecurityElement.Escape(sheetName)}\" sheetId=\"2\" r:id=\"rId2\"/></sheets></workbook>";
+        var (legend, named) = ("<sheet name=\"Legend\" sheetId=\"1\" r:id=\"rId1\"/>", $"<sheet name=\"{SecurityElement.Escape(sheetName)}\" sheetId=\"2\" r:id=\"rId2\"/>");
+        var workbook = $"<workbook xmlns=\"{main}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets>{(legendFirst ? legend + named : named + legend)}</sheets></workbook>";
         const string relationships = "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"worksheet\" Target=\"worksheets/sheet2.xml\"/></Relationships>";
         return Zip(
             ("xl/workbook.xml", workbook), ("xl/_rels/workbook.xml.rels", relationships), ("xl/sharedStrings.xml", strings.ToString()),
@@ -364,6 +371,45 @@ public class SpreadsheetTests
 
         Assert.Throws<ListFormatException>(() => new NewZealandParser().Parse(noHeader, CancellationToken.None).ToList());
         Assert.Throws<ListFormatException>(() => new NewZealandParser().Parse(noId, CancellationToken.None).ToList());
+    }
+
+    private static readonly string[] BelgiumHeader =
+        ["", "Naam", "Voornaam(voornamen)", "Rijkregisternummer", "Geboortedatum", "Datum KB", "Inwerkingtreding", "Laatste bevestiging", "Link naar de publicatie"];
+
+    [Fact]
+    public void Belgium_ReadsPeopleByNumber_LeavesOutEmptyPlaces_AndTheNationalRegisterNumber()
+    {
+        // The first sheet, whatever its name; a number with no name is a place kept for someone no longer listed.
+        using var file = XlsxFirstSheet(
+            "Blad1",
+            ["", "GECONSOLIDEERDE NATIONALE LIJST VAN PERSONEN EN ENTITEITEN"],
+            ["", "", "Deze lijst is een maatregel (fictief)."],
+            BelgiumHeader,
+            ["1", "JANSSENS", "Pieter Jan", "87.02.28-999.99", "31836", "46172", "46181", "22 mei 2026", "https://www.ejustice.just.fgov.be/eli/arrete/2026/05/30/fictief/moniteur"],
+            ["2"],
+            ["3", "PEETERS", "Anna", "", "", "45380", "45391", "22 mei 2026", "zie het Staatsblad"]);
+
+        var subjects = new BelgiumParser().Parse(file, CancellationToken.None).ToList();
+
+        Assert.Equal(["1", "3"], subjects.Select(subject => subject.ExternalId));
+        Assert.Equal((SubjectType.Individual, "Pieter Jan JANSSENS"), (subjects[0].Type, subjects[0].PrimaryName));
+        Assert.Equal((new DateOnly(2026, 5, 30), BelgiumParser.Programme, "born 1987-02-28"), (subjects[0].ListedOn, subjects[0].Programmes, subjects[0].Remarks));
+        Assert.Equal("https://www.ejustice.just.fgov.be/eli/arrete/2026/05/30/fictief/moniteur", subjects[0].SourceUrl);
+        Assert.Equal((null, null), (subjects[1].Remarks, subjects[1].SourceUrl));
+        Assert.DoesNotContain(subjects, subject => (subject.Remarks ?? string.Empty).Contains("999", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Belgium_WithoutItsHeader_OrANamedRowWithoutANumberOrSurname_IsAFormatError()
+    {
+        using var noHeader = XlsxFirstSheet("Blad1", ["", "Name", "First name"], ["1", "JANSSENS", "Pieter"]);
+        using var noNumber = XlsxFirstSheet("Blad1", BelgiumHeader, ["", "JANSSENS", "Pieter"]);
+        using var noSurname = XlsxFirstSheet("Blad1", BelgiumHeader, ["4", "", "Pieter"]);
+
+        foreach (var file in new[] { noHeader, noNumber, noSurname })
+        {
+            Assert.Throws<ListFormatException>(() => new BelgiumParser().Parse(file, CancellationToken.None).ToList());
+        }
     }
 
     [Fact]

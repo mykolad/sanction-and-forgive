@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // XlsxRows and ExcelDate in the reference's Spreadsheets: the rows of an Office Open XML workbook's named sheet, found
@@ -97,7 +98,8 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 	err = eachToken(data, "xl/workbook.xml", func(token xml.Token) (bool, error) {
 		if t, ok := token.(xml.StartElement); ok && t.Name.Space == xlsxMain && t.Name.Local == "sheet" {
 			name, _ := attr(t, "", "name")
-			if id, ok := attr(t, xlsxRelationships, "id"); ok && name == sheetName {
+			// An empty name takes the first sheet (a workbook whose sheet keeps its program's name).
+			if id, ok := attr(t, xlsxRelationships, "id"); ok && (sheetName == "" || name == sheetName) {
 				relationshipID = id
 				return true, nil
 			}
@@ -106,6 +108,9 @@ func XlsxRows(reader io.Reader, sheetName string) ([][]string, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	if relationshipID == "" && sheetName == "" {
+		return nil, formatError("The workbook has no sheet.")
 	}
 	if relationshipID == "" {
 		return nil, formatError("The workbook has no sheet named %q.", sheetName)
@@ -303,6 +308,87 @@ func ExcelDate(value *string) *time.Time {
 	}
 	date := time.Date(1899, 12, 30, 0, 0, 0, 0, time.UTC).AddDate(0, 0, int(math.Floor(serial)))
 	return &date
+}
+
+const belgiumProgramme = "Belgian national list (royal decree of 28 December 2006, financing of terrorism)"
+
+// parseBelgium reads Belgium's national terrorism list (XLSX, its first sheet): BelgiumParser in the reference. A row
+// per number (first column); a number without a name is a place kept for someone no longer listed. Every party is a
+// person; the national register number isn't kept, the date of birth goes in the remarks, the publication link is the
+// official record.
+func parseBelgium(reader io.Reader) ([]ParsedSubject, error) {
+	rows, err := XlsxRows(reader, "")
+	if err != nil {
+		return nil, err
+	}
+	is := func(cell, name string) bool { return strings.EqualFold(strings.TrimSpace(cell), name) }
+	has := func(row []string, name string) bool {
+		for _, cell := range row {
+			if is(cell, name) {
+				return true
+			}
+		}
+		return false
+	}
+	headerAt := -1
+	for i, row := range rows {
+		if has(row, "Naam") && has(row, "Voornaam(voornamen)") {
+			headerAt = i
+			break
+		}
+	}
+	if headerAt < 0 {
+		return nil, formatError("No header row (Naam, Voornaam(voornamen), …) in Belgium's national list.")
+	}
+	find := func(name string) int {
+		for i, cell := range rows[headerAt] {
+			if is(cell, name) {
+				return i
+			}
+		}
+		return -1
+	}
+	surname, given, born, decree, publication := find("Naam"), find("Voornaam(voornamen)"), find("Geboortedatum"), find("Datum KB"), find("Link naar de publicatie")
+
+	var out []ParsedSubject
+	for _, row := range rows[headerAt+1:] {
+		cell := func(index int) *string {
+			if index >= 0 && index < len(row) {
+				return cleanString(row[index])
+			}
+			return nil
+		}
+		last, first := cell(surname), cell(given)
+		if last == nil && first == nil {
+			continue
+		}
+		number := cell(0)
+		if number == nil {
+			name := first
+			if last != nil {
+				name = last
+			}
+			return nil, formatError("A row of Belgium's national list (%s) has no number.", *name)
+		}
+		if last == nil {
+			return nil, formatError("Row %s of Belgium's national list has no surname.", *number)
+		}
+		b := newBuilder(*number, Individual)
+		b.Programmes = s(belgiumProgramme)
+		b.ListedOn = ExcelDate(cell(decree))
+		if birth := ExcelDate(cell(born)); birth != nil {
+			b.Remarks = s("born " + birth.Format("2006-01-02"))
+		}
+		if link := cell(publication); link != nil && (strings.HasPrefix(*link, "https://") || strings.HasPrefix(*link, "http://")) &&
+			!strings.ContainsFunc(*link, unicode.IsSpace) {
+			b.SourceURL = link
+		}
+		b.AddName(Join(" ", first, last), false, true)
+		if subject := b.Build(); subject != nil {
+			out = append(out, *subject)
+		}
+	}
+	return out, nil
 }
 
 const (

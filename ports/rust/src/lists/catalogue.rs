@@ -58,7 +58,7 @@ const fn source(
 }
 
 /// The catalogue, in the reference's order.
-pub static SOURCES: [ListSource; 16] = [
+pub static SOURCES: [ListSource; 17] = [
     source(
         "eu",
         "EU consolidated financial sanctions",
@@ -176,6 +176,18 @@ pub static SOURCES: [ListSource; 16] = [
         "https://www.mfat.govt.nz/en/copyright",
         "",
     ),
+    ListSource {
+        link_pattern: r"/[0-9]{8}[^/]*[Nn]ationale[^/]*\.xlsx$",
+        ..source(
+            "be-terrorism",
+            "Belgium national terrorism list (FPS Finance)",
+            "https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national",
+            FeedStatus::Active,
+            "https://finance.belgium.be/en/about_fps/structure_and_services/general_administrations/treasury/financial-sanctions/national",
+            "https://fin.belgium.be/en/terms-use",
+            "",
+        )
+    },
     ListSource {
         link_pattern: r"/shisantouketsu[0-9]{8}\.csv$",
         ..source(
