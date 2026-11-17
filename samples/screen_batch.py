@@ -126,6 +126,23 @@ def finding(answer, code):
     return f"no match {max(cell.get('percent') or 0 for _, cell in cells)}%"
 
 
+def neutral(value):
+    """A value as written to the results file: one a spreadsheet would read as a formula (=, +, -, @, tab or carriage
+    return first) gets a leading apostrophe. The values are the input's references and the lists' names: untrusted."""
+    text = "" if value is None else str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+class SafeWriter:
+    """csv.writer, with every value neutralised (quoting alone doesn't stop a spreadsheet evaluating a formula)."""
+
+    def __init__(self, writer):
+        self.writer = writer
+
+    def writerow(self, row):
+        self.writer.writerow([neutral(value) for value in row])
+
+
 def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__)
@@ -148,7 +165,7 @@ def main():
         codes += [item["code"] for item in header["lists"] if item["code"] not in codes]
     used = sorted({snapshot for answer in answers if answer for _, snapshot in [answer] if snapshot >= 0})
     with open(target, "w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.writer(file)
+        writer = SafeWriter(csv.writer(file))
         writer.writerow(["reference", "outcome", "decision", *codes, "snapshot"])
         for record, answer in zip(records, answers):
             message, snapshot = answer if answer else (None, -1)
