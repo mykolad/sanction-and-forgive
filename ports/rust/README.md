@@ -19,8 +19,9 @@ lists its 2,000 screenings are the reference's, result for result (`ReferenceTes
 - **Not ported:** the CLI's `evaluate` and `load-inputs` (development tools; run them with the .NET CLI).
 - **Licences in the image:** `/app` holds `LICENSE`, `THIRD-PARTY-NOTICES.txt` (the data the dictionaries derive
   from) and `THIRD-PARTY-CODE.txt`, the licences of the 214 libraries compiled into `api` and `cli`, which
-  `cargo about` gathers from `Cargo.lock` while the image builds (`about.toml`, `about.hbs`; a library whose licence
-  isn't accepted or can't be read stops the build). To see it locally: `cargo install cargo-about --locked --features
+  `cargo about` gathers from `Cargo.lock` while the image builds (`about.toml`, `about.hbs`). A library whose licence
+  isn't accepted, or whose licence file isn't found (`about-check.hbs`), stops the build; `about.toml` names the file,
+  with its checksum, for the few that `cargo about` doesn't recognise on its own. To see it locally: `cargo install cargo-about --locked --features
   cli`, then `cargo about generate about.hbs` here.
 
 ```powershell

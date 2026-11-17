@@ -14,12 +14,14 @@ RUN cargo test --release --locked && cargo build --release --locked --bin api --
 
 # The licences of the libraries compiled into api and cli (about.toml: Linux target, no dev- or build-dependencies),
 # gathered by cargo about from Cargo.lock in a stage of its own, so it runs alongside the build. --fail: a library
-# whose licence can't be read or isn't accepted stops the build.
+# whose licence can't be read or isn't accepted stops the build. about-check.hbs lists any library whose licence file
+# wasn't found (cargo about would put the bare SPDX text, without its copyright lines): any stops the build too, until
+# about.toml names the file.
 FROM rust:1.99-bookworm AS notices
 RUN cargo install cargo-about --version 0.9.3 --locked --features cli
 WORKDIR /src/ports/rust
 COPY ports/rust/ ./
-RUN cargo fetch --locked && cargo about generate --frozen --fail about.hbs -o /THIRD-PARTY-CODE.txt
+RUN cargo fetch --locked  && cargo about generate --frozen --fail about-check.hbs -o /missing.txt  && if grep -q . /missing.txt; then echo "No licence file found for:"; cat /missing.txt; exit 1; fi  && cargo about generate --frozen --fail about.hbs -o /THIRD-PARTY-CODE.txt
 
 # Distroless with glibc (for the logarithm): no shell, CA certificates for the feeds and Azure, non-root.
 FROM gcr.io/distroless/cc-debian12:nonroot
