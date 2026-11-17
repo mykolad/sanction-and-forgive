@@ -10,7 +10,6 @@ const MAX_BYTES = 10 * 1024 * 1024;
 // is still sending it (a browser reads the response only once the request is sent), large enough to keep the stream
 // endpoint's one-at-a-time permit busy.
 const CHUNK = 100;
-const FIELD_LIMIT = 300;
 const SHOWN = 200;
 
 const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible match, allowed", NoMatch: "No match", NotChecked: "Not checked" };
@@ -229,13 +228,19 @@ function showPreview() {
     return el("tr", {}, el("td", {}, table.firstRow + i), el("td", {}, values.receiver), el("td", {}, values.company), el("td", {}, values.address));
   }));
   const none = map.receiver < 0 && map.company < 0 && map.address.length === 0;
-  $("screen-button").disabled = none;
+  $("screen-button").disabled = none || aborter !== null;
   if (none) showState("Choose at least one column to screen.");
-  else showState("");
+  else if (aborter === null) showState("");
 }
 
 $("map-receiver").addEventListener("change", showPreview);
 $("map-company").addEventListener("change", showPreview);
+
+// While rows are being screened, nothing that decides them can change: the file, its reading, the columns.
+function lock(locked) {
+  for (const id of ["file", "encoding", "has-header", "map-receiver", "map-company"]) $(id).disabled = locked;
+  for (const input of $("map-address").querySelectorAll("input")) input.disabled = locked;
+}
 
 // ---- Screening ----
 
@@ -258,8 +263,30 @@ function retryAfter(response) {
   return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 1000;
 }
 
-// Sends one chunk of records, and whatever of it isn't answered again (the stream's limits, or a broken
-// connection), until every record has a result or an error. Busy and warming-up answers are waited out.
+// The NDJSON lines of a response as they arrive, each parsed. A body that breaks off, or ends inside a line, throws
+// after the complete lines before it: their answers count.
+async function* ndjson(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    buffered += done ? decoder.decode() : decoder.decode(value, { stream: true });
+    let end;
+    while ((end = buffered.indexOf("\n")) >= 0) {
+      const line = buffered.slice(0, end).trim();
+      buffered = buffered.slice(end + 1);
+      if (line !== "") yield JSON.parse(line);
+    }
+    if (done) {
+      if (buffered.trim() !== "") throw new Error("The answer ended inside a line.");
+      return;
+    }
+  }
+}
+
+// Sends one chunk of records, and whatever of it isn't answered again (the stream's limits, or a connection or answer
+// that broke off), until every record has a result or an error. Busy and warming-up answers are waited out.
 async function screenChunk(records, signal, onAnswer) {
   let pending = records;
   let failures = 0;
@@ -285,17 +312,26 @@ async function screenChunk(records, signal, onAnswer) {
     }
     if (!response.ok) throw new Error(`The API answered ${response.status}.`);
     showState("");
-    const lines = (await response.text()).split("\n").filter((line) => line.trim() !== "");
     let answered = 0;
     let end = null;
-    for (const line of lines) {
-      const message = JSON.parse(line);
-      if (message.type === "header") headers.push(message);
-      else if (message.type === "result" || message.type === "error") {
-        const record = pending[message.line - 1];
-        if (record) onAnswer(record, message, headers.length - 1);
-        answered = Math.max(answered, message.line);
-      } else if (message.type === "end") end = message;
+    let snapshot = -1;
+    try {
+      for await (const message of ndjson(response)) {
+        if (message.type === "header") {
+          headers.push(message);
+          snapshot = headers.length - 1;
+        } else if (message.type === "result" || message.type === "error") {
+          const record = pending[message.line - 1];
+          if (record) onAnswer(record, message, snapshot);
+          answered = Math.max(answered, message.line);
+        } else if (message.type === "end") {
+          end = message;
+        }
+      }
+    } catch (error) {
+      if (error.name === "AbortError") throw error;
+      // Broke off: the answers so far stand; the rest goes again below.
+      end = null;
     }
     // The stream stopped early (its record or time limit: nextLine), or broke (no end line): send the rest again,
     // from the first line without an answer.
@@ -306,30 +342,32 @@ async function screenChunk(records, signal, onAnswer) {
 }
 
 async function screen() {
+  if (aborter !== null || !table) return;
   const map = mapping();
   const batch = randomId();
   results = [];
   headers = [];
   const records = [];
-  let skipped = 0;
   table.data.forEach((row, i) => {
     const values = valuesOf(row, map);
     const number = table.firstRow + i;
+    const result = { row: number, reference: null, values, outcome: null, entries: [], errors: null, snapshot: -1, skipped: false };
+    results.push(result);
     if (!values.receiver && !values.company && !values.address) {
-      skipped += 1;
+      // Kept, so the results file has every row: marked skipped, never sent.
+      result.skipped = true;
       return;
     }
-    const reference = `manifest-${batch}-${number}`;
-    const body = { reference };
+    result.reference = `manifest-${batch}-${number}`;
+    const body = { reference: result.reference };
     if (values.receiver) body.receiverName = values.receiver;
     if (values.company) body.companyName = values.company;
     if (values.address) body.address = values.address;
-    const result = { row: number, reference, values, outcome: null, entries: [], errors: null, snapshot: -1 };
-    results.push(result);
     records.push({ body, result });
   });
 
   aborter = new AbortController();
+  lock(true);
   $("screen-button").disabled = true;
   $("cancel-button").hidden = false;
   $("result").hidden = true;
@@ -337,6 +375,7 @@ async function screen() {
   const progress = $("progress");
   progress.max = Math.max(records.length, 1);
   let done = 0;
+  const skipped = results.length - records.length;
   const started = Date.now();
   const report = () => {
     progress.value = done;
@@ -344,7 +383,7 @@ async function screen() {
     const rate = seconds > 0 ? done / seconds : 0;
     const left = rate > 0 ? Math.round((records.length - done) / rate) : null;
     $("progress-text").textContent = `${done.toLocaleString()} of ${records.length.toLocaleString()} rows screened`
-      + (skipped ? ` (${rows(skipped, "empty row", "empty rows")} skipped)` : "")
+      + (skipped ? ` (${rows(skipped, "row", "rows")} with nothing to screen skipped)` : "")
       + (left !== null && done < records.length ? `, about ${left < 90 ? `${left} s` : `${Math.round(left / 60)} min`} left.` : ".");
   };
   report();
@@ -363,26 +402,24 @@ async function screen() {
         report();
       });
     }
-    showResults(skipped, false);
+    showResults();
   } catch (error) {
     if (error.name === "AbortError") {
-      showState(`Stopped after ${done.toLocaleString()} rows. The results so far are below.`);
-      showResults(skipped, true);
+      showState(`Stopped after ${rows(done, "row", "rows")}. The results so far are below; the rest weren't screened.`);
     } else {
       showState(`${error.message} The results so far are below; screen the file again to finish it.`, true);
-      showResults(skipped, true);
     }
+    showResults();
   } finally {
     aborter = null;
-    $("screen-button").disabled = false;
+    lock(false);
     $("cancel-button").hidden = true;
     $("progress-panel").hidden = true;
+    showPreview();
   }
 }
 
-$("screen-button").addEventListener("click", () => {
-  if (table) screen();
-});
+$("screen-button").addEventListener("click", screen);
 $("cancel-button").addEventListener("click", () => {
   if (aborter) aborter.abort();
 });
@@ -393,72 +430,123 @@ function cellState(cell) {
   return cell.state === "NotChecked" ? "NotChecked" : cell.allowed ? "Allowed" : cell.outcome;
 }
 
-// What a row found in one list: its entries' Match and Review cells, worst first; otherwise "No match" or "Not
-// checked". Never "cleared": no match is only that, in that list as of its date.
+function percentText(percent) {
+  if (percent === null || percent === undefined) return "";
+  return percent < 1 ? "<1%" : `${percent}%`;
+}
+
+// What a row found in one list: its entries' Match and Review cells (allowed ones too, so marked), worst first; else
+// "No match" with the highest percentage, or "Not checked". Never "cleared": no match is only that, in that list as
+// of its date. Null when the list has no cells (switched off).
 function foundIn(result, code) {
   const cells = result.entries.flatMap((entry) => entry.cells.filter((cell) => cell.list === code).map((cell) => ({ entry, cell })));
   if (cells.length === 0) return null;
   const hits = cells.filter(({ cell }) => cell.state !== "NotChecked" && (cell.outcome === "Match" || cell.outcome === "Review"));
   const rank = { Match: 0, Review: 1 };
-  hits.sort((a, b) => rank[a.cell.outcome] - rank[b.cell.outcome] || (b.cell.percent || 0) - (a.cell.percent || 0));
+  hits.sort((a, b) => rank[a.cell.outcome] - rank[b.cell.outcome] || Number(a.cell.allowed) - Number(b.cell.allowed) || (b.cell.percent || 0) - (a.cell.percent || 0));
   if (hits.length > 0) {
     return hits.map(({ entry, cell }) => {
       const state = cellState(cell);
       const name = cell.best ? cell.best.listedName : "";
-      return `${SYMBOLS[state]} ${LABELS[state]} ${cell.percent}%: ${KINDS[entry.kind] || entry.kind}${name ? `, ${name}` : ""}`;
+      return `${SYMBOLS[state]} ${LABELS[state]} ${percentText(cell.percent)}: ${KINDS[entry.kind] || entry.kind}${name ? `, ${name}` : ""}`;
     }).join("; ");
   }
-  return cells.some(({ cell }) => cell.state === "NotChecked") ? `${SYMBOLS.NotChecked} ${LABELS.NotChecked}` : `${SYMBOLS.NoMatch} ${LABELS.NoMatch}`;
+  if (cells.some(({ cell }) => cell.state === "NotChecked")) return `${SYMBOLS.NotChecked} ${LABELS.NotChecked}`;
+  const highest = Math.max(...cells.map(({ cell }) => cell.percent || 0));
+  return `${SYMBOLS.NoMatch} ${LABELS.NoMatch} ${percentText(highest)}`;
+}
+
+// Whether a row has possible matches the allow-list allows (its outcome stays NoMatch).
+function hasAllowed(result) {
+  return result.entries.some((entry) => entry.cells.some((cell) => cell.allowed && cell.outcome === "Review"));
 }
 
 function listsOf(snapshot) {
   return snapshot >= 0 && headers[snapshot] ? headers[snapshot].lists : [];
 }
 
-function showResults(skipped, partial) {
-  const screened = results.filter((result) => result.outcome !== null);
+// The snapshots the results were screened against, in order: usually one; more if a list was updated mid-run.
+function usedSnapshots() {
+  return [...new Set(results.map((result) => result.snapshot).filter((snapshot) => snapshot >= 0))].sort((a, b) => a - b);
+}
+
+// What a snapshot searched, as the single screening's summary words it: the no-match scope is only the lists
+// searched; overdue, not-checked and switched-off lists are said so.
+function coverage(snapshot) {
+  const lists = listsOf(snapshot);
+  const name = (list) => `${list.name}, as of ${utc(list.asOf)}`;
+  return {
+    searched: lists.filter((list) => list.state === "Current" || list.state === "Overdue").map(name),
+    notices: [
+      lists.some((list) => list.state === "Overdue")
+        ? `Warning: couldn't be updated within their allowed age, so searched as last downloaded: ${lists.filter((list) => list.state === "Overdue").map(name).join("; ")}.`
+        : null,
+      lists.some((list) => list.state === "NotChecked") ? `Not checked: ${lists.filter((list) => list.state === "NotChecked").map((list) => list.name).join("; ")}.` : null,
+      lists.some((list) => list.state === "SwitchedOff")
+        ? `Not searched: ${lists.filter((list) => list.state === "SwitchedOff").map((list) => list.name).join("; ")} (switched off by an administrator).`
+        : null,
+    ].filter(Boolean),
+  };
+}
+
+function showResults() {
+  const screened = results.filter((result) => !result.skipped && result.outcome !== null);
+  const pending = results.filter((result) => !result.skipped && result.outcome === null).length;
+  const skipped = results.filter((result) => result.skipped).length;
   const count = (outcome) => screened.filter((result) => result.outcome === outcome).length;
-  const worst = count("Match") ? "Match" : count("Review") ? "Review" : count("Incomplete") || count("Error") ? "Incomplete" : "NoMatch";
-  const lists = listsOf(headers.length - 1);
-  const asOf = lists.filter((list) => list.state !== "SwitchedOff").map((list) => `${list.name}, as of ${utc(list.asOf)}`).join("; ");
+  const allowed = screened.filter((result) => result.outcome === "NoMatch" && hasAllowed(result)).length;
+  // Match and Review first; otherwise anything not screened (stopped, failed, an error, a list not checked) makes the
+  // batch incomplete: never a no-match badge for rows nobody screened.
+  const worst = count("Match") ? "Match" : count("Review") ? "Review" : count("Incomplete") || count("Error") || pending ? "Incomplete" : "NoMatch";
+  const snapshots = usedSnapshots();
+  const latest = coverage(snapshots.length ? snapshots[snapshots.length - 1] : -1);
   const parts = [
-    `${rows(screened.length, "row", "rows")} screened${partial ? ` of ${results.length.toLocaleString()}` : ""}`,
+    `${rows(screened.length, "row", "rows")} screened`,
     `${count("Match").toLocaleString()} with a match`,
     `${count("Review").toLocaleString()} to review`,
     count("Incomplete") ? `${count("Incomplete").toLocaleString()} incomplete (a list couldn't be checked)` : null,
     count("Error") ? `${count("Error").toLocaleString()} not screened (an error)` : null,
-    skipped ? `${rows(skipped, "empty row", "empty rows")} skipped` : null,
+    pending ? `${rows(pending, "row", "rows")} not screened (stopped)` : null,
+    skipped ? `${rows(skipped, "row", "rows")} with nothing to screen` : null,
   ].filter(Boolean);
   const noMatch = count("NoMatch");
   const summary = $("summary");
   summary.className = `summary ${worst}`;
   summary.replaceChildren(
     el("span", { class: "badge" }, OVERALL[worst]),
-    el("span", {}, `${parts.join(", ")}. No match found for the other ${noMatch.toLocaleString()} in: ${asOf || "the lists"}.`,
-      headers.length > 1 && new Set(headers.map((header) => header.lists.map((list) => `${list.code}:${list.version}`).join(","))).size > 1
-        ? " A list was updated while the file was screened: each row's list versions are in the results file."
-        : null));
+    el("span", {},
+      `${parts.join(", ")}. `,
+      noMatch
+        ? `No match found for the other ${noMatch.toLocaleString()}${allowed ? ` (${allowed.toLocaleString()} of them only with possible matches the allow-list allows)` : ""} in: ${latest.searched.join("; ") || "no list"}. `
+        : null,
+      latest.notices.join(" "),
+      snapshots.length > 1 ? " A list was updated while the file was screened: each row's list versions are in the results file." : null));
 
-  const flagged = screened.filter((result) => result.outcome !== "NoMatch");
+  const flagged = screened.filter((result) => result.outcome !== "NoMatch" || hasAllowed(result));
   $("flagged-title").textContent = flagged.length === 0
     ? "No row needs a look."
     : flagged.length > SHOWN ? `The first ${SHOWN} of ${flagged.length.toLocaleString()} rows that need a look (all are in the results file)` : "Rows that need a look";
   $("flagged").hidden = flagged.length === 0;
   $("flagged").querySelector("tbody").replaceChildren(...flagged.slice(0, SHOWN).map((result) => {
     const found = result.outcome === "Error"
-      ? Object.entries(result.errors || {}).map(([field, messages]) => `${field}: ${[].concat(messages).join(" ")}`).join("; ")
+      ? errorText(result)
       : listsOf(result.snapshot).map((list) => {
         const text = foundIn(result, list.code);
         return text && !text.startsWith(SYMBOLS.NoMatch) ? `${list.name}: ${text}` : null;
       }).filter(Boolean).join("\n");
+    const label = result.outcome === "NoMatch" ? `${OVERALL.NoMatch} (allowed possible match)` : OVERALL[result.outcome] || result.outcome;
     return el("tr", {},
       el("td", {}, result.row),
       el("td", { class: "reference" }, result.reference),
-      el("td", { class: `outcome ${result.outcome}` }, OVERALL[result.outcome] || result.outcome),
+      el("td", { class: `outcome ${result.outcome}` }, label),
       el("td", { class: "found" }, found));
   }));
   $("disclaimer").textContent = headers.length > 0 ? headers[headers.length - 1].disclaimer : "";
-  $("result").hidden = screened.length === 0;
+  $("result").hidden = screened.length === 0 && pending === 0;
+}
+
+function errorText(result) {
+  return Object.entries(result.errors || {}).map(([field, messages]) => `${field || "Record"}: ${[].concat(messages).join(" ")}`).join("; ");
 }
 
 // ---- The results file ----
@@ -473,31 +561,40 @@ function csvField(value, separator) {
 
 function download() {
   const separator = table.separator;
-  const lists = listsOf(headers.length - 1);
-  const snapshots = new Set(results.map((result) => result.snapshot).filter((snapshot) => snapshot >= 0));
-  const line = (fields) => fields.map((field) => csvField(field, separator)).join(separator);
-  const rows = [line([
-    "Row", "Reference", "Result", "Receiver", "Company", "Address",
-    ...lists.map((list) => `${list.name} (${list.code})`),
-    ...(snapshots.size > 1 ? ["List versions"] : []),
-  ])];
-  for (const result of results) {
-    const outcome = result.outcome === null ? "Not screened (stopped)" : OVERALL[result.outcome] || result.outcome;
-    const cells = result.outcome === "Error"
-      ? lists.map(() => Object.entries(result.errors || {}).map(([field, messages]) => `${field}: ${[].concat(messages).join(" ")}`).join("; "))
-      : lists.map((list) => (result.outcome === null ? "" : foundIn(result, list.code) || "Not searched"));
-    rows.push(line([
-      result.row, result.reference, outcome, result.values.receiver, result.values.company, result.values.address, ...cells,
-      ...(snapshots.size > 1 ? [listsOf(result.snapshot).map((list) => `${list.code} ${list.version}`).join(" ")] : []),
-    ]));
+  const snapshots = usedSnapshots();
+  // A column per list any snapshot used, in the latest's order, then any only an earlier one had.
+  const columns = [];
+  for (const snapshot of [...snapshots].reverse()) {
+    for (const list of listsOf(snapshot)) if (!columns.some((column) => column.code === list.code)) columns.push(list);
   }
-  const header = headers[headers.length - 1];
-  rows.push("", line(["Lists as searched"]), line(["List", "Code", "Version", "As of", "State"]));
-  for (const list of lists) rows.push(line([list.name, list.code, list.version, utc(list.asOf), list.state]));
-  rows.push("", line(["Matcher version", header ? header.matcherVersion : ""]), line(["Screened", new Date().toISOString()]));
-  rows.push(line([header ? header.disclaimer : ""]));
+  const line = (fields) => fields.map((field) => csvField(field, separator)).join(separator);
+  const output = [line(["Row", "Reference", "Result", "Receiver", "Company", "Address", ...columns.map((list) => `${list.name} (${list.code})`), "Lists as of"])];
+  for (const result of results) {
+    let outcome;
+    if (result.skipped) outcome = "Skipped: nothing to screen";
+    else if (result.outcome === null) outcome = "Not screened (stopped)";
+    else if (result.outcome === "NoMatch" && hasAllowed(result)) outcome = `${OVERALL.NoMatch} (allowed possible match)`;
+    else outcome = OVERALL[result.outcome] || result.outcome;
+    const searched = new Set(listsOf(result.snapshot).map((list) => list.code));
+    const cells = columns.map((list) => {
+      if (result.skipped || result.outcome === null) return "";
+      if (result.outcome === "Error") return errorText(result);
+      if (!searched.has(list.code)) return "";
+      return foundIn(result, list.code) || "Not searched (switched off)";
+    });
+    output.push(line([result.row, result.reference, outcome, result.values.receiver, result.values.company, result.values.address, ...cells,
+      result.snapshot >= 0 ? `snapshot ${snapshots.indexOf(result.snapshot) + 1}` : ""]));
+  }
+  output.push("", line(["Lists as searched"]), line(["Snapshot", "List", "Code", "Version", "As of", "State", "Matcher version"]));
+  snapshots.forEach((snapshot, i) => {
+    for (const list of listsOf(snapshot)) {
+      output.push(line([`snapshot ${i + 1}`, list.name, list.code, list.version, utc(list.asOf), list.state, headers[snapshot].matcherVersion]));
+    }
+  });
+  output.push("", line(["Screened", new Date().toISOString()]));
+  output.push(line([headers.length ? headers[headers.length - 1].disclaimer : ""]));
   // A byte order mark, so a spreadsheet reads the file as UTF-8.
-  const blob = new Blob(["﻿" + rows.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  const blob = new Blob(["﻿" + output.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = el("a", { href: url, download: `screening-results-${new Date().toISOString().slice(0, 10)}.csv` });
   document.body.append(a);
