@@ -89,9 +89,9 @@ reference. The pipeline:
   Turkish, Spanish and Italian from CLDR; without first names, words, abbreviations of something else and places common
   elsewhere: Maurice, Dominique, Grenade, Dominika, Kuba, Grecia, Granada, Indie, Butan, Çad (Turkish cad.), RU, ABD,
   Norfolk, Pitcairn...), `places.json` (exonyms with their country). Keys are normalised like
-  the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`. `arabic.json` (Arabic-script folding, name particles) and
-  `cjk.json` (Chinese and Korean: spacing, company forms, traditional characters) are read by the Rust port only so
-  far; .NET and Go hash them.
+  the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`. `arabic.json` (Arabic-script folding, name particles),
+  `cjk.json` (Chinese and Korean: spacing, company forms, traditional characters) and `korean.json` (Korean names in
+  their different romanisations) are read by the Rust port only so far; .NET and Go hash them.
 - **Text** (`Text/`): `Normalizer.Words` (NFKC, lower case, apostrophes inside words deleted, punctuation as
   separators, `&` → and); `Tokenizer` (legal phrases → short form, single-letter runs joined, letters kept as
   initials); `TokenFactory` (Latin forms: one per transliteration table for Cyrillic, plus a look-alike reading;

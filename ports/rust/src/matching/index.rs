@@ -141,11 +141,11 @@ fn distinct_tokens(tokens: impl IntoIterator<Item = TokenRef>) -> Vec<TokenRef> 
 }
 
 fn lookup_keys(token: &Token) -> Vec<&str> {
-    if token.folds.is_empty() {
-        vec![token.text.as_str()]
-    } else {
-        token.folds.iter().map(String::as_str).collect()
-    }
+    let mut keys: Vec<&str> =
+        if token.folds.is_empty() { vec![token.text.as_str()] } else { token.folds.iter().map(String::as_str).collect() };
+    // A Korean name's word is also found by its readings (korean.rs), so its other spellings find it.
+    keys.extend(token.korean.iter().flat_map(|readings| readings.iter().map(String::as_str)));
+    keys
 }
 
 fn address_keys(address: &AddressForm) -> Vec<String> {

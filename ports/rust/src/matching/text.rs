@@ -21,6 +21,9 @@ pub struct Token {
     length: u32,
     /// None: in no spelling or cognate group (most words).
     pub(crate) groups: Option<Box<TokenGroups>>,
+    /// A word of a name read as Korean, its readings (korean.rs: the spellings of one name read alike); None for any
+    /// other word, so a Jung elsewhere never meets a Chung.
+    pub korean: Option<Box<[String]>>,
 }
 
 /// The spelling-pair and cognate groups a token belongs to, looked up once when it's made.
@@ -769,7 +772,7 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         }
         folds
     };
-    Token { text: text.to_string(), forms: distinct, folds, is_cyrillic: has_cyrillic, is_number, length, groups: None }
+    Token { text: text.to_string(), forms: distinct, folds, is_cyrillic: has_cyrillic, is_number, length, groups: None, korean: None }
 }
 
 /// Section 5.1: normalise, replace multi-word legal forms, join runs of single letters (keeping the letters for
@@ -794,10 +797,13 @@ impl<'a> Tokenizer<'a> {
             self.replace_legal_phrases(join_and_split_cjk(words(&remove_hyphenated_honorifics(value)))),
         );
         let mut tokens = Vec::with_capacity(words.len());
+        // A Korean name's words carry its readings (korean.rs); the same word in any other name doesn't.
+        let korean = super::korean::is_korean_name(&words);
         let mut i = 0;
         while i < words.len() {
             if !join_initials || !is_single_letter(&words[i]) {
-                tokens.push(RawToken { token: self.get(&words[i]), initials: None });
+                let token = if korean { self.get_korean(&words[i]) } else { self.get(&words[i]) };
+                tokens.push(RawToken { token, initials: None });
                 i += 1;
                 continue;
             }
@@ -811,6 +817,21 @@ impl<'a> Tokenizer<'a> {
             i += 1;
         }
         tokens
+    }
+
+    /// The word as part of a Korean name: its token with the Korean readings, interned apart from the plain word.
+    fn get_korean(&mut self, text: &str) -> TokenRef {
+        let key = format!("\u{1}ko:{text}");
+        if let Some(token) = self.cache.as_ref().and_then(|cache| cache.get(&key)) {
+            return token.clone();
+        }
+        let mut token = self.data.token(text);
+        token.korean = Some(super::korean::readings(text).into_boxed_slice());
+        let token = Arc::new(token);
+        if let Some(cache) = &mut self.cache {
+            cache.insert(key, token.clone());
+        }
+        token
     }
 
     pub fn get(&mut self, text: &str) -> TokenRef {
