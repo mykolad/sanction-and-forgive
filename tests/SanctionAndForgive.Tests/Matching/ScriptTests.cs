@@ -7,7 +7,8 @@ namespace SanctionAndForgive.Tests.Matching;
 // on 2026-11-16: the same spelling matches in every script; Arabic vowel marks, tatweel and letter variants, Greek
 // accents, Chinese and Korean spacing or partial names, traditional against simplified characters, and any other script
 // against its Latin spelling don't. The locale issues (#91-#93) change these rows on purpose; until then they record
-// what a user gets.
+// what a user of the .NET app gets. The Rust port (production) reads Arabic-script variants since #92 (its tests in
+// ports/rust/src/matching/mod.rs).
 public class ScriptTests
 {
     private static readonly Screener Screener = new(MatchingOptions.Default);

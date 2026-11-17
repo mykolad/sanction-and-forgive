@@ -87,7 +87,8 @@ reference. The pipeline:
   words), `spelling-pairs.json`, `cognates.json`, `countries.json` (244 countries: English variants as the feeds write
   them, Russian, Ukrainian, native names from ICU, French from CLDR as France's register writes them, without Maurice,
   Dominique and Grenade, which are first names and words), `places.json` (exonyms with their country). Keys are normalised like
-  the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`.
+  the text they're compared with. **`MatcherVersion`** = a hash of every dictionary file plus `MatchingOptions`. `arabic.json` (Arabic-script folding) is
+  read by the Rust port only so far; .NET and Go hash it.
 - **Text** (`Text/`): `Normalizer.Words` (NFKC, lower case, apostrophes inside words deleted, punctuation as
   separators, `&` → and); `Tokenizer` (legal phrases → short form, single-letter runs joined, letters kept as
   initials); `TokenFactory` (Latin forms: one per transliteration table for Cyrillic, plus a look-alike reading;
@@ -217,6 +218,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 ## Conformance suite (`docs/conformance.md`)
 
 The owner's experiment (2026-11-09): port the whole application to Go, then Rust, one deployed at a time, and compare.
+Since 2026-11-17 (owner's decision) improvements land in the Rust port first, which production runs, and .NET and Go
+follow later: a Rust-only change keeps the fictional lists' results as the reference has them, or the golden files'
+source has to change (ask the owner), and a shared dictionary only one implementation reads says so in its note.
 `tests/SanctionAndForgive.Conformance` tests an implementation as a black box through its HTTP API, its CLI and the
 shared database, references no app project, and compares with golden files from the reference, the Rust port since
 2026-11-17 (`tests/conformance/golden`): 600 screenings through the stream, 60 single ones, the catalogue, browsing. Then

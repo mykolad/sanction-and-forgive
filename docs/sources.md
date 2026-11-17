@@ -165,7 +165,10 @@ What it says:
 - About 3,500 names (3,474) mix Latin with another script: mostly the EU's and SECO's translations around a Latin name
   (`Οργάνωση Abu Nidal`) and Cyrillic company names with a Latin word.
 
-How such a name behaves when entered today is recorded in `tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
+Since #92 the Rust port, which production runs, compares Arabic-script names in their own script (`arabic.json`:
+vowel marks and tatweel dropped; alef forms, hamza seats, ya and alef maqsura, ta marbuta, Persian kaf and ya unified;
+Eastern digits read as ASCII). How such a name behaves in the .NET app is recorded in
+`tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
 the same spelling matches in every script; Arabic vowel marks, tatweel and letter variants, Greek accents, a part of a
 Chinese or Korean name, a space inside one, traditional characters for simplified ones, and a Latin spelling of a name
 listed only in another script don't.
