@@ -402,6 +402,23 @@ public class SpreadsheetTests
     }
 
     [Fact]
+    public void Belgium_WritesTheBirthDateInTheGregorianCalendar_WhateverTheCulture()
+    {
+        // The remarks go into the import's hash: the same file must give the same text on any machine.
+        var culture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("th-TH");
+            using var file = XlsxFirstSheet("Blad1", BelgiumHeader, ["1", "JANSSENS", "Pieter", "", "31836", "46172", "", "", ""]);
+            Assert.Equal("born 1987-02-28", Assert.Single(new BelgiumParser().Parse(file, CancellationToken.None)).Remarks);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+        }
+    }
+
+    [Fact]
     public void Belgium_WithoutItsHeader_OrANamedRowWithoutANumberOrSurname_IsAFormatError()
     {
         using var noHeader = XlsxFirstSheet("Blad1", ["", "Name", "First name"], ["1", "JANSSENS", "Pieter"]);

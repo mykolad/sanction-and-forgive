@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace SanctionAndForgive.Lists.Parsers;
 
 /// <summary>Belgium's national list of persons and entities whose funds and economic resources are frozen in the fight
@@ -51,7 +53,7 @@ public sealed class BelgiumParser : IListParser
             {
                 Programmes = Programme,
                 ListedOn = Spreadsheets.ExcelDate(Cell(decree)),
-                Remarks = birth is { } date ? $"born {date:yyyy-MM-dd}" : null,
+                Remarks = birth is { } date ? "born " + date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null,
                 SourceUrl = IsLink(link) ? link : null,
             };
             builder.AddName(Text.Join(" ", first, last), isWeak: false, isPrimary: true);
