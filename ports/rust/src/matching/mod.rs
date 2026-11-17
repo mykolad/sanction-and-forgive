@@ -347,6 +347,30 @@ mod tests {
         assert_eq!((outcome, percent), (Some(Outcome::Match), Some(99)));
     }
 
+    /// An alias found as written ranks ahead of one found partly joined, so many partial aliases can't push it past
+    /// the candidate limit: Hua Wei finds the Hua Wei alias though thousands of Hua Huawei come first.
+    #[test]
+    fn an_alias_found_as_written_stays_a_candidate() {
+        let named = |id: usize, name: &str| ListedSubject {
+            external_id: format!("X-{id}"),
+            kind: SubjectKind::Entity,
+            primary_name: name.to_string(),
+            names: vec![ListedName { full_name: name.to_string(), is_weak: false }],
+            addresses: Vec::new(),
+            programme: None,
+            source_url: None,
+        };
+        let options = Options::default();
+        let mut subjects: Vec<ListedSubject> = (0..options.candidate_limit + 10).map(|i| named(i, "Hua Huawei")).collect();
+        subjects.push(named(usize::MAX, "Hua Wei"));
+        let list =
+            ScreenedList { code: "eu".to_string(), name: "EU".to_string(), index: Some(std::sync::Arc::new(ListIndex::build(subjects))) };
+        let request = ScreeningRequest { receiver_name: String::new(), company_name: "Hua Wei".to_string(), address: String::new() };
+        let result = Screener::new(options).screen(&request, &[list], &AllowList::empty()).unwrap();
+        let cell = &result.entries[0].cells[0];
+        assert_eq!(cell.outcome, Some(Outcome::Match), "{:?}", cell.percent);
+    }
+
     /// Joining is for words that read together as the other side's word: different names stay apart.
     #[test]
     fn joining_words_never_makes_different_names_match() {

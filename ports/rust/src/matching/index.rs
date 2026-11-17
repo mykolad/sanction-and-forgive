@@ -298,6 +298,11 @@ impl ListIndex {
                 if joined {
                     joinable.extend(list.iter());
                 }
+                // A vote through words read as one counts three quarters of one through the words themselves, so an
+                // alias the entered words find as written ranks ahead of one found partly joined (Hua Wei: the Hua Wei
+                // alias's 6 votes before Hua Huawei's 3 and 3). Every vote is scaled alike otherwise: the order of
+                // aliases found without a join is the same as before.
+                let weight = weight * if joined { 3 } else { 4 };
                 for &alias in list.iter() {
                     if votes[alias as usize] == 0 {
                         voted.push(alias);
