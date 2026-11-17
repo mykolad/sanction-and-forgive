@@ -141,11 +141,16 @@ fn distinct_tokens(tokens: impl IntoIterator<Item = TokenRef>) -> Vec<TokenRef> 
 }
 
 fn lookup_keys(token: &Token) -> Vec<&str> {
-    let mut keys: Vec<&str> =
-        if token.folds.is_empty() { vec![token.text.as_str()] } else { token.folds.iter().map(String::as_str).collect() };
-    // A Korean name's word is also found by its readings (korean.rs), so its other spellings find it.
-    keys.extend(token.korean.iter().flat_map(|readings| readings.iter().map(String::as_str)));
-    keys
+    if token.folds.is_empty() {
+        vec![token.text.as_str()]
+    } else {
+        token.folds.iter().map(String::as_str).collect()
+    }
+}
+
+/// A Korean name's word's readings (korean.rs): posted with its lookup keys, so its other spellings find it.
+fn korean_keys(token: &Token) -> impl Iterator<Item = &str> {
+    token.korean.iter().flat_map(|readings| readings.iter().map(String::as_str))
 }
 
 fn address_keys(address: &AddressForm) -> Vec<String> {
@@ -192,7 +197,7 @@ impl ListIndex {
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
                 *document_frequency.entry(token.key().to_string()).or_default() += 1;
-                for k in lookup_keys(&token) {
+                for k in lookup_keys(&token).into_iter().chain(korean_keys(&token)) {
                     by_fold.post(k, a);
                 }
             }
@@ -280,28 +285,43 @@ impl ListIndex {
     fn candidates(&self, query: &PreparedName, state: &mut SearchState, o: &Options) -> Vec<u32> {
         let votes = &mut state.votes;
         let voted = &mut state.voted;
-        let mut vote = |k: &str, weight: i32| {
-            if let Some(list) = self.aliases_by_fold.get(k) {
-                for &alias in list.iter() {
-                    if votes[alias as usize] == 0 {
-                        voted.push(alias);
-                    }
-                    votes[alias as usize] += weight;
+        let mut vote_for = |list: &[u32], weight: i32| {
+            for &alias in list {
+                if votes[alias as usize] == 0 {
+                    voted.push(alias);
                 }
+                votes[alias as usize] += weight;
             }
         };
+        let postings = |k: &str| -> &[u32] { self.aliases_by_fold.get(k).map_or(&[][..], |list| &list[..]) };
         for token in distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned()) {
             for k in lookup_keys(&token) {
-                vote(k, 3);
+                vote_for(postings(k), 3);
+            }
+            // A Korean name's word through its readings: each alias once, and none its own keys found already, however
+            // many readings the word has (Lee Cheol mustn't outvote Ri Chol with surname-only aliases).
+            if token.korean.is_some() {
+                let mut found: Vec<u32> = lookup_keys(&token).iter().flat_map(|k| postings(k).iter().copied()).collect();
+                found.sort_unstable();
+                found.dedup();
+                let mut extra: Vec<u32> = Vec::new();
+                for k in korean_keys(&token) {
+                    for &alias in postings(k) {
+                        if found.binary_search(&alias).is_err() && !extra.contains(&alias) {
+                            extra.push(alias);
+                        }
+                    }
+                }
+                vote_for(&extra, 3);
             }
             for &group in token.cognate_groups() {
                 for fold in &self.data.cognate_folds[group] {
-                    vote(fold, 2);
+                    vote_for(postings(fold), 2);
                 }
             }
             for form in &token.forms {
                 for spelling in self.data.spelling_members(form) {
-                    vote(&fold_key(spelling), 2);
+                    vote_for(postings(&fold_key(spelling)), 2);
                 }
             }
             let mut near: Vec<&str> = Vec::new();
@@ -313,7 +333,7 @@ impl ListIndex {
                 }
             }
             for other in near {
-                vote(other, 1);
+                vote_for(postings(other), 1);
             }
         }
         let mut ids = voted.clone();

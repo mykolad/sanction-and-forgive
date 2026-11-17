@@ -133,8 +133,12 @@ pub fn readings(word: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for parse in parses(&word) {
         let mut readings = vec![String::new()];
-        for syllable in &parse {
-            let variants = syllable_readings(syllable);
+        for (index, syllable) in parse.iter().enumerate() {
+            // The South changes an initial r or n at the start of a word only: inside it (Mira, Mina) a consonant stays.
+            let mut variants = syllable_readings(syllable);
+            if index > 0 {
+                variants.truncate(1);
+            }
             readings = readings
                 .iter()
                 .flat_map(|r| variants.iter().map(move |v| if r.is_empty() { v.clone() } else { format!("{r}|{v}") }))

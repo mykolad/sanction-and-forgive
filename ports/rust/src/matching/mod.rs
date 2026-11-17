@@ -351,6 +351,30 @@ mod tests {
         assert_eq!(outcome, Some(Outcome::Review), "{percent:?}");
     }
 
+    /// A Korean word's many readings count once per alias: surname-only aliases can't outvote the full name past the
+    /// candidate limit (Lee Cheol / Ri Chol among a limit's worth of Lee Nam).
+    #[test]
+    fn korean_readings_dont_outvote_the_full_name() {
+        let named = |id: usize, name: &str| ListedSubject {
+            external_id: format!("X-{id}"),
+            kind: SubjectKind::Individual,
+            primary_name: name.to_string(),
+            names: vec![ListedName { full_name: name.to_string(), is_weak: false }],
+            addresses: Vec::new(),
+            programme: None,
+            source_url: None,
+        };
+        let options = Options::default();
+        let mut subjects: Vec<ListedSubject> = (0..options.candidate_limit + 10).map(|i| named(i, "Lee Nam")).collect();
+        subjects.push(named(usize::MAX, "Ri Chol"));
+        let list =
+            ScreenedList { code: "eu".to_string(), name: "EU".to_string(), index: Some(std::sync::Arc::new(ListIndex::build(subjects))) };
+        let request = ScreeningRequest { receiver_name: "Lee Cheol".to_string(), company_name: String::new(), address: String::new() };
+        let result = Screener::new(options).screen(&request, &[list], &AllowList::empty()).unwrap();
+        let cell = &result.entries[0].cells[0];
+        assert_eq!(cell.outcome, Some(Outcome::Match), "{:?}", cell.percent);
+    }
+
     /// Only a Korean name's words read alike: a different given name stays different, and Jung or Chung in a name
     /// that isn't Korean keeps its own spelling.
     #[test]
@@ -359,6 +383,7 @@ mod tests {
             ("Kim Jong Un", "Kim Jong Il"),
             ("Kim Jong Un", "Kim Yo Jong"),
             ("Ri Yong Ho", "Ri Yong Nam"),
+            ("Kim Mira", "Kim Mina"),
             ("Carl Jung", "Carl Chung"),
             ("Maria Jung", "Maria Chung"),
         ] {
