@@ -1,0 +1,21 @@
+# cargo about (https://github.com/EmbarkStudios/cargo-about): the licences of the libraries compiled into the Rust
+# port's binaries, gathered into THIRD-PARTY-CODE.txt when the image is built (Dockerfile). Only what ships: the Linux
+# target, no dev- or build-dependencies. Where a library offers a choice ("MIT OR Apache-2.0"), the first accepted
+# licence in this order is the one used.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "ISC",
+    "BSD-3-Clause",
+    "BSD-2-Clause",
+    "Zlib",
+    "Unicode-3.0",
+    "MIT-0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "Unlicense",
+    "CDLA-Permissive-2.0",
+]
+targets = ["x86_64-unknown-linux-gnu"]
+ignore-dev-dependencies = true
+ignore-build-dependencies = true

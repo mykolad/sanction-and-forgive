@@ -2,7 +2,8 @@ THIRD-PARTY NOTICES
 
 Sanction & Forgive is MIT-licensed (LICENSE). Two of its matching dictionaries, in
 src/SanctionAndForgive.Matching/Data and embedded in every build and image of the application, are derived from
-third-party data under the licences below.
+third-party data under the licences below. The libraries compiled into the Rust image's binaries are listed, with
+their licences, in THIRD-PARTY-CODE.txt next to this file in that image (generated when it is built).
 
 ================================================================================================================
 1. OpenCC: src/SanctionAndForgive.Matching/Data/cjk.json ("traditional")
