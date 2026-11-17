@@ -22,11 +22,14 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         string? country = sourceCountryCode is { Length: 2 } code && data.CountryCodes.Contains(code.ToUpperInvariant()) ? code.ToUpperInvariant() : null;
         var words = Normalizer.Words(raw);
         var parts = Parts(raw, words.Count);
+        var followed = false; // a final ISO code follows the last word, as a country name would
+
         if (TrailingCode().Match(raw) is { Success: true } trailing && data.CountryCodes.Contains(trailing.Groups[1].Value))
         {
             country ??= trailing.Groups[1].Value;
             words.RemoveAt(words.Count - 1);
             parts.RemoveAt(parts.Count - 1);
+            followed = true;
         }
 
         var tokens = words.Select(tokenizer.Get).ToList();
@@ -38,7 +41,7 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         {
             if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch)
             {
-                if (NamesAStreet(tokens, parts, i, countryMatch.Length))
+                if (NamesAStreet(tokens, parts, i, countryMatch.Length, followed))
                 {
                     // The whole name is the street's: no country or place within it ("rue de la République
                     // démocratique du Congo" is neither the DRC nor the Congo).
@@ -87,8 +90,9 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
     /// right after a street type in the same part of the address (<paramref name="parts"/>), unless it ends the address
     /// (<c>Via Germania 12</c> is a street, <c>12 Example Avenue, Germany, 10115</c> and <c>Some Road Malta</c> name
     /// their countries); or right before a street type written after the name, in the same part (<c>Almanya Caddesi
-    /// 12</c>, <c>Jordan Road</c>).</summary>
-    private bool NamesAStreet(List<Token> tokens, List<int> parts, int start, int length)
+    /// 12</c>, <c>Jordan Road</c>). A final ISO code (<paramref name="followed"/>) follows the last word as a country
+    /// name would: <c>Via Germania, IT</c> is read as <c>Via Germania, Italia</c> is.</summary>
+    private bool NamesAStreet(List<Token> tokens, List<int> parts, int start, int length, bool followed)
     {
         var end = start + length;
         if (end < tokens.Count && parts[end] == parts[end - 1] && Is(tokens[end], data.StreetSuffixes))
@@ -104,7 +108,7 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
             particles++;
         }
 
-        return i >= 0 && Is(tokens[i], data.StreetWords) && (particles > 0 || (parts[i] == parts[start] && end < tokens.Count));
+        return i >= 0 && Is(tokens[i], data.StreetWords) && (particles > 0 || (parts[i] == parts[start] && (end < tokens.Count || followed)));
     }
 
     /// <summary>The parts of an address that commas, semicolons and line breaks separate: each word's part, in order.

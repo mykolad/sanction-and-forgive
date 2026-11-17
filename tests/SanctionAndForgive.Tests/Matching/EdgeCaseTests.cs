@@ -59,6 +59,17 @@ public class EdgeCaseTests
     }
 
     [Fact]
+    public void AFinalIsoCode_ReadsLikeTheCountryName()
+    {
+        // "Via Germania, IT" and "Via Germania, Italia" are one address: the street is Via Germania in both.
+        var listed = Subject("Northwind Shipping LLC", SubjectKind.Entity, "5 Corso Germania, Torino");
+        var withCode = AddressCell("Torino, 5 Corso Germania, IT", listed);
+        var withName = AddressCell("Torino, 5 Corso Germania, Italia", listed);
+        Assert.Equal(withName.Percent, withCode.Percent);
+        Assert.Equal(withName.Best?.Alignment, withCode.Best?.Alignment);
+    }
+
+    [Fact]
     public void UnaccentedTurkishStreetTypes_AreStreetTypes()
     {
         // "Sokagi" is "Sokağı" typed without Turkish letters: a street type, not a word two streets can share.

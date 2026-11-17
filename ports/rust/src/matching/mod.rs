@@ -195,6 +195,10 @@ mod tests {
         ] {
             assert_eq!(parse(raw).country, country, "{raw}");
         }
+        // A final ISO code reads like the country's name: the street keeps its word in both.
+        let texts = |raw: &str| parse(raw).words.iter().map(|t| t.text.clone()).collect::<Vec<_>>();
+        assert_eq!(texts("Via Germania, IT"), texts("Via Germania, Italia"));
+        assert_eq!(texts("Via Germania, IT"), ["germania"]);
         // "Sokagi" is "Sokağı" typed without Turkish letters: a street type, dropped like the accented one.
         for raw in ["Karanfil Sokagi 5", "Karanfil Sokağı 5", "Ataturk Bulvari 5"] {
             assert_eq!(parse(raw).words.len(), 1, "{raw}");

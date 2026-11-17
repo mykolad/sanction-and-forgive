@@ -30,6 +30,18 @@ func TestAddress_AStreetNamedAfterACountry_IsAStreet(t *testing.T) {
 	}
 }
 
+// A final ISO code reads like the country's name: "Via Germania, IT" keeps the street's word, as "Via Germania,
+// Italia" does.
+func TestAddress_AFinalIsoCode_ReadsLikeTheCountryName(t *testing.T) {
+	data := Data()
+	parser := &addressParser{data: data, tokenizer: &tokenizer{data: data, cache: map[string]*Token{}}}
+	for _, raw := range []string{"Via Germania, IT", "Via Germania, Italia"} {
+		if words := parser.Parse(raw, "").Words; len(words) != 1 || words[0].Text != "germania" {
+			t.Errorf("Parse(%q) kept %d words, want germania", raw, len(words))
+		}
+	}
+}
+
 // "Sokagi" is "Sokağı" typed without Turkish letters: a street type, dropped like the accented one.
 func TestAddress_UnaccentedTurkishStreetTypes_AreDropped(t *testing.T) {
 	data := Data()

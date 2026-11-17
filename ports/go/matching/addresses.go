@@ -58,12 +58,14 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	}
 	words := Words(raw)
 	parts := addressParts(raw, len(words))
+	followed := false // a final ISO code follows the last word, as a country name would
 	if code, ok := trailingCode(raw); ok && p.data.CountryCodes[code] && len(words) > 0 {
 		if country == "" {
 			country = code
 		}
 		words = words[:len(words)-1]
 		parts = parts[:len(parts)-1]
+		followed = true
 	}
 
 	tokens := make([]*Token, len(words))
@@ -82,7 +84,7 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	}
 	for i := 0; i < len(tokens); i++ {
 		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok {
-			if p.namesAStreet(tokens, parts, i, length) {
+			if p.namesAStreet(tokens, parts, i, length, followed) {
 				// The whole name is the street's: no country or place within it ("rue de la République
 				// démocratique du Congo" is neither the DRC nor the Congo).
 				for k := i; k < i+length; k++ {
@@ -120,8 +122,9 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 // two particles ("12 rue de Malte, Paris" is in France); right after a street type in the same part of the address,
 // unless it ends the address ("Via Germania 12" is a street, "12 Example Avenue, Germany, 10115" and "Some Road Malta"
 // name their countries); or right before a street type written after the name, in the same part ("Almanya Caddesi
-// 12", "Jordan Road").
-func (p *addressParser) namesAStreet(tokens []*Token, parts []int, start, length int) bool {
+// 12", "Jordan Road"). A final ISO code (followed) follows the last word as a country name would: "Via Germania, IT"
+// is read as "Via Germania, Italia" is.
+func (p *addressParser) namesAStreet(tokens []*Token, parts []int, start, length int, followed bool) bool {
 	is := func(token *Token, words map[string]bool) bool { return words[token.Text] || anyIn(token.Forms, words) }
 	end := start + length
 	if end < len(tokens) && parts[end] == parts[end-1] && is(tokens[end], p.data.StreetSuffixes) {
@@ -132,7 +135,7 @@ func (p *addressParser) namesAStreet(tokens []*Token, parts []int, start, length
 		i--
 		particles++
 	}
-	return i >= 0 && is(tokens[i], p.data.StreetWords) && (particles > 0 || (parts[i] == parts[start] && end < len(tokens)))
+	return i >= 0 && is(tokens[i], p.data.StreetWords) && (particles > 0 || (parts[i] == parts[start] && (end < len(tokens) || followed)))
 }
 
 // addressParts: the parts of an address that commas, semicolons and line breaks separate, as each word's part in
