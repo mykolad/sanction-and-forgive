@@ -57,6 +57,9 @@
 
     <section id="result" class="result" hidden aria-live="polite">
       <div id="summary" class="summary"></div>
+      <div class="result-actions">
+        <button type="button" class="secondary" id="print-button">Print or save the record</button>
+      </div>
       <p class="likelihood-note"><strong>Match likelihood</strong> is an estimate that the entry is the listed party, based on the data entered. It isn't the chance that a shipment is lawful.</p>
       <div class="table-scroll">
         <table id="result-table">
@@ -73,7 +76,7 @@
   <footer class="footer">
     <div class="wrap">
       <p><strong>Sources.</strong> <span id="sources">Loading the lists…</span> <a href="/status">List status: record counts, freshness, and the lists not imported</a></p>
-      <p>Contains public sector information licensed under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">Open Government Licence v3.0</a> (UK Sanctions List).
+      <p id="attribution">Contains public sector information licensed under the <a href="https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/">Open Government Licence v3.0</a> (UK Sanctions List).
         This product uses the International Trade Administration's Data API but is not endorsed or certified by the International Trade Administration.
         EU data © European Union, reused under the Commission's <a href="https://commission.europa.eu/legal-notice_en">reuse policy</a>.
         France: Registre national des gels, Direction générale du Trésor, reused under the <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/">Licence Ouverte 2.0</a>.
@@ -83,6 +86,9 @@
       <p class="fineprint">A demo list check, not a legal determination. <span id="version"></span> · <a href="https://github.com/mykolad/sanction-and-forgive">Source code</a> (MIT)</p>
     </div>
   </footer>
+
+  <!-- The screening record, built from the result on the page when it's printed; shown only on paper (app.css). -->
+  <section id="print-record" class="print-record" aria-hidden="true"></section>
 
   <script src="app.js"></script>
 </body>
