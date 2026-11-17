@@ -104,7 +104,8 @@ function separatorOf(text) {
 }
 
 // RFC 4180: fields separated by the separator, quoted with double quotes ("" inside a quoted field is one quote),
-// records ending in CRLF or LF, a quoted field may hold either. Blank lines are left out.
+// records ending in CRLF or LF, a quoted field may hold either. Blank lines are left out. Each record keeps its row
+// number in the file as a spreadsheet numbers it (row.line): blank lines count, a line break inside quotes doesn't.
 function parseCsv(text, separator) {
   const rows = [];
   let row = [];
@@ -112,6 +113,7 @@ function parseCsv(text, separator) {
   let quoted = false;
   let started = false;
   let quoteAt = 0;
+  let line = 1;
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i];
     if (quoted) {
@@ -138,10 +140,12 @@ function parseCsv(text, separator) {
     } else if (c === "\n" || c === "\r") {
       if (c === "\r" && text[i + 1] === "\n") i += 1;
       row.push(field);
+      row.line = line;
       if (started || row.some((value) => value !== "")) rows.push(row);
       row = [];
       field = "";
       started = false;
+      line += 1;
     } else {
       field += c;
       started = true;
@@ -152,6 +156,7 @@ function parseCsv(text, separator) {
   // The last record without a line break after it counts as any other (even with nothing in it: it's skipped later).
   if (started || field !== "" || row.length > 0) {
     row.push(field);
+    row.line = line;
     rows.push(row);
   }
   return rows;
@@ -198,7 +203,7 @@ async function readFile() {
   const names = hasHeader
     ? Array.from({ length: width }, (_, i) => (rows[0][i] || "").trim() || `Column ${i + 1}`)
     : Array.from({ length: width }, (_, i) => `Column ${i + 1}`);
-  table = { names, data, separator, firstRow: hasHeader ? 2 : 1 };
+  table = { names, data, separator };
   const separatorName = { ",": "commas", ";": "semicolons", "\t": "tabs" }[separator];
   $("file-note").textContent = `${data.length.toLocaleString()} rows, ${width} columns, separated by ${separatorName}, read as ${encoding.toUpperCase()}.`;
   showMapping();
@@ -257,7 +262,7 @@ function showPreview() {
     el("th", { scope: "col" }, "Row"), el("th", { scope: "col" }, "Receiver"), el("th", { scope: "col" }, "Company"), el("th", { scope: "col" }, "Address")));
   $("preview").querySelector("tbody").replaceChildren(...table.data.slice(0, 5).map((row, i) => {
     const values = valuesOf(row, map);
-    return el("tr", {}, el("td", {}, table.firstRow + i), el("td", {}, values.receiver), el("td", {}, values.company), el("td", {}, values.address));
+    return el("tr", {}, el("td", {}, table.data[i].line), el("td", {}, values.receiver), el("td", {}, values.company), el("td", {}, values.address));
   }));
   const none = map.receiver < 0 && map.company < 0 && map.address.length === 0;
   $("screen-button").disabled = none || aborter !== null;
@@ -391,7 +396,7 @@ async function screen() {
   const records = [];
   table.data.forEach((row, i) => {
     const values = valuesOf(row, map);
-    const number = table.firstRow + i;
+    const number = row.line;
     const result = { row: number, reference: null, values, outcome: null, entries: [], errors: null, snapshot: -1, skipped: false };
     results.push(result);
     if (!values.receiver && !values.company && !values.address) {
