@@ -28,6 +28,8 @@ let headers = [];
 let aborter = null;
 // Each file chosen (or read again) takes a new number; a read that finishes after a newer one started is dropped.
 let reading = 0;
+// When the run started and ended: the results file's times, not when it was downloaded.
+let run = { started: null, ended: null };
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -77,17 +79,28 @@ function decode(buffer, choice) {
   }
 }
 
-// The separator: the one of comma, semicolon and tab that occurs most in the first line (outside quotes).
+// The separator: the one of tab, semicolon and comma that splits the first records into the same number of columns
+// (more than one) most often. A tie goes to tab, then semicolon: a semicolon file's addresses often hold commas, a
+// comma file rarely holds a semicolon in every record. The Separator control overrides it.
 function separatorOf(text) {
-  const counts = { ",": 0, ";": 0, "\t": 0 };
-  let quoted = false;
-  for (const c of text) {
-    if (c === '"') quoted = !quoted;
-    else if (!quoted && (c === "\n" || c === "\r")) break;
-    else if (!quoted && c in counts) counts[c] += 1;
+  const sample = text.slice(0, 65536);
+  let best = ",";
+  let bestScore = 0;
+  for (const separator of ["\t", ";", ","]) {
+    let records;
+    try {
+      records = parseCsv(sample, separator).slice(0, 20);
+    } catch {
+      continue; // The sample cut a quoted value: this separator's reading is no worse; others may do.
+    }
+    const width = records.length ? records[0].length : 0;
+    const score = width > 1 ? records.filter((record) => record.length === width).length : 0;
+    if (score > bestScore) {
+      best = separator;
+      bestScore = score;
+    }
   }
-  const [best, count] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-  return count > 0 ? best : ",";
+  return best;
 }
 
 // RFC 4180: fields separated by the separator, quoted with double quotes ("" inside a quoted field is one quote),
@@ -160,7 +173,8 @@ async function readFile() {
   if (generation !== reading) return;
   const { text, encoding } = decode(buffer, $("encoding").value);
   const clean = text.replace(/^﻿/, "");
-  const separator = separatorOf(clean);
+  const chosen = $("separator").value;
+  const separator = chosen === "auto" ? separatorOf(clean) : chosen === "tab" ? "\t" : chosen;
   let rows;
   try {
     rows = parseCsv(clean, separator);
@@ -256,7 +270,7 @@ $("map-company").addEventListener("change", showPreview);
 
 // While rows are being screened, nothing that decides them can change: the file, its reading, the columns.
 function lock(locked) {
-  for (const id of ["file", "encoding", "has-header", "map-receiver", "map-company"]) $(id).disabled = locked;
+  for (const id of ["file", "encoding", "separator", "has-header", "map-receiver", "map-company"]) $(id).disabled = locked;
   for (const input of $("map-address").querySelectorAll("input")) input.disabled = locked;
 }
 
@@ -373,6 +387,7 @@ async function screen() {
   const batch = randomId();
   results = [];
   headers = [];
+  run = { started: new Date(), ended: null };
   const records = [];
   table.data.forEach((row, i) => {
     const values = valuesOf(row, map);
@@ -437,6 +452,7 @@ async function screen() {
     }
     showResults();
   } finally {
+    run.ended = new Date();
     aborter = null;
     lock(false);
     $("cancel-button").hidden = true;
@@ -530,7 +546,8 @@ function showResults() {
   const snapshots = usedSnapshots();
   const latest = coverage(snapshots.length ? snapshots[snapshots.length - 1] : -1);
   const parts = [
-    `${rows(screened.length, "row", "rows")} screened`,
+    // Screened means answered: an API error (a value over 300 characters, say) is counted below, not here.
+    `${rows(screened.length - count("Error"), "row", "rows")} screened`,
     `${count("Match").toLocaleString()} with a match`,
     `${count("Review").toLocaleString()} to review`,
     count("Incomplete") ? `${count("Incomplete").toLocaleString()} incomplete (a list couldn't be checked)` : null,
@@ -620,7 +637,7 @@ function download() {
       output.push(line([`snapshot ${i + 1}`, list.name, list.code, list.version, utc(list.asOf), list.state, headers[snapshot].matcherVersion, headers[snapshot].allowListVersion]));
     }
   });
-  output.push("", line(["Screened", new Date().toISOString()]));
+  output.push("", line(["Screening started", run.started ? run.started.toISOString() : ""]), line(["Screening ended", run.ended ? run.ended.toISOString() : ""]));
   output.push(line([headers.length ? headers[headers.length - 1].disclaimer : ""]));
   // A byte order mark, so a spreadsheet reads the file as UTF-8.
   const blob = new Blob(["﻿" + output.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
@@ -635,5 +652,6 @@ function download() {
 $("download-button").addEventListener("click", download);
 $("file").addEventListener("change", readFile);
 $("encoding").addEventListener("change", readFile);
+$("separator").addEventListener("change", readFile);
 $("has-header").addEventListener("change", readFile);
 $("max-rows").textContent = MAX_ROWS.toLocaleString();
