@@ -44,13 +44,20 @@ public static class Settings
     /// <summary>Set to 1 to write the golden files from this implementation instead of comparing with them.</summary>
     public static bool UpdateGolden => Environment.GetEnvironmentVariable("CONFORMANCE_UPDATE_GOLDEN") == "1";
 
+    /// <summary>The suite's version an implementation is tested at (<c>CONFORMANCE_VERSION</c>, 2 by default): its golden
+    /// files are in <c>tests/conformance/golden/v{n}</c>. Version 2 is the Rust reference's answers, which grow with its
+    /// improvements; version 1 is what the .NET and Go implementations answer until they catch up (docs/conformance.md).</summary>
+    public static int Version => Environment.GetEnvironmentVariable("CONFORMANCE_VERSION") is { Length: > 0 } version
+        ? int.Parse(version, System.Globalization.CultureInfo.InvariantCulture) is var n and (1 or 2) ? n : throw new InvalidOperationException($"CONFORMANCE_VERSION {version}: 1 or 2.")
+        : 2;
+
     public static string GoldenDirectory
     {
         get
         {
             for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
             {
-                var golden = Path.Combine(directory.FullName, "tests", "conformance", "golden");
+                var golden = Path.Combine(directory.FullName, "tests", "conformance", "golden", $"v{Version}");
                 if (Directory.Exists(Path.Combine(directory.FullName, "tests", "conformance")))
                 {
                     Directory.CreateDirectory(golden);
