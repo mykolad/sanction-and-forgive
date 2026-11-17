@@ -33,7 +33,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "6c8b02cd3d46");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "e715d85f50de");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -76,6 +76,24 @@ mod tests {
         }
         let (outcome, _) = screen("شركة النور ٢٠٠٠", "شركة النور 2000", SubjectKind::Entity);
         assert_eq!(outcome, Some(Outcome::Match));
+        // A small mark above (U+0618) is dropped too.
+        let (outcome, percent) = screen("عؘلي حسن", "علي حسن", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// A short name stays short however many marks or tatweels it's written with: the cap for a short name applies alike.
+    #[test]
+    fn marks_dont_lift_a_short_arabic_name_past_its_cap() {
+        let plain = screen("نور", "نور", SubjectKind::Entity);
+        assert_eq!(screen("نُور", "نور", SubjectKind::Entity), plain);
+        assert_eq!(screen("نـور", "نور", SubjectKind::Entity), plain);
+    }
+
+    /// A stray tatweel between words is no word: the names still match.
+    #[test]
+    fn a_stray_tatweel_is_no_word() {
+        let (outcome, percent) = screen("محمد ـ حسن", "محمد حسن", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
     }
 
     /// Arabic name particles in Latin script (#92): Abd and its article, the article written apart or joined, Abu, and
