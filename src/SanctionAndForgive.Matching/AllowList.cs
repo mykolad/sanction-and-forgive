@@ -9,8 +9,10 @@ public sealed record AllowListEntry(int Id, string Name, string Reason);
 /// <summary>Names whose possible matches (Review) are shown as allowed and don't raise the outcome (owner's decision,
 /// 2026-11-06). Only possible matches: a Match is never suppressed, and only when the entered receiver or company is
 /// the allow-listed name itself, word for word as screening reads it: case, punctuation, apostrophes and spacing don't
-/// matter, but every word does, the legal form included ("Huamei Co., Ltd." is "HUAMEI CO LTD", not "Huamei Limited");
-/// Cyrillic and Latin spellings are separate entries. Immutable, with a version
+/// matter, and a written-out legal form is read as its short form (legal-forms.json phrases: "Huamei Co., Ltd." is read
+/// "HUAMEI LTD", as "Huamei Ltd." is), but every other word does, the legal form included ("Huamei Limited" is another
+/// name); Cyrillic and Latin spellings are separate entries. Names with one key screen alike, so a possible match
+/// confirmed for one is the other's too. Immutable, with a version
 /// that every result carries, so the same input, lists and allow-list always give the same answer.</summary>
 public sealed class AllowList
 {

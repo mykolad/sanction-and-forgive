@@ -5,7 +5,7 @@
     "group": ["group", "groups", "grupp", "groupe", "gruppe", "групп", "группа", "група", "груп"],
     "holding": ["holding", "holdings", "холдинг", "холдингс"],
     "international": ["international", "intl", "internacional", "interneshnl", "интернешнл", "интернэшнл", "інтернешнл", "международный", "международная", "международное", "міжнародний", "міжнародна", "міжнародне"],
-    "logistics": ["logistics", "logistic", "логистик", "логистика", "логистикс", "логістик", "логістика", "логістикс"],
+    "logistics": ["logistics", "logistic", "логистик", "логистика", "логистикс", "логістик", "логістика", "логістикс", "logistika", "lojistik", "logistyka", "logistik"],
     "shipping": ["shipping", "шиппинг", "шипінг"],
     "company": ["company", "co", "companies", "compania", "компания", "компанія", "компани"],
     "bank": ["bank", "banka", "banque", "banco", "банк"],

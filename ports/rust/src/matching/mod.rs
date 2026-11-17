@@ -33,7 +33,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "350da5e1ee3c");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "47cd3a896bb2");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -87,6 +87,15 @@ mod tests {
         let plain = screen("نور", "نور", SubjectKind::Entity);
         assert_eq!(screen("نُور", "نور", SubjectKind::Entity), plain);
         assert_eq!(screen("نـور", "نور", SubjectKind::Entity), plain);
+    }
+
+    /// An Arabic initial is one however it's written: with a vowel mark or a tatweel it screens as without.
+    #[test]
+    fn an_arabic_initial_with_a_mark_or_tatweel_is_still_an_initial() {
+        let plain = screen("ع حسين", "علي حسين", SubjectKind::Individual);
+        assert_eq!(plain.0, Some(Outcome::Review), "{:?}", plain.1);
+        assert_eq!(screen("عُ حسين", "علي حسين", SubjectKind::Individual), plain);
+        assert_eq!(screen("عـ حسين", "علي حسين", SubjectKind::Individual), plain);
     }
 
     /// A stray tatweel between words is no word: the names still match.
