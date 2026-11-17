@@ -12,7 +12,7 @@ internal static class Normalizer
 
     /// <summary>The letters a word's marks don't come off by decomposing (<c>Data/letters.json</c>, hashed into the
     /// matcher version with the other dictionaries): what each folds to, and the second spellings.</summary>
-    private static readonly (Dictionary<char, string> Folds, Dictionary<char, string> SecondForms) Letters = LoadLetters();
+    private static readonly (Dictionary<char, string> Folds, List<Dictionary<char, string>> SecondForms) Letters = LoadLetters();
 
     /// <summary>The words of <paramref name="value"/>, normalised, in order.</summary>
     public static List<string> Words(string value)
@@ -85,36 +85,45 @@ internal static class Normalizer
         return builder.ToString().Normalize(NormalizationForm.FormC);
     }
 
-    /// <summary>A word's second spelling (letters.json): <c>müller</c> → <c>mueller</c>, <c>jørgen</c> → <c>joergen</c>,
-    /// <c>đorđe</c> → <c>djordje</c>; null if it has none of those letters.</summary>
-    public static string? SecondForm(string value)
+    /// <summary>A word's second spellings (letters.json): one per language group whose letters it has, and one with
+    /// every such group together: <c>müller</c> → <c>mueller</c>; <c>åström</c> → <c>åstroem</c>, <c>aaström</c>,
+    /// <c>aastroem</c>. None if it has none of those letters.</summary>
+    public static List<string> SecondForms(string value)
     {
-        if (!value.Any(Letters.SecondForms.ContainsKey))
+        var groups = Letters.SecondForms.Where(group => value.Any(group.ContainsKey)).ToList();
+        var forms = groups.Select(group => Replace(value, [group])).ToList();
+        if (groups.Count > 1)
         {
-            return null;
+            forms.Add(Replace(value, groups));
         }
 
-        var builder = new StringBuilder(value.Length + 4);
-        foreach (var c in value)
-        {
-            if (Letters.SecondForms.TryGetValue(c, out var second))
-            {
-                builder.Append(second);
-            }
-            else
-            {
-                builder.Append(c);
-            }
-        }
+        return forms;
 
-        return builder.ToString();
+        static string Replace(string value, List<Dictionary<char, string>> groups)
+        {
+            var builder = new StringBuilder(value.Length + 4);
+            foreach (var c in value)
+            {
+                var second = groups.Select(group => group.GetValueOrDefault(c)).FirstOrDefault(found => found is not null);
+                if (second is not null)
+                {
+                    builder.Append(second);
+                }
+                else
+                {
+                    builder.Append(c);
+                }
+            }
+
+            return builder.ToString();
+        }
     }
 
     public static bool IsCyrillic(char c) => c is >= 'Ѐ' and <= 'ԯ';
 
     public static bool IsLatin(char c) => c is >= 'a' and <= 'z' or >= 'À' and <= 'ɏ' or >= 'Ḁ' and <= 'ỿ';
 
-    private static (Dictionary<char, string> Folds, Dictionary<char, string> SecondForms) LoadLetters()
+    private static (Dictionary<char, string> Folds, List<Dictionary<char, string>> SecondForms) LoadLetters()
     {
         using var stream = typeof(Normalizer).Assembly.GetManifestResourceStream("SanctionAndForgive.Matching.Data.letters.json")
             ?? throw new InvalidOperationException("The matcher's letters.json isn't embedded.");
@@ -123,7 +132,7 @@ internal static class Normalizer
             table.EnumerateObject().ToDictionary(
                 letter => letter.Name.Length == 1 ? letter.Name[0] : throw new InvalidOperationException($"letters.json: '{letter.Name}' isn't one letter."),
                 letter => letter.Value.GetString()!);
-        return (Table(document.RootElement.GetProperty("folds")), Table(document.RootElement.GetProperty("secondForms")));
+        return (Table(document.RootElement.GetProperty("folds")), [.. document.RootElement.GetProperty("secondForms").EnumerateArray().Select(Table)]);
     }
 
     private static void Flush(List<string> words, StringBuilder word)

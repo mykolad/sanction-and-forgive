@@ -160,16 +160,16 @@ pub fn to_upper_invariant(s: &str) -> String {
 /// the other dictionaries): what each folds to, and the second spellings.
 struct LetterTables {
     folds: HashMap<char, String>,
-    second_forms: HashMap<char, String>,
+    second_forms: Vec<HashMap<char, String>>,
 }
 
 static LETTERS: std::sync::LazyLock<LetterTables> = std::sync::LazyLock::new(|| {
     let bytes = super::data::resource("letters.json").expect("letters.json is embedded");
     let document: serde_json::Value = serde_json::from_slice(bytes).expect("letters.json is JSON");
-    let table = |key: &str| -> HashMap<char, String> {
-        document[key]
+    let table = |entries: &serde_json::Value| -> HashMap<char, String> {
+        entries
             .as_object()
-            .unwrap_or_else(|| panic!("letters.json has no {key}"))
+            .expect("letters.json's tables are objects")
             .iter()
             .map(|(letter, value)| {
                 let mut chars = letter.chars();
@@ -178,7 +178,8 @@ static LETTERS: std::sync::LazyLock<LetterTables> = std::sync::LazyLock::new(|| 
             })
             .collect()
     };
-    LetterTables { folds: table("folds"), second_forms: table("secondForms") }
+    let groups = document["secondForms"].as_array().expect("letters.json has secondForms").iter().map(table).collect();
+    LetterTables { folds: table(&document["folds"]), second_forms: groups }
 });
 
 /// A Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds (letters.json) apply
@@ -204,13 +205,19 @@ pub fn strip_diacritics(value: &str) -> String {
     out.nfc().collect()
 }
 
-/// A word's second spelling (letters.json): müller → mueller, jørgen → joergen, đorđe → djordje; None if it has none
-/// of those letters.
-pub fn second_form(value: &str) -> Option<String> {
-    if !value.chars().any(|c| LETTERS.second_forms.contains_key(&c)) {
-        return None;
+/// A word's second spellings (letters.json): one per language group whose letters it has, and one with every such
+/// group together: müller → mueller; åström → åstroem, aaström, aastroem. None if it has none of those letters.
+pub fn second_forms(value: &str) -> Vec<String> {
+    let groups: Vec<&HashMap<char, String>> =
+        LETTERS.second_forms.iter().filter(|group| value.chars().any(|c| group.contains_key(&c))).collect();
+    let replace = |groups: &[&HashMap<char, String>]| -> String {
+        value.chars().map(|c| groups.iter().find_map(|group| group.get(&c).cloned()).unwrap_or_else(|| c.to_string())).collect()
+    };
+    let mut forms: Vec<String> = groups.iter().map(|group| replace(&[group])).collect();
+    if groups.len() > 1 {
+        forms.push(replace(&groups));
     }
-    Some(value.chars().map(|c| LETTERS.second_forms.get(&c).cloned().unwrap_or_else(|| c.to_string())).collect())
+    forms
 }
 
 pub fn is_cyrillic(c: char) -> bool {
@@ -335,7 +342,7 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         }
     } else if has_latin || is_number {
         forms.push(strip_diacritics(text));
-        if let Some(second) = second_form(text) {
+        for second in second_forms(text) {
             forms.push(strip_diacritics(&second));
         }
     }

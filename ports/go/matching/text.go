@@ -126,7 +126,7 @@ func isLetterOrDigit(c rune) bool {
 // matcher version with the other dictionaries): what each folds to, and the second spellings.
 type letterTables struct {
 	folds       map[rune]string
-	secondForms map[rune]string
+	secondForms []map[rune]string
 }
 
 var letters = sync.OnceValue(func() letterTables {
@@ -135,8 +135,8 @@ var letters = sync.OnceValue(func() letterTables {
 		panic("matching: letters.json isn't embedded: " + err.Error())
 	}
 	var document struct {
-		Folds       map[string]string `json:"folds"`
-		SecondForms map[string]string `json:"secondForms"`
+		Folds       map[string]string   `json:"folds"`
+		SecondForms []map[string]string `json:"secondForms"`
 	}
 	if err := json.Unmarshal(content, &document); err != nil {
 		panic("matching: letters.json: " + err.Error())
@@ -152,7 +152,11 @@ var letters = sync.OnceValue(func() letterTables {
 		}
 		return out
 	}
-	return letterTables{table(document.Folds), table(document.SecondForms)}
+	groups := make([]map[rune]string, len(document.SecondForms))
+	for i, group := range document.SecondForms {
+		groups[i] = table(group)
+	}
+	return letterTables{table(document.Folds), groups}
 })
 
 // StripDiacritics returns a Latin word without diacritics: Ştefan → stefan, straße → strasse, þór → thor. The folds
@@ -181,21 +185,43 @@ func StripDiacritics(value string) string {
 	return norm.NFC.String(b.String())
 }
 
-// SecondForm is a word's second spelling (letters.json): müller → mueller, jørgen → joergen, đorđe → djordje; false if
-// it has none of those letters.
-func SecondForm(value string) (string, bool) {
-	seconds := letters().secondForms
-	found := false
-	var b strings.Builder
-	for _, c := range value {
-		if second, ok := seconds[c]; ok {
-			b.WriteString(second)
-			found = true
-		} else {
-			b.WriteRune(c)
+// SecondForms are a word's second spellings (letters.json): one per language group whose letters it has, and one with
+// every such group together: müller → mueller; åström → åstroem, aaström, aastroem. None if it has none of those letters.
+func SecondForms(value string) []string {
+	var groups []map[rune]string
+	for _, group := range letters().secondForms {
+		for _, c := range value {
+			if _, ok := group[c]; ok {
+				groups = append(groups, group)
+				break
+			}
 		}
 	}
-	return b.String(), found
+	replace := func(groups []map[rune]string) string {
+		var b strings.Builder
+		for _, c := range value {
+			found := false
+			for _, group := range groups {
+				if second, ok := group[c]; ok {
+					b.WriteString(second)
+					found = true
+					break
+				}
+			}
+			if !found {
+				b.WriteRune(c)
+			}
+		}
+		return b.String()
+	}
+	var forms []string
+	for _, group := range groups {
+		forms = append(forms, replace([]map[rune]string{group}))
+	}
+	if len(groups) > 1 {
+		forms = append(forms, replace(groups))
+	}
+	return forms
 }
 
 func IsCyrillic(c rune) bool { return c >= 'Ѐ' && c <= 'ԯ' }
@@ -304,7 +330,7 @@ func (f *tokenFactory) Create(text string) *Token {
 		}
 	} else if hasLatin || isNumber {
 		forms = append(forms, StripDiacritics(text))
-		if second, ok := SecondForm(text); ok {
+		for _, second := range SecondForms(text) {
 			forms = append(forms, StripDiacritics(second))
 		}
 	}

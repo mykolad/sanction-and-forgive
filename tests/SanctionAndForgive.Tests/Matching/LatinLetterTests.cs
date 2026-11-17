@@ -30,6 +30,11 @@ public class LatinLetterTests
         { "Oeuvre Logistique SARL", "Œuvre Logistique SARL", SubjectKind.Entity, Outcome.Match },
         { "Broendby Shipping ApS", "Brøndby Shipping ApS", SubjectKind.Entity, Outcome.Match },
 
+        // A word with letters of two groups keeps each group's reading as well as both together.
+        { "Astroem GmbH", "Åström GmbH", SubjectKind.Entity, Outcome.Match },
+        { "Aastrom GmbH", "Åström GmbH", SubjectKind.Entity, Outcome.Match },
+        { "Aastroem GmbH", "Åström GmbH", SubjectKind.Entity, Outcome.Match },
+
         // A folded letter with an accent on it decomposes to the letter and its mark: ǿ is ø, ǽ is æ.
         { "Orn Hansen", "Ǿrn Hansen", SubjectKind.Individual, Outcome.Match },
         { "Aegir Hansen", "Ǽgir Hansen", SubjectKind.Individual, Outcome.Match },

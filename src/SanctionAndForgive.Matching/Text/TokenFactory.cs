@@ -35,10 +35,7 @@ internal sealed class TokenFactory(IReadOnlyList<TransliterationTable> tables)
         else if (hasLatin || isNumber)
         {
             forms.Add(Normalizer.StripDiacritics(text));
-            if (Normalizer.SecondForm(text) is { } second)
-            {
-                forms.Add(Normalizer.StripDiacritics(second));
-            }
+            forms.AddRange(Normalizer.SecondForms(text).Select(Normalizer.StripDiacritics));
         }
 
         var distinct = forms.Where(form => form.Length > 0).Distinct(StringComparer.Ordinal).Take(MaxForms).ToArray();
