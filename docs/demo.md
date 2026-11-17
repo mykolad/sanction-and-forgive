@@ -7,6 +7,9 @@ administrator's sign-in (the owner's Entra account). The questions in italics ar
 Before you start: open the site, then **List status**, and check every list says *Current* (an *Overdue* list is fine
 for the demo: step 8 shows what it means).
 
+Press **Clear** before each example and leave the fields it doesn't name empty: the form keeps what was entered
+after a screening (to change one field and screen again), so a company left from the step before still counts.
+
 ## 1. A listed company, exact
 
 **Screen**, Company: `PJSC Rosneft Oil Company` → **Possible match found**: Match 99% on OFAC SDN, OFAC
