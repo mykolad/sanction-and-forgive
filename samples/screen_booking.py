@@ -61,8 +61,12 @@ def screen(reference, receiver, company, address):
                 time.sleep(wait)
                 continue
             if error.code == 400:
-                # Validation errors name the field, never quote its value.
-                problem = json.load(error)
+                # Validation errors name the field, never quote its value. An error body cut off or not JSON is
+                # still a refusal: the booking is held either way.
+                try:
+                    problem = json.load(error)
+                except (http.client.HTTPException, ConnectionError, TimeoutError, ValueError):
+                    problem = {}
                 print(f"{reference}: rejected: {json.dumps(problem.get('errors', {}))}", file=sys.stderr)
             else:
                 print(f"{reference}: the service answered {error.code}", file=sys.stderr)
@@ -91,8 +95,17 @@ def decide(result):
     return HOLD_NOT_CHECKED, f"hold: not checked ({outcome or 'no outcome'})"
 
 
+class UsageParser(argparse.ArgumentParser):
+    """argparse exits 2 on a usage error; 2 here means "held for review", so a usage error exits 1."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        print(f"{self.prog}: error: {message}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = UsageParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--booking", required=True, help="the booking's id (goes into the reference; no personal data)")
     parser.add_argument("--receiver", help="the receiving person")
     parser.add_argument("--company", help="the receiving company")
