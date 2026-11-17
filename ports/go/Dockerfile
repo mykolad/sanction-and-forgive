@@ -18,6 +18,8 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o /out/api ./cmd/api \
 FROM gcr.io/distroless/base-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/api /out/cli /app/
+# The licence, and the notices for the dictionaries derived from OpenCC and Unicode CLDR data (all embedded).
+COPY LICENSE THIRD-PARTY-NOTICES.txt /app/
 EXPOSE 8080
 ARG VERSION=dev
 ARG REVISION=

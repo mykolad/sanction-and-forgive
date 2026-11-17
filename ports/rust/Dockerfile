@@ -16,6 +16,8 @@ RUN cargo test --release --locked && cargo build --release --locked --bin api --
 FROM gcr.io/distroless/cc-debian12:nonroot
 WORKDIR /app
 COPY --from=build /src/ports/rust/target/release/api /src/ports/rust/target/release/cli /app/
+# The licence, and the notices for the dictionaries derived from OpenCC and Unicode CLDR data (all embedded).
+COPY LICENSE THIRD-PARTY-NOTICES.txt /app/
 EXPOSE 8080
 ARG VERSION=dev
 ARG REVISION=

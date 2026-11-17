@@ -167,7 +167,12 @@ What it says:
 
 Since #92 the Rust port, which production runs, compares Arabic-script names in their own script (`arabic.json`:
 vowel marks and tatweel dropped; alef forms, hamza seats, ya and alef maqsura, ta marbuta, Persian kaf and ya unified;
-Eastern digits read as ASCII). How such a name behaves in the .NET app is recorded in
+Eastern digits read as ASCII), reads Arabic name particles in Latin script alike (Abd al-Rahman, Abdulrahman, Abdel
+Rahman; al-Sayed, Elsayed; Nasr Allah, Nasrallah), and compares Chinese and Korean names in their own script
+(`cjk.json`, #93: adjacent Han or Hangul words joined, company forms such as 股份有限公司 and 주식회사 split off,
+traditional characters read as simplified with OpenCC's character table, Apache License 2.0; its licence and the
+changes made are in `THIRD-PARTY-NOTICES.txt`, which every image carries). How such a name behaves
+in the .NET app is recorded in
 `tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
 the same spelling matches in every script; Arabic vowel marks, tatweel and letter variants, Greek accents, a part of a
 Chinese or Korean name, a space inside one, traditional characters for simplified ones, and a Latin spelling of a name

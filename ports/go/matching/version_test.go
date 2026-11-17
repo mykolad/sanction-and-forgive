@@ -3,7 +3,7 @@ package matching
 import "testing"
 
 // The reference's MatcherVersion for the shipped dictionaries and default options (French country names, 2026-11-16).
-const referenceMatcherVersion = "62d0e84c5493"
+const referenceMatcherVersion = "40c70c232e7e"
 
 func TestMatcherVersion_IsTheReferences(t *testing.T) {
 	if got := NewScreener(DefaultOptions()).MatcherVersion; got != referenceMatcherVersion {
