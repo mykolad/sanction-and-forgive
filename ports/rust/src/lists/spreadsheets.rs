@@ -616,8 +616,9 @@ pub fn parse_new_zealand(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, 
 pub const BELGIUM_PROGRAMME: &str = "Belgian national list (royal decree of 28 December 2006, financing of terrorism)";
 
 /// Belgium's national terrorism list (XLSX, its first sheet): BelgiumParser in the reference. A row per number (first
-/// column); a number without a name is a place kept for someone no longer listed. Every party is a person; the national
-/// register number isn't kept, the date of birth goes in the remarks, the publication link is the official record.
+/// column); a number without a name is a place kept for someone no longer listed. A row with a given name is a person,
+/// one without is read both ways; the national register number isn't kept, the date of birth goes in the remarks, the
+/// publication link is the official record.
 pub fn parse_belgium(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
     let rows = xlsx_rows(input, "")?;
     let is_cell = |cell: &str, name: &str| cell.trim().eq_ignore_ascii_case(name);
@@ -646,7 +647,8 @@ pub fn parse_belgium(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Pars
         let Some(last) = last else {
             return Err(format_error(format!("Row {number} of Belgium's national list has no surname.")));
         };
-        let mut b = Builder::new(&number, SubjectType::Individual);
+        let kind = if first.is_some() { SubjectType::Individual } else { SubjectType::Unknown };
+        let mut b = Builder::new(&number, kind);
         b.programmes = Some(BELGIUM_PROGRAMME.to_string());
         b.listed_on = excel_date(cell(decree).as_deref());
         b.remarks = excel_date(cell(born).as_deref()).map(|date| format!("born {}", date.format("%Y-%m-%d")));

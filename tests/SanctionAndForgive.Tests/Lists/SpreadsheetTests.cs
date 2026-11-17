@@ -387,11 +387,13 @@ public class SpreadsheetTests
             BelgiumHeader,
             ["1", "JANSSENS", "Pieter Jan", "87.02.28-999.99", "31836", "46172", "46181", "22 mei 2026", "https://www.ejustice.just.fgov.be/eli/arrete/2026/05/30/fictief/moniteur"],
             ["2"],
-            ["3", "PEETERS", "Anna", "", "", "45380", "45391", "22 mei 2026", "zie het Staatsblad"]);
+            ["3", "PEETERS", "Anna", "", "", "45380", "45391", "22 mei 2026", "zie het Staatsblad"],
+            ["4", "Fictief Collectief", "", "", "", "45380", "45391", "22 mei 2026", ""]);
 
         var subjects = new BelgiumParser().Parse(file, CancellationToken.None).ToList();
 
-        Assert.Equal(["1", "3"], subjects.Select(subject => subject.ExternalId));
+        Assert.Equal(["1", "3", "4"], subjects.Select(subject => subject.ExternalId));
+        Assert.Equal((SubjectType.Unknown, "Fictief Collectief"), (subjects[2].Type, subjects[2].PrimaryName));
         Assert.Equal((SubjectType.Individual, "Pieter Jan JANSSENS"), (subjects[0].Type, subjects[0].PrimaryName));
         Assert.Equal((new DateOnly(2026, 5, 30), BelgiumParser.Programme, "born 1987-02-28"), (subjects[0].ListedOn, subjects[0].Programmes, subjects[0].Remarks));
         Assert.Equal("https://www.ejustice.just.fgov.be/eli/arrete/2026/05/30/fictief/moniteur", subjects[0].SourceUrl);

@@ -622,9 +622,9 @@ public static class FeedFiles
     }
 
     /// <summary>Belgium's national list as the FPS Finance publishes it: one sheet, named as the program named it
-    /// (Blad1), a title and notes, a header with an empty first column, then a row per number: people only, and now
-    /// and then a number with no name, a place kept for someone no longer listed. The national register number is
-    /// there (fictional), for the parsers to leave out.</summary>
+    /// (Blad1), a title and notes, a header with an empty first column, then a row per number, and now and then a
+    /// number with no name, a place kept for someone no longer listed. A company has its name and no given name. The
+    /// national register number is there (fictional), for the parsers to leave out.</summary>
     private static void Belgium(IReadOnlyList<FixtureSubject> subjects, string path)
     {
         static string Serial(DateOnly date) => (date.DayNumber - new DateOnly(1899, 12, 30).DayNumber).ToString(CultureInfo.InvariantCulture);
@@ -635,7 +635,7 @@ public static class FeedFiles
             new[] { string.Empty, "Naam", "Voornaam(voornamen)", "Rijkregisternummer", "Geboortedatum", "Datum KB", "Inwerkingtreding", "Laatste bevestiging", "Link naar de publicatie" },
         };
         var number = 0;
-        foreach (var subject in subjects.Where(subject => subject.Person))
+        foreach (var subject in subjects)
         {
             if (++number % 7 == 0)
             {
@@ -644,12 +644,18 @@ public static class FeedFiles
             }
 
             var born = new DateOnly(1970, 1, 1).AddDays(subject.Number * 97 % 9000);
-            rows.Add(
-            [
-                number.ToString(CultureInfo.InvariantCulture), subject.Family.ToUpperInvariant(), subject.Given!,
-                $"{born:yy.MM.dd}-{subject.Number % 1000:000}.{subject.Number % 97:00}", Serial(born), Serial(subject.ListedOn),
-                Serial(subject.ListedOn.AddDays(9)), "22 mei 2026", $"https://www.ejustice.just.fgov.be/eli/arrete/fictief/{subject.Number}",
-            ]);
+            rows.Add(subject.Person
+                ?
+                [
+                    number.ToString(CultureInfo.InvariantCulture), subject.Family.ToUpperInvariant(), subject.Given!,
+                    $"{born:yy.MM.dd}-{subject.Number % 1000:000}.{subject.Number % 97:00}", Serial(born), Serial(subject.ListedOn),
+                    Serial(subject.ListedOn.AddDays(9)), "22 mei 2026", $"https://www.ejustice.just.fgov.be/eli/arrete/fictief/{subject.Number}",
+                ]
+                :
+                [
+                    number.ToString(CultureInfo.InvariantCulture), subject.Family, string.Empty, string.Empty, string.Empty, Serial(subject.ListedOn),
+                    Serial(subject.ListedOn.AddDays(9)), "22 mei 2026", $"https://www.ejustice.just.fgov.be/eli/arrete/fictief/{subject.Number}",
+                ]);
         }
 
         const string main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";

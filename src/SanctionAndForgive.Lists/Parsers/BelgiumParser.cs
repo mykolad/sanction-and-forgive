@@ -4,8 +4,9 @@ namespace SanctionAndForgive.Lists.Parsers;
 /// against the financing of terrorism (royal decree of 28 December 2006; FPS Finance, Treasury): a workbook whose first
 /// sheet has a title and notes, a header (<c>Naam</c>, <c>Voornaam(voornamen)</c>, <c>Rijkregisternummer</c>,
 /// <c>Geboortedatum</c>, <c>Datum KB</c>, …, <c>Link naar de publicatie</c>), then a row per number, in the first column.
-/// A number whose row has no name is a place kept for someone no longer listed, and is left out. Every party listed so
-/// far is a person; dates are Excel serial numbers. The national register number isn't kept; the date of birth goes in
+/// A number whose row has no name is a place kept for someone no longer listed, and is left out. A row with a given name
+/// is a person; one without (an entity, should the list name one: every party so far is a person) is read both ways.
+/// Dates are Excel serial numbers. The national register number isn't kept; the date of birth goes in
 /// the remarks, and the link to the royal decree in the Belgian Official Journal is the official record.</summary>
 public sealed class BelgiumParser : IListParser
 {
@@ -46,7 +47,7 @@ public sealed class BelgiumParser : IListParser
 
             var birth = Spreadsheets.ExcelDate(Cell(born));
             var link = Cell(publication);
-            var builder = new SubjectBuilder(number, SubjectType.Individual)
+            var builder = new SubjectBuilder(number, first is null ? SubjectType.Unknown : SubjectType.Individual)
             {
                 Programmes = Programme,
                 ListedOn = Spreadsheets.ExcelDate(Cell(decree)),

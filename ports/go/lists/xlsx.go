@@ -313,9 +313,9 @@ func ExcelDate(value *string) *time.Time {
 const belgiumProgramme = "Belgian national list (royal decree of 28 December 2006, financing of terrorism)"
 
 // parseBelgium reads Belgium's national terrorism list (XLSX, its first sheet): BelgiumParser in the reference. A row
-// per number (first column); a number without a name is a place kept for someone no longer listed. Every party is a
-// person; the national register number isn't kept, the date of birth goes in the remarks, the publication link is the
-// official record.
+// per number (first column); a number without a name is a place kept for someone no longer listed. A row with a given
+// name is a person, one without is read both ways; the national register number isn't kept, the date of birth goes in
+// the remarks, the publication link is the official record.
 func parseBelgium(reader io.Reader) ([]ParsedSubject, error) {
 	rows, err := XlsxRows(reader, "")
 	if err != nil {
@@ -373,7 +373,11 @@ func parseBelgium(reader io.Reader) ([]ParsedSubject, error) {
 		if last == nil {
 			return nil, formatError("Row %s of Belgium's national list has no surname.", *number)
 		}
-		b := newBuilder(*number, Individual)
+		kind := Individual
+		if first == nil {
+			kind = Unknown
+		}
+		b := newBuilder(*number, kind)
 		b.Programmes = s(belgiumProgramme)
 		b.ListedOn = ExcelDate(cell(decree))
 		if birth := ExcelDate(cell(born)); birth != nil {
