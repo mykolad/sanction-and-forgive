@@ -1,6 +1,7 @@
 //! The Rust port of SanctionAndForgive.Matching: pure, deterministic, no I/O beyond its embedded dictionaries. Every
 //! rule follows the .NET reference exactly (docs/conformance.md), except where improvements land here first (owner's
-//! decision, 2026-11-17): Arabic-script names compared in their own script (data/arabic.json, #92). The speed work
+//! decision, 2026-11-17): Arabic-script names compared in their own script and Arabic name particles in Latin script
+//! (data/arabic.json, #92), Chinese and Korean names (data/cjk.json, #93). The speed work
 //! follows the Go port's (ports/go/README.md, "Speed and memory").
 
 /// The matcher's maps and sets: FxHash, not the default SipHash (which resists hash flooding, at a cost every lookup
@@ -33,7 +34,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "408565f8b3c2");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "62c78ee5a11c");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -167,6 +168,36 @@ mod tests {
     fn abd_before_a_surname_stays_a_given_name() {
         let (outcome, percent) = screen("Abdul Karimov", "Karimov Abdul", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// Chinese and Korean names (data/cjk.json, #93): spacing, traditional and simplified characters, and company forms
+    /// written without a space don't keep a name from matching.
+    #[test]
+    fn chinese_and_korean_names_match_however_spaced_or_written() {
+        for (query, listed, kind) in [
+            ("中兴通讯", "中兴通讯股份有限公司", SubjectKind::Entity),
+            ("中興通訊", "中兴通讯", SubjectKind::Entity),
+            ("中兴 通讯", "中兴通讯", SubjectKind::Entity),
+            ("華為技術有限公司", "华为技术有限公司", SubjectKind::Entity),
+            ("中兴通讯有限責任公司", "中兴通讯有限责任公司", SubjectKind::Entity),
+            ("김 정은", "김정은", SubjectKind::Individual),
+            ("주식회사 삼성전자", "삼성전자", SubjectKind::Entity),
+            ("삼성전자 주식회사", "삼성전자", SubjectKind::Entity),
+            ("삼성전자주식회사", "주식회사 삼성전자", SubjectKind::Entity),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// The company forms alone, or different names, never match.
+    #[test]
+    fn different_chinese_and_korean_names_dont_match() {
+        for (query, listed) in [("中兴通讯", "华为技术"), ("股份有限公司", "中兴通讯股份有限公司"), ("삼성전자", "현대자동차")]
+        {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Entity);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
     }
 
     /// The same normalisation never makes different names match.

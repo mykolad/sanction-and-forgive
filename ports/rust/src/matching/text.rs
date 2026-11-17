@@ -123,7 +123,115 @@ pub fn words(value: &str) -> Vec<String> {
     }
     // A "word" of Arabic marks or tatweel alone (a stray ـ) carries no letter: it isn't a word.
     words.retain(|word| !word.chars().all(is_arabic) || !arabic_form(word).is_empty());
-    words
+    join_and_split_cjk(words)
+}
+
+/// Chinese and Korean names compared in their own script (data/cjk.json, #93): the split-off forms, longest first,
+/// and each traditional Han character's simplified reading. Rust only for now; .NET and Go hash the file.
+struct CjkTable {
+    split_off: Vec<String>,
+    traditional: HashMap<char, char>,
+}
+
+static CJK: std::sync::LazyLock<CjkTable> = std::sync::LazyLock::new(|| {
+    let bytes = super::data::resource("cjk.json").expect("cjk.json is embedded");
+    let document: serde_json::Value = serde_json::from_slice(bytes).expect("cjk.json is JSON");
+    let mut split_off: Vec<String> = document["splitOff"]
+        .as_array()
+        .expect("cjk.json has splitOff")
+        .iter()
+        .map(|form| form.as_str().expect("a form is text").to_string())
+        .collect();
+    split_off.sort_by_key(|form| std::cmp::Reverse(form.chars().count()));
+    let one = |text: &str| {
+        let mut chars = text.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => c,
+            _ => panic!("cjk.json: '{text}' isn't one character."),
+        }
+    };
+    let traditional = document["traditional"]
+        .as_object()
+        .expect("cjk.json has traditional")
+        .iter()
+        .map(|(from, to)| (one(from), one(to.as_str().expect("a reading is text"))))
+        .collect();
+    CjkTable { split_off, traditional }
+});
+
+/// A Han character (the unified ideographs of the Basic Multilingual Plane, as words() sees letters).
+pub fn is_han(c: char) -> bool {
+    matches!(c as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x3005 | 0x3007)
+}
+
+/// A Hangul letter: syllables and jamo.
+pub fn is_hangul(c: char) -> bool {
+    matches!(c as u32, 0xAC00..=0xD7AF | 0x1100..=0x11FF | 0x3130..=0x318F | 0xA960..=0xA97F | 0xD7B0..=0xD7FF)
+}
+
+/// Han characters read as simplified ones (cjk.json traditional); a character for a character.
+pub fn simplified(text: &str) -> String {
+    text.chars().map(|c| CJK.traditional.get(&c).copied().unwrap_or(c)).collect()
+}
+
+/// Whether a word is wholly Han (1) or wholly Hangul (2), or neither (0).
+fn cjk_script(word: &str) -> u8 {
+    if !word.is_empty() && word.chars().all(is_han) {
+        1
+    } else if !word.is_empty() && word.chars().all(is_hangul) {
+        2
+    } else {
+        0
+    }
+}
+
+/// Adjacent words wholly in Han or wholly in Hangul as one word (neither script spaces a name as Latin does), then the
+/// company forms (cjk.json splitOff) split off either end as words of their own: the longest that fits, compared in
+/// simplified characters, again and again while at least two characters are left. 中兴 通讯股份有限公司 is 中兴通讯 and
+/// 股份有限公司; 주식회사 삼성전자 is 주식회사 and 삼성전자.
+fn join_and_split_cjk(words: Vec<String>) -> Vec<String> {
+    if !words.iter().any(|word| cjk_script(word) != 0) {
+        return words;
+    }
+    let mut joined: Vec<String> = Vec::with_capacity(words.len());
+    for word in words {
+        let script = cjk_script(&word);
+        match joined.last_mut() {
+            Some(last) if script != 0 && cjk_script(last) == script => last.push_str(&word),
+            _ => joined.push(word),
+        }
+    }
+    let mut out = Vec::with_capacity(joined.len() + 2);
+    for word in joined {
+        if cjk_script(&word) == 0 {
+            out.push(word);
+            continue;
+        }
+        let (mut before, mut after, mut core) = (Vec::new(), Vec::new(), word);
+        loop {
+            let chars: Vec<char> = core.chars().collect();
+            let folded = simplified(&core);
+            let longest = |at_end: bool| {
+                CJK.split_off
+                    .iter()
+                    .find(|form| if at_end { folded.ends_with(form.as_str()) } else { folded.starts_with(form.as_str()) })
+                    .map(|form| form.chars().count())
+            };
+            if let Some(k) = longest(true).filter(|&k| chars.len() >= k + 2) {
+                after.push(chars[chars.len() - k..].iter().collect::<String>());
+                core = chars[..chars.len() - k].iter().collect();
+            } else if let Some(k) = longest(false).filter(|&k| chars.len() >= k + 2) {
+                before.push(chars[..k].iter().collect::<String>());
+                core = chars[k..].iter().collect();
+            } else {
+                break;
+            }
+        }
+        out.extend(before);
+        out.push(core);
+        out.extend(after.into_iter().rev());
+    }
+    out
 }
 
 /// .NET's char.ToLowerInvariant: the simple lower case, except that the Turkish capital İ (U+0130) stays as it is.
@@ -601,6 +709,11 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
             // Words merged from Arabic name particles: each reading's readings (arabic_readings).
             forms = forms.iter().flat_map(|form| arabic_readings(form)).collect();
         }
+    } else if !has_latin && !is_number && chars.iter().all(|&c| is_han(c)) {
+        // A Han word compares in simplified characters (cjk.json), a character for a character.
+        forms.push(simplified(text));
+    } else if !has_latin && !is_number && chars.iter().all(|&c| is_hangul(c)) {
+        forms.push(text.to_string());
     } else if !has_latin && !is_number && chars.iter().any(|&c| is_arabic(c)) {
         let form = arabic_form(text);
         // Its length is the form's: a dropped mark or tatweel mustn't make a short name long enough to pass its cap.

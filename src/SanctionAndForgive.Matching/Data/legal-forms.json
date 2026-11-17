@@ -1,13 +1,13 @@
 {
-  "note": "Legal forms by canonical class. Each spelling is matched exactly against a normalised token in its own script (Latin spellings against Latin and look-alike forms, Cyrillic against Cyrillic). 'ambiguous' spellings are also plausible as a name or initials: they are stripped only when another core token remains. Phrases are replaced by their short form before tokens are classified, longest first; they're compared word for word as normalised, so a Turkish phrase is also given with İ, which invariant lower-casing keeps.",
+  "note": "Legal forms by canonical class. Each spelling is matched exactly against a normalised token in its own script (Latin spellings against Latin and look-alike forms, Cyrillic against Cyrillic). 'ambiguous' spellings are also plausible as a name or initials: they are stripped only when another core token remains. Han and Hangul forms are words of their own only in the Rust port, which splits them off a name (cjk.json). Phrases are replaced by their short form before tokens are classified, longest first; they're compared word for word as normalised, so a Turkish phrase is also given with İ, which invariant lower-casing keeps.",
   "forms": {
     "INC": { "unambiguous": ["inc", "incorporated"] },
     "CORP": { "unambiguous": ["corp", "corporation"] },
     "LLC": {
-      "unambiguous": ["llc", "ooo", "ооо", "tov", "тов", "тоо", "liability", "spzoo", "sro", "kft", "uab", "ood", "оод", "eood", "еоод", "taa", "таа", "zhshs", "жшс", "fze", "fzco", "fzc", "fzllc", "dmcc"],
+      "unambiguous": ["llc", "ooo", "ооо", "tov", "тов", "тоо", "liability", "spzoo", "sro", "kft", "uab", "ood", "оод", "eood", "еоод", "taa", "таа", "zhshs", "жшс", "fze", "fzco", "fzc", "fzllc", "dmcc", "有限责任公司", "有限責任公司", "유한회사", "유한책임회사"],
       "ambiguous": ["too", "sia"]
     },
-    "LTD": { "unambiguous": ["ltd", "limited"] },
+    "LTD": { "unambiguous": ["ltd", "limited", "有限公司"] },
     "LLP": { "unambiguous": ["llp"] },
     "LP": { "ambiguous": ["lp"] },
     "PLC": { "unambiguous": ["plc"] },
@@ -22,7 +22,7 @@
     "APS": { "unambiguous": ["aps"] },
     "KG": { "ambiguous": ["kg"], "unambiguous": ["spk"] },
     "JSC": {
-      "unambiguous": ["jsc", "ojsc", "cjsc", "pjsc", "oao", "zao", "pao", "оао", "зао", "пао", "нао", "пат", "прат", "ват", "зат", "zrt", "nyrt", "ead", "еад", "aat", "аат"],
+      "unambiguous": ["jsc", "ojsc", "cjsc", "pjsc", "oao", "zao", "pao", "оао", "зао", "пао", "нао", "пат", "прат", "ват", "зат", "zrt", "nyrt", "ead", "еад", "aat", "аат", "股份有限公司", "股份公司", "주식회사"],
       "ambiguous": ["ао", "ат", "ao", "at", "pat", "prat", "vat", "zat", "ад", "ақ"]
     },
     "SOLE": { "unambiguous": ["фоп", "fop", "спд", "spd", "чп", "пбоюл"], "ambiguous": ["ип", "ip", "пп", "pp"] },
