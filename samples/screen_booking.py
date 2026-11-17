@@ -15,6 +15,7 @@ key to the API's audit log, so it carries the booking id, never a name.
 import argparse
 import json
 import os
+import re
 import secrets
 import sys
 import time
@@ -40,7 +41,9 @@ def screen(reference, receiver, company, address):
         body["address"] = address
     data = json.dumps(body).encode("utf-8")
     deadline = time.monotonic() + GIVE_UP_AFTER_SECONDS
-    while True:
+    # Every attempt, wait and read fits in what's left of the deadline: past it, the booking is held, never later.
+    left = lambda: deadline - time.monotonic()
+    while left() > 1:
         request = urllib.request.Request(
             f"{BASE_URL}/api/v1/screenings",
             data=data,
@@ -48,11 +51,11 @@ def screen(reference, receiver, company, address):
             headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=min(30, left())) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
-            if error.code in (429, 503) and time.monotonic() < deadline:
-                wait = float(error.headers.get("Retry-After") or (3 if error.code == 503 else 1))
+            wait = float(error.headers.get("Retry-After") or (3 if error.code == 503 else 1))
+            if error.code in (429, 503) and wait < left():
                 print(f"{reference}: the service answered {error.code}, trying again in {wait:g} s", file=sys.stderr)
                 time.sleep(wait)
                 continue
@@ -63,25 +66,27 @@ def screen(reference, receiver, company, address):
             else:
                 print(f"{reference}: the service answered {error.code}", file=sys.stderr)
             return None
-        except (urllib.error.URLError, TimeoutError) as error:
-            if time.monotonic() < deadline:
-                print(f"{reference}: no answer ({error}), trying again in 3 s", file=sys.stderr)
+        except (urllib.error.URLError, ConnectionError, TimeoutError, ValueError) as error:
+            # No connection, a reset (ConnectionError), a timeout, or an answer cut off (ValueError: not JSON).
+            if left() > 4:
+                print(f"{reference}: no answer ({type(error).__name__}), trying again in 3 s", file=sys.stderr)
                 time.sleep(3)
                 continue
             return None
+    return None
 
 
 def decide(result):
     """The booking's decision from the overall outcome (docs/decisions.md)."""
     if result is None:
         return HOLD_NOT_CHECKED, "hold: not checked (the API couldn't answer)"
-    outcome = result["outcome"]
+    outcome = result.get("outcome")
     if outcome in ("Match", "Review"):
         return HOLD_FOR_REVIEW, f"hold for review: {outcome}"
-    if outcome == "Incomplete":
-        # A list couldn't be searched: no answer from it is not a clean answer.
-        return HOLD_NOT_CHECKED, "hold: incomplete (a list couldn't be checked)"
-    return RELEASE, "release: no match found in the lists searched"
+    if outcome == "NoMatch":
+        return RELEASE, "release: no match found in the lists searched"
+    # Incomplete (a list couldn't be searched), or an outcome this script doesn't know: never a clean answer.
+    return HOLD_NOT_CHECKED, f"hold: not checked ({outcome or 'no outcome'})"
 
 
 def main():
@@ -94,16 +99,19 @@ def main():
     if not (args.receiver or args.company or args.address):
         parser.error("give at least one of --receiver, --company, --address")
 
-    # Unique per check: the same booking screened again (after an edit, say) gets its own reference.
-    reference = f"booking-{args.booking}-{secrets.token_hex(3)}"[:64]
+    # Unique per check: the same booking screened again (after an edit, say) gets its own reference. The booking id is
+    # cut to leave room for the random part (64 characters in all), and characters a reference can't hold become "-".
+    booking = re.sub(r"[^A-Za-z0-9._:/-]", "-", args.booking)[:64 - len("booking--") - 6]
+    reference = f"booking-{booking}-{secrets.token_hex(3)}"
     result = screen(reference, args.receiver, args.company, args.address)
     code, decision = decide(result)
     print(f"{reference}: {decision}")
     if result is not None:
-        # What a person reviewing it needs, and what reproduces it: the lists as of when, and the versions.
-        print(f"  {result['summary']}")
-        lists = ", ".join(f"{item['code']} {item['version']} ({item['state']})" for item in result["lists"])
-        print(f"  matcher {result['matcherVersion']}, lists {lists}")
+        # What reproduces it: the lists as of when, their states, and the versions. Not the summary: it can quote an
+        # allow-listed name, which is what was entered.
+        lists = ", ".join(f"{item['code']} {item['version']} as of {item['asOf']} ({item['state']})" for item in result.get("lists", []))
+        print(f"  matcher {result.get('matcherVersion')}, allow-list {result.get('allowListVersion')}, lists {lists}")
+        print(f"  {result.get('disclaimer', '')}")
     return code
 
 

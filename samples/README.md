@@ -7,7 +7,7 @@ How a booking system (TMS, WMS, ERP) plugs into the screening API. Every name in
 |---|---|
 | `screening.http` | The requests: readiness, status, sources, a single screening (Latin and Cyrillic), a small stream. Opens in VS Code's REST Client or a JetBrains IDE. |
 | `screen_booking.py` | Screening a booking before it's confirmed: a reference per check, 503 (`warmingUp`, `busy`) and 429 waited out with `Retry-After`, the booking held on `Match`, `Review` and `Incomplete`, released only on `NoMatch`. Exit codes for a workflow engine. Prints no names. |
-| `screen_batch.py` | A CSV of shipments through the stream endpoint: a few hundred records per stream, resuming from `nextLine`, a results CSV with each list's best finding and the lists as searched. |
+| `screen_batch.py` | A CSV of shipments through the stream endpoint: a few hundred records per stream, resuming from `nextLine`, a results CSV with each list's best finding, the snapshot each row was screened against, and every snapshot's lists and versions; answers kept when a connection breaks. |
 
 Both scripts are Python 3.9+ with the standard library only. What each answer means for the booking:
 [docs/decisions.md](../docs/decisions.md). The API itself: [docs/api.md](../docs/api.md).
