@@ -1,5 +1,5 @@
 {
-  "note": "Chinese and Korean names compared in their own script (#93). Neither puts spaces where Latin script does, so adjacent words wholly in Han or wholly in Hangul are one word, and 'splitOff' are the company forms that are words of their own at either end of such a word, the longest that fits, again and again while at least two characters are left: legal forms (legal-forms.json) and generic words (generic.json), so 中兴通讯股份有限公司 is 中兴通讯 and a joint-stock company, and 주식회사 삼성전자 is 삼성전자 and one too. 'traditional' reads each traditional character as its simplified form (character for character, the first of OpenCC's TSCharacters.txt, Apache License 2.0, https://github.com/BYVoid/OpenCC), so the two spellings of a name compare equal. Read by the Rust port; .NET and Go hash it.",
+  "note": "Chinese and Korean names compared in their own script (#93). Neither puts spaces where Latin script does, so adjacent words wholly in Han or wholly in Hangul are one word, and 'splitOff' are the company forms that are words of their own at either end of such a word, the longest that fits, again and again while at least two characters are left: legal forms (legal-forms.json) and generic words (generic.json), so 中兴通讯股份有限公司 is 中兴通讯 and a joint-stock company, and 주식회사 삼성전자 is 삼성전자 and one too. 'traditional' reads each traditional character as its simplified form (character for character, the first of OpenCC's TSCharacters.txt, followed to the end of a chain, Apache License 2.0, https://github.com/BYVoid/OpenCC), so the two spellings of a name compare equal. Read by the Rust port; .NET and Go hash it.",
   "splitOff": ["股份有限公司", "有限责任公司", "有限公司", "股份公司", "集团公司", "集团", "控股", "公司", "주식회사", "유한책임회사", "유한회사"],
   "traditional": {
     "㑯": "㑔", "㑳": "㑇", "㑶": "㐹", "㓨": "刾", "㗲": "𠵾", "㘚": "㘎", "㜄": "㚯", "㜏": "㛣", "㜢": "𡞱", "㠏": "㟆", "㠣": "𫵷", "㥮": "㤘",
@@ -137,7 +137,7 @@
     "蒐": "搜", "蒓": "莼", "蒔": "莳", "蒕": "蒀", "蒞": "莅", "蒼": "苍", "蓀": "荪", "蓆": "席", "蓋": "盖", "蓮": "莲", "蓯": "苁", "蓴": "莼",
     "蓽": "荜", "蔄": "𬜬", "蔔": "卜", "蔘": "参", "蔞": "蒌", "蔣": "蒋", "蔥": "葱", "蔦": "茑", "蔭": "荫", "蔯": "𫈟", "蔿": "𫇭", "蕁": "荨",
     "蕆": "蒇", "蕎": "荞", "蕒": "荬", "蕓": "芸", "蕕": "莸", "蕘": "荛", "蕢": "蒉", "蕩": "荡", "蕪": "芜", "蕭": "萧", "蕷": "蓣", "薀": "蕰",
-    "薈": "荟", "薊": "蓟", "薌": "芗", "薑": "姜", "薔": "蔷", "薘": "荙", "薟": "莶", "薦": "荐", "薩": "萨", "薴": "苧", "薵": "䓓", "薹": "苔",
+    "薈": "荟", "薊": "蓟", "薌": "芗", "薑": "姜", "薔": "蔷", "薘": "荙", "薟": "莶", "薦": "荐", "薩": "萨", "薴": "苎", "薵": "䓓", "薹": "苔",
     "薺": "荠", "藍": "蓝", "藎": "荩", "藝": "艺", "藥": "药", "藪": "薮", "藭": "䓖", "藴": "蕴", "藶": "苈", "藹": "蔼", "藺": "蔺", "蘀": "萚",
     "蘄": "蕲", "蘆": "芦", "蘇": "苏", "蘊": "蕴", "蘋": "苹", "蘚": "藓", "蘞": "蔹", "蘟": "𦻕", "蘢": "茏", "蘭": "兰", "蘺": "蓠", "蘿": "萝",
     "虆": "蔂", "虉": "𬟁", "處": "处", "虛": "虚", "虜": "虏", "號": "号", "虧": "亏", "虯": "虬", "蛺": "蛱", "蛻": "蜕", "蜆": "蚬", "蝀": "𬟽",

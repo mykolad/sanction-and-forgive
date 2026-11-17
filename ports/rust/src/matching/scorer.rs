@@ -253,7 +253,7 @@ impl<'a> NameScorer<'a> {
             && query.core.len() == 1
             && listed.core.len() == 1
             && pairs.len() == 1
-            && query.core[0].len() < 4
+            && query.core[0].is_short_core()
             && !intersects(&query.legal_classes, &listed.legal_classes)
         {
             let reason =

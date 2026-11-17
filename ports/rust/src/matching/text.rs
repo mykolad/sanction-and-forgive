@@ -40,6 +40,12 @@ impl Token {
         self.length as usize
     }
 
+    /// Whether this word is too short to name a company on its own (the short-core cap): under four letters, or for a
+    /// Han or Hangul word, where each character is a syllable, a single character.
+    pub fn is_short_core(&self) -> bool {
+        self.length < if cjk_script(&self.text) != 0 { 2 } else { 4 }
+    }
+
     /// The key for weights and postings: the first fold key, or the text itself.
     pub fn key(&self) -> &str {
         self.folds.first().map(String::as_str).unwrap_or(&self.text)
@@ -105,7 +111,8 @@ pub fn words(value: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
     for (i, &c) in text.iter().enumerate() {
-        if is_letter_or_digit(c) || is_mark(c) {
+        // 〇 (U+3007), the ideographic zero, is a number letter, not a letter: kept, so 七〇八 isn't 七八.
+        if is_letter_or_digit(c) || is_mark(c) || c == '\u{3007}' {
             word.push(c);
         } else if APOSTROPHES.contains(c) && !word.is_empty() && i + 1 < text.len() && is_letter(text[i + 1]) {
             // Inside a word: deleted, so the word stays whole.

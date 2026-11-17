@@ -34,7 +34,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "62c78ee5a11c");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "e6a5156d037b");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -215,6 +215,37 @@ mod tests {
             assert!(cell.best.is_some(), "{address}: {:?} {:?}", cell.outcome, cell.percent);
         }
         assert_eq!(text::words("中国, 北京, 1"), ["中国", "北京", "1"]);
+    }
+
+    /// A two-character Chinese or Korean core is a name of its own, like a Latin one of six letters: an exact match stays
+    /// a Match with a generic word split off. A single character is still a short name.
+    #[test]
+    fn a_two_character_chinese_or_korean_name_is_not_short() {
+        for name in ["中兴集团", "华为公司", "中兴", "삼성"] {
+            let (outcome, percent) = screen(name, name, SubjectKind::Entity);
+            assert_eq!(outcome, Some(Outcome::Match), "{name}: {percent:?}");
+        }
+        let (outcome, percent) = screen("华", "华", SubjectKind::Entity);
+        assert_eq!(outcome, Some(Outcome::Review), "{percent:?}");
+    }
+
+    /// Every traditional character reads as its final simplified form, so a chain (薴 to 苧 to 苎) reads alike from
+    /// either end.
+    #[test]
+    fn traditional_characters_read_to_the_end_of_a_chain() {
+        assert_eq!(text::simplified("王薴華"), text::simplified("王苧華"));
+        let (outcome, percent) = screen("王薴華", "王苧華", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// The ideographic zero is a character of the name: 七〇八研究所 isn't 七八研究所, at most a possible match for a
+    /// person to review, as one letter more in a long Latin name is.
+    #[test]
+    fn the_ideographic_zero_is_kept() {
+        let (outcome, percent) = screen("七〇八研究所", "七八研究所", SubjectKind::Entity);
+        assert_ne!(outcome, Some(Outcome::Match), "{percent:?}");
+        let (outcome, percent) = screen("七〇八研究所", "七〇八研究所", SubjectKind::Entity);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
     }
 
     /// A repeated Han or Hangul character makes another name, not a spelling of the same one.
