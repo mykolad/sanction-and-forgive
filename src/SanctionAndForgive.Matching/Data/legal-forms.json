@@ -1,5 +1,5 @@
 {
-  "note": "Legal forms by canonical class. Each spelling is matched exactly against a normalised token in its own script (Latin spellings against Latin and look-alike forms, Cyrillic against Cyrillic). 'ambiguous' spellings are also plausible as a name or initials: they are stripped only when another core token remains. Phrases are replaced by their short form before tokens are classified, longest first.",
+  "note": "Legal forms by canonical class. Each spelling is matched exactly against a normalised token in its own script (Latin spellings against Latin and look-alike forms, Cyrillic against Cyrillic). 'ambiguous' spellings are also plausible as a name or initials: they are stripped only when another core token remains. Phrases are replaced by their short form before tokens are classified, longest first; they're compared word for word as normalised, so a Turkish phrase is also given with İ, which invariant lower-casing keeps.",
   "forms": {
     "INC": { "unambiguous": ["inc", "incorporated"] },
     "CORP": { "unambiguous": ["corp", "corporation"] },
@@ -97,10 +97,13 @@
     "akciova spolocnost": "as",
     "anonim şirketi": "as",
     "anonim sirketi": "as",
+    "anonİm şİrketİ": "as",
     "ltd şti": "ltd",
     "ltd sti": "ltd",
+    "ltd ştİ": "ltd",
     "limited şirketi": "ltd",
     "limited sirketi": "ltd",
+    "lİmİted şİrketİ": "ltd",
     "co ltd": "ltd",
     "co limited": "ltd",
     "company limited": "ltd",
