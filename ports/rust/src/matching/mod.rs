@@ -337,6 +337,16 @@ mod tests {
         }
     }
 
+    /// Joining never loses what the words as written align: Hua Wei Huawei against Wei Huawei Hua is the same three
+    /// words reordered.
+    #[test]
+    fn joining_words_never_loses_the_words_as_written() {
+        let (outcome, percent) = screen("Hua Wei Huawei", "Wei Huawei Hua", SubjectKind::Entity);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+        let (outcome, percent) = screen("Hua Wei Huawei", "Hua Wei Huawei", SubjectKind::Entity);
+        assert_eq!((outcome, percent), (Some(Outcome::Match), Some(99)));
+    }
+
     /// Joining is for words that read together as the other side's word: different names stay apart.
     #[test]
     fn joining_words_never_makes_different_names_match() {

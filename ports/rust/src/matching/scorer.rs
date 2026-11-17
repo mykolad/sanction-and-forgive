@@ -165,9 +165,34 @@ impl<'a> NameScorer<'a> {
         e.percent = 0;
         e.contained = false;
         e.joined = None;
-        let value = self.evaluate(query, listed, weak_alias, weight, &mut e, false);
+        let mut value = self.evaluate(query, listed, weak_alias, weight, &mut e, false);
+        if e.joined.is_some() {
+            let mut plain = Evaluation::default();
+            value = self.better_unjoined(query, listed, weak_alias, weight, &mut plain, false, value).unwrap_or(value);
+        }
         self.scratch = e;
         value
+    }
+
+    /// Where words were joined, the names scored again with their words as they are: joining two words can lose an
+    /// alignment the words had (Hua Wei Huawei / Wei Huawei Hua). The unjoined reading's value when it's at least as
+    /// good (a tie goes to the words as written), and its evaluation in e.
+    #[allow(clippy::too_many_arguments)]
+    fn better_unjoined(
+        &mut self,
+        query: &NameForm,
+        listed: &NameForm,
+        weak_alias: bool,
+        weight: &mut dyn FnMut(&Token) -> f64,
+        e: &mut Evaluation,
+        explain: bool,
+        joined: ScoreValue,
+    ) -> Option<ScoreValue> {
+        let try_join = self.try_join;
+        self.try_join = false;
+        let plain = self.evaluate(query, listed, weak_alias, weight, e, explain);
+        self.try_join = try_join;
+        (plain.percent >= joined.percent).then_some(plain)
     }
 
     /// Scores query against the alias again, the same way, and explains the result.
@@ -179,7 +204,14 @@ impl<'a> NameScorer<'a> {
         weight: &mut dyn FnMut(&Token) -> f64,
     ) -> NameScoreDetails {
         let mut e = Evaluation::default();
-        self.evaluate(query, listed, weak_alias, weight, &mut e, true);
+        let value = self.evaluate(query, listed, weak_alias, weight, &mut e, true);
+        if e.joined.is_some() {
+            // The same choice as score's.
+            let mut plain = Evaluation::default();
+            if self.better_unjoined(query, listed, weak_alias, weight, &mut plain, true, value).is_some() {
+                e = plain;
+            }
+        }
         if let Some(reason) = e.zero {
             return NameScoreDetails { explanation: vec![reason.to_string()], words: Vec::new(), notes: vec![reason.to_string()] };
         }

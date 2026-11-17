@@ -307,15 +307,10 @@ impl ListIndex {
             }
         };
         let (by_fold, by_joined) = (&self.aliases_by_fold, &self.aliases_by_joined);
-        // Two entered words the list writes as one, and below, an entered word the list writes as two
-        // (NameForm::joined).
-        for k in query.entity.joined.iter().chain(query.person.joined.iter()).filter(|k| !k.is_empty()) {
-            vote(by_fold, &fold_key(k), 3, true);
-        }
-        for token in distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned()) {
-            for k in lookup_keys(&token) {
+        let tokens = distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned());
+        for token in &tokens {
+            for k in lookup_keys(token) {
                 vote(by_fold, k, 3, false);
-                vote(by_joined, k, 3, true);
             }
             for &group in token.cognate_groups() {
                 for fold in &self.data.cognate_folds[group] {
@@ -337,6 +332,26 @@ impl ListIndex {
             }
             for other in near {
                 vote(by_fold, other, 1, false);
+            }
+        }
+        // Then words one side writes as two (NameForm::joined), each key once though the company and person readings
+        // both have it, and after the words themselves, so an alias found as written wins a tie (votes are counted in
+        // the order of the first vote).
+        let mut keys: Vec<String> = Vec::new();
+        for token in &tokens {
+            for k in lookup_keys(token) {
+                if !keys.iter().any(|seen| seen == k) {
+                    keys.push(k.to_string());
+                    vote(by_joined, k, 3, true);
+                }
+            }
+        }
+        let mut joined: Vec<String> = Vec::new();
+        for k in query.entity.joined.iter().chain(query.person.joined.iter()).filter(|k| !k.is_empty()) {
+            let key = fold_key(k);
+            if !joined.contains(&key) {
+                vote(by_fold, &key, 3, true);
+                joined.push(key);
             }
         }
         let mut ids = voted.clone();
