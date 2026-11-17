@@ -13,6 +13,12 @@ pub struct NameForm {
     pub initials: Vec<TokenRef>,
     pub legal_only: bool,
     pub is_person: bool,
+    /// For each two adjacent core words, the two read as one: their first Latin readings joined (Rust first, #93). A
+    /// name that writes as one word what another writes as two (Zhongxing / Zhong Xing, Jongun / Jong Un, McDonald /
+    /// Mc Donald) is found and aligned by it, the one word's reading being exactly the two's. Empty where the two
+    /// can't be read as one: a number, a single letter, a word with no Latin reading, or two that read as a legal form,
+    /// a generic word or a stop word (L TD isn't a word).
+    pub joined: Vec<String>,
 }
 
 impl NameForm {
@@ -48,6 +54,34 @@ pub struct NameParser<'a> {
 impl NameParser<'_> {
     /// A name read as a company: legal forms and generic words stripped from the ends.
     pub fn entity(&self, tokens: &[RawToken]) -> NameForm {
+        self.with_joined(self.entity_form(tokens))
+    }
+
+    /// A name read as a person's: honorifics dropped, single letters kept as initials.
+    pub fn person(&self, tokens: &[RawToken]) -> NameForm {
+        self.with_joined(self.person_form(tokens))
+    }
+
+    fn with_joined(&self, mut form: NameForm) -> NameForm {
+        form.joined = form.core.windows(2).map(|pair| self.joined(&pair[0], &pair[1])).collect();
+        form
+    }
+
+    /// Two adjacent words read as one (NameForm::joined), or empty.
+    fn joined(&self, a: &Token, b: &Token) -> String {
+        let readable = |t: &Token| !t.is_number && !t.folds.is_empty() && t.len() > 1;
+        if !readable(a) || !readable(b) {
+            return String::new();
+        }
+        let joined = format!("{}{}", a.forms[0], b.forms[0]);
+        let data = self.data;
+        if data.legal_forms.contains_key(&joined) || data.generic.contains_key(&joined) || data.stop_words.contains(&joined) {
+            return String::new();
+        }
+        joined
+    }
+
+    fn entity_form(&self, tokens: &[RawToken]) -> NameForm {
         let mut items: Vec<Classified> = Vec::new();
         for raw in tokens {
             let (class, legal_class, generic) = self.classify(&raw.token);
@@ -129,8 +163,7 @@ impl NameParser<'_> {
         NameForm { core, generic, legal_classes: classes, ..Default::default() }
     }
 
-    /// A name read as a person's: honorifics dropped, single letters kept as initials.
-    pub fn person(&self, tokens: &[RawToken]) -> NameForm {
+    fn person_form(&self, tokens: &[RawToken]) -> NameForm {
         let mut form = NameForm { is_person: true, ..Default::default() };
         for raw in tokens {
             if let Some(initials) = &raw.initials {
