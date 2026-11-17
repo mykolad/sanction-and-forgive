@@ -386,6 +386,8 @@ mod tests {
             ("Kim Jong Un", "Kim Yo Jong"),
             ("Ri Yong Ho", "Ri Yong Nam"),
             ("Kim Mira", "Kim Mina"),
+            ("Kim Mi-ra", "Kim Mi-na"),
+            ("Kim Mi Ra", "Kim Mi Na"),
             ("Carl Jung", "Carl Chung"),
             ("Maria Jung", "Maria Chung"),
         ] {

@@ -806,10 +806,23 @@ impl<'a> Tokenizer<'a> {
             .cloned()
             .collect();
         let korean = super::korean::is_korean_name(&named);
+        // Each word's role in the Korean name (korean::roles over the named words), by its position among all words.
+        let mut roles: Vec<Option<super::korean::Role>> = vec![None; words.len()];
+        if korean {
+            let mut named_roles = super::korean::roles(&named).into_iter();
+            for (word, role) in words.iter().zip(roles.iter_mut()) {
+                if !self.data.honorifics.contains(word.as_str()) && !self.data.stop_words.contains(word.as_str()) {
+                    *role = named_roles.next();
+                }
+            }
+        }
         let mut i = 0;
         while i < words.len() {
             if !join_initials || !is_single_letter(&words[i]) {
-                let token = if korean { self.get_korean(&words[i]) } else { self.get(&words[i]) };
+                let token = match roles[i] {
+                    Some(role) => self.get_korean(&words[i], role),
+                    None => self.get(&words[i]),
+                };
                 tokens.push(RawToken { token, initials: None });
                 i += 1;
                 continue;
@@ -827,13 +840,13 @@ impl<'a> Tokenizer<'a> {
     }
 
     /// The word as part of a Korean name: its token with the Korean readings, interned apart from the plain word.
-    fn get_korean(&mut self, text: &str) -> TokenRef {
-        let key = format!("\u{1}ko:{text}");
+    fn get_korean(&mut self, text: &str, role: super::korean::Role) -> TokenRef {
+        let key = format!("\u{1}ko:{role:?}:{text}");
         if let Some(token) = self.cache.as_ref().and_then(|cache| cache.get(&key)) {
             return token.clone();
         }
         let mut token = self.data.token(text);
-        token.korean = Some(super::korean::readings(text).into_boxed_slice());
+        token.korean = Some(super::korean::readings(text, role).into_boxed_slice());
         let token = Arc::new(token);
         if let Some(cache) = &mut self.cache {
             cache.insert(key, token.clone());

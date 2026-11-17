@@ -126,17 +126,49 @@ fn syllable_readings(s: &Syllable) -> Vec<String> {
     out
 }
 
+/// The part a word plays in a Korean name, which decides the spelling rules that apply to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    /// The family name: it starts the name, and spells a surname (Ri, Lee, Yi).
+    Surname,
+    /// The given name's first syllable(s) (Ryong, Yong): a word's start for the South's initial-sound rule.
+    GivenStart,
+    /// The rest of a given name written apart (Mi-ra's ra): inside the name, so neither rule applies.
+    GivenRest,
+}
+
+/// Each word's role in a Korean name (is_korean_name): the surname first if the first word spells one, else last; the
+/// given name's first word next to it; the rest after.
+pub fn roles(words: &[String]) -> Vec<Role> {
+    let surname_first = KOREAN.surnames.contains_key(&latin(&words[0]));
+    let surname_at = if surname_first { 0 } else { words.len() - 1 };
+    let given_start = if surname_first { 1 } else { 0 };
+    (0..words.len())
+        .map(|i| {
+            if i == surname_at {
+                Role::Surname
+            } else if i == given_start {
+                Role::GivenStart
+            } else {
+                Role::GivenRest
+            }
+        })
+        .collect()
+}
+
 /// A word's Korean readings (in a name is_korean_name accepts): one per split into syllables and per initial-sound
-/// variant, and one per surname group it spells. Prefixed so they never meet a word's other readings or fold keys.
-pub fn readings(word: &str) -> Vec<String> {
+/// variant (on the word's first syllable, unless it continues a given name), and one per surname group it spells (the
+/// surname only). Prefixed so they never meet a word's other readings or fold keys.
+pub fn readings(word: &str, role: Role) -> Vec<String> {
     let word = latin(word);
     let mut out: Vec<String> = Vec::new();
     for parse in parses(&word) {
         let mut readings = vec![String::new()];
         for (index, syllable) in parse.iter().enumerate() {
-            // The South changes an initial r or n at the start of a word only: inside it (Mira, Mina) a consonant stays.
+            // The South changes an initial r or n at the start of a name's part only: inside it (Mira, Mina; Mi-ra,
+            // Mi-na) a consonant stays.
             let mut variants = syllable_readings(syllable);
-            if index > 0 {
+            if index > 0 || role == Role::GivenRest {
                 variants.truncate(1);
             }
             readings = readings
@@ -152,8 +184,10 @@ pub fn readings(word: &str) -> Vec<String> {
             }
         }
     }
-    if let Some(groups) = KOREAN.surnames.get(&word) {
-        out.extend(groups.iter().map(|g| format!("\u{1}ko-surname:{g}")));
+    if role == Role::Surname {
+        if let Some(groups) = KOREAN.surnames.get(&word) {
+            out.extend(groups.iter().map(|g| format!("\u{1}ko-surname:{g}")));
+        }
     }
     out
 }
@@ -163,7 +197,7 @@ mod tests {
     use super::*;
 
     fn shares(a: &str, b: &str) -> bool {
-        let (x, y) = (readings(a), readings(b));
+        let (x, y) = (readings(a, Role::Surname), readings(b, Role::Surname));
         x.iter().any(|r| y.contains(r))
     }
 
