@@ -238,6 +238,17 @@ mod tests {
         assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
     }
 
+    /// A character beyond the Basic Multilingual Plane is Han too: 王𠵾 (simplified, extension B) is 王㗲 (traditional),
+    /// and its repeated characters still count.
+    #[test]
+    fn han_characters_beyond_the_basic_plane_are_han() {
+        let (outcome, percent) = screen("王𠵾", "王㗲", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+        let (outcome, percent) = screen("王𠵾", "王𠵾𠵾", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::NoMatch), "{percent:?}");
+        assert_eq!(text::words("王𠵾华 有限公司"), ["王𠵾华", "有限公司"]);
+    }
+
     /// The ideographic zero is a character of the name: 七〇八研究所 isn't 七八研究所, at most a possible match for a
     /// person to review, as one letter more in a long Latin name is.
     #[test]

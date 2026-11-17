@@ -70,9 +70,12 @@ pub struct RawToken {
 const APOSTROPHES: &str = "'’ʼʻ`′‘";
 
 /// A character's category as .NET's char checks see it: one beyond the Basic Multilingual Plane is two UTF-16 units,
-/// each a surrogate (Cs), so never a letter, a digit or a mark, and a word ends there.
+/// each a surrogate (Cs), so never a letter, a digit or a mark, and a word ends there. Except a Han character there
+/// (Rust first, #93): a letter, as in the Basic Multilingual Plane, so a name written with one keeps it.
 pub fn category(c: char) -> GeneralCategory {
-    if c as u32 > 0xFFFF {
+    if c as u32 > 0xFFFF && is_han(c) {
+        GeneralCategory::OtherLetter
+    } else if c as u32 > 0xFFFF {
         GeneralCategory::Surrogate
     } else {
         get_general_category(c)
@@ -166,9 +169,14 @@ static CJK: std::sync::LazyLock<CjkTable> = std::sync::LazyLock::new(|| {
     CjkTable { split_off, traditional }
 });
 
-/// A Han character (the unified ideographs of the Basic Multilingual Plane, as words() sees letters).
+/// A Han character: the unified and compatibility ideographs, in the Basic Multilingual Plane and beyond it.
 pub fn is_han(c: char) -> bool {
-    matches!(c as u32, 0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x3005 | 0x3007)
+    // The supplementary ideographic planes too (extensions B to H, compatibility ideographs): 256 of cjk.json's
+    // simplified readings are there.
+    matches!(
+        c as u32,
+        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x3005 | 0x3007 | 0x20000..=0x2FA1F | 0x30000..=0x323AF
+    )
 }
 
 /// A Hangul letter: syllables and jamo.
