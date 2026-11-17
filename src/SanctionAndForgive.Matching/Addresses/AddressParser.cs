@@ -21,10 +21,15 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
     {
         string? country = sourceCountryCode is { Length: 2 } code && data.CountryCodes.Contains(code.ToUpperInvariant()) ? code.ToUpperInvariant() : null;
         var words = Normalizer.Words(raw);
+        var parts = Parts(raw, words.Count);
+        var followed = false; // a final ISO code follows the last word, as a country name would
+
         if (TrailingCode().Match(raw) is { Success: true } trailing && data.CountryCodes.Contains(trailing.Groups[1].Value))
         {
             country ??= trailing.Groups[1].Value;
             words.RemoveAt(words.Count - 1);
+            parts.RemoveAt(parts.Count - 1);
+            followed = true;
         }
 
         var tokens = words.Select(tokenizer.Get).ToList();
@@ -36,7 +41,7 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         {
             if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch)
             {
-                if (NamesAStreet(tokens, i))
+                if (NamesAStreet(tokens, parts, i, countryMatch.Length, followed))
                 {
                     // The whole name is the street's: no country or place within it ("rue de la République
                     // démocratique du Congo" is neither the DRC nor the Congo).
@@ -80,11 +85,21 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         return new AddressForm(raw, [.. remaining], [.. numbers], [.. places.Distinct()], country ?? namedCountry, impliedCountry);
     }
 
-    /// <summary>Whether the country name starting at <paramref name="start"/> follows a street type and one or two
-    /// particles, so it names the street (<c>12 rue de Malte, Paris</c> is in France, not Malta). A particle is required:
-    /// commas are gone by now, and <c>Sheikh Zayed Road, UAE</c> must still name its country.</summary>
-    private bool NamesAStreet(List<Token> tokens, int start)
+    /// <summary>Whether the country name of <paramref name="length"/> words starting at <paramref name="start"/> names
+    /// a street: after a street type and one or two particles (<c>12 rue de Malte, Paris</c> is in France, not Malta);
+    /// right after a street type in the same part of the address (<paramref name="parts"/>), unless it ends the address
+    /// (<c>Via Germania 12</c> is a street, <c>12 Example Avenue, Germany, 10115</c> and <c>Some Road Malta</c> name
+    /// their countries); or right before a street type written after the name, in the same part (<c>Almanya Caddesi
+    /// 12</c>, <c>Jordan Road</c>). A final ISO code (<paramref name="followed"/>) follows the last word as a country
+    /// name would: <c>Via Germania, IT</c> is read as <c>Via Germania, Italia</c> is.</summary>
+    private bool NamesAStreet(List<Token> tokens, List<int> parts, int start, int length, bool followed)
     {
+        var end = start + length;
+        if (end < tokens.Count && parts[end] == parts[end - 1] && Is(tokens[end], data.StreetSuffixes))
+        {
+            return true;
+        }
+
         var i = start - 1;
         var particles = 0;
         while (i >= 0 && particles < 2 && Is(tokens[i], data.StreetParticles))
@@ -93,8 +108,25 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
             particles++;
         }
 
-        return particles > 0 && i >= 0 && Is(tokens[i], data.StreetWords);
+        return i >= 0 && Is(tokens[i], data.StreetWords) && (particles > 0 || (parts[i] == parts[start] && (end < tokens.Count || followed)));
     }
+
+    /// <summary>The parts of an address that commas, semicolons and line breaks separate: each word's part, in order.
+    /// Should the parts' words ever differ from the whole's, every word is a part of its own, so a country name never
+    /// names a street for want of a comma.</summary>
+    private static List<int> Parts(string raw, int count)
+    {
+        var parts = new List<int>(count);
+        var pieces = raw.Split(PartSeparators);
+        for (var i = 0; i < pieces.Length; i++)
+        {
+            parts.AddRange(Enumerable.Repeat(i, Normalizer.Words(pieces[i]).Count));
+        }
+
+        return parts.Count == count ? parts : [.. Enumerable.Range(0, count).Select(i => -1 - i)];
+    }
+
+    private static readonly char[] PartSeparators = [',', ';', '\n', '\r', '\uFF0C', '\uFF1B', '\u3001'];
 
     private static bool Is(Token token, HashSet<string> words) => words.Contains(token.Text) || token.Forms.Any(words.Contains);
 

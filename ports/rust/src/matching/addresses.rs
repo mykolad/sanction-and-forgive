@@ -58,12 +58,17 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
         country = code;
     }
     let mut ws = words(raw);
+    let mut parts = address_parts(raw, ws.len());
+    // A final ISO code follows the last word, as a country name would.
+    let mut followed = false;
     if let Some(code) = trailing_code(raw) {
         if data.country_codes.contains(&code) && !ws.is_empty() {
             if country.is_empty() {
                 country = code;
             }
             ws.pop();
+            parts.pop();
+            followed = true;
         }
     }
 
@@ -84,7 +89,7 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
     let mut i = 0;
     while i < tokens.len() {
         if let Some((code, length)) = lookup(&tokens, i, data.max_country_words, &data.countries) {
-            if names_a_street(data, &tokens, i) {
+            if names_a_street(data, &tokens, &parts, i, length, followed) {
                 // The whole name is the street's: no country or place within it ("rue de la République démocratique du
                 // Congo" is neither the DRC nor the Congo).
                 for token in &tokens[i..i + length] {
@@ -120,17 +125,41 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
 }
 
 /// The longest name starting at start, on the words' own text or one of their Latin readings.
-/// The country name starting at start follows a street type and one or two particles, so it names the street ("12 rue de
-/// Malte, Paris" is in France). A particle is required: commas are gone, and "Sheikh Zayed Road, UAE" must still name
-/// its country.
-fn names_a_street(data: &MatcherData, tokens: &[TokenRef], start: usize) -> bool {
+/// The country name of length words starting at start names a street: after a street type and one or two particles ("12
+/// rue de Malte, Paris" is in France); right after a street type in the same part of the address, unless it ends the
+/// address ("Via Germania 12" is a street, "12 Example Avenue, Germany, 10115" and "Some Road Malta" name their
+/// countries); or right before a street type written after the name, in the same part ("Almanya Caddesi 12", "Jordan
+/// Road"). A final ISO code (followed) follows the last word as a country name would: "Via Germania, IT" is read as "Via
+/// Germania, Italia" is.
+fn names_a_street(data: &MatcherData, tokens: &[TokenRef], parts: &[i64], start: usize, length: usize, followed: bool) -> bool {
     let is = |token: &TokenRef, words: &HashSet<String>| words.contains(&token.text) || token.forms.iter().any(|f| words.contains(f));
+    let end = start + length;
+    if end < tokens.len() && parts[end] == parts[end - 1] && is(&tokens[end], &data.street_suffixes) {
+        return true;
+    }
     let (mut i, mut particles) = (start, 0);
     while i > 0 && particles < 2 && is(&tokens[i - 1], &data.street_particles) {
         i -= 1;
         particles += 1;
     }
-    particles > 0 && i > 0 && is(&tokens[i - 1], &data.street_words)
+    i > 0 && is(&tokens[i - 1], &data.street_words) && (particles > 0 || (parts[i - 1] == parts[start] && (end < tokens.len() || followed)))
+}
+
+/// The parts of an address that commas, semicolons and line breaks separate, as each word's part in order. Should the
+/// parts' words ever differ from the whole's, every word is a part of its own, so a country name never names a street
+/// for want of a comma.
+fn address_parts(raw: &str, count: usize) -> Vec<i64> {
+    let separators = [',', ';', '\n', '\r', '\u{FF0C}', '\u{FF1B}', '\u{3001}'];
+    let parts: Vec<i64> = raw
+        .split(|c| separators.contains(&c))
+        .enumerate()
+        .flat_map(|(i, piece)| std::iter::repeat_n(i as i64, words(piece).len()))
+        .collect();
+    if parts.len() == count {
+        parts
+    } else {
+        (0..count as i64).map(|i| -1 - i).collect()
+    }
 }
 
 fn lookup<'m, T>(tokens: &[TokenRef], start: usize, max_words: usize, names: &'m HashMap<String, T>) -> Option<(&'m T, usize)> {

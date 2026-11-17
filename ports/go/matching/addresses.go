@@ -57,11 +57,15 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 		country = code
 	}
 	words := Words(raw)
+	parts := addressParts(raw, len(words))
+	followed := false // a final ISO code follows the last word, as a country name would
 	if code, ok := trailingCode(raw); ok && p.data.CountryCodes[code] && len(words) > 0 {
 		if country == "" {
 			country = code
 		}
 		words = words[:len(words)-1]
+		parts = parts[:len(parts)-1]
+		followed = true
 	}
 
 	tokens := make([]*Token, len(words))
@@ -80,7 +84,7 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	}
 	for i := 0; i < len(tokens); i++ {
 		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok {
-			if p.namesAStreet(tokens, i) {
+			if p.namesAStreet(tokens, parts, i, length, followed) {
 				// The whole name is the street's: no country or place within it ("rue de la République
 				// démocratique du Congo" is neither the DRC nor the Congo).
 				for k := i; k < i+length; k++ {
@@ -114,17 +118,43 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	return &addressForm{raw, remaining, numbers, distinctPlaces, country, impliedCountry}
 }
 
-// namesAStreet: the country name starting at start follows a street type and one or two particles, so it names the
-// street ("12 rue de Malte, Paris" is in France). A particle is required: commas are gone, and "Sheikh Zayed Road,
-// UAE" must still name its country.
-func (p *addressParser) namesAStreet(tokens []*Token, start int) bool {
+// namesAStreet: the country name of length words starting at start names a street: after a street type and one or
+// two particles ("12 rue de Malte, Paris" is in France); right after a street type in the same part of the address,
+// unless it ends the address ("Via Germania 12" is a street, "12 Example Avenue, Germany, 10115" and "Some Road Malta"
+// name their countries); or right before a street type written after the name, in the same part ("Almanya Caddesi
+// 12", "Jordan Road"). A final ISO code (followed) follows the last word as a country name would: "Via Germania, IT"
+// is read as "Via Germania, Italia" is.
+func (p *addressParser) namesAStreet(tokens []*Token, parts []int, start, length int, followed bool) bool {
 	is := func(token *Token, words map[string]bool) bool { return words[token.Text] || anyIn(token.Forms, words) }
+	end := start + length
+	if end < len(tokens) && parts[end] == parts[end-1] && is(tokens[end], p.data.StreetSuffixes) {
+		return true
+	}
 	i, particles := start-1, 0
 	for i >= 0 && particles < 2 && is(tokens[i], p.data.StreetParticles) {
 		i--
 		particles++
 	}
-	return particles > 0 && i >= 0 && is(tokens[i], p.data.StreetWords)
+	return i >= 0 && is(tokens[i], p.data.StreetWords) && (particles > 0 || (parts[i] == parts[start] && (end < len(tokens) || followed)))
+}
+
+// addressParts: the parts of an address that commas, semicolons and line breaks separate, as each word's part in
+// order. Should the parts' words ever differ from the whole's, every word is a part of its own, so a country name
+// never names a street for want of a comma.
+func addressParts(raw string, count int) []int {
+	parts := make([]int, 0, count)
+	for i, piece := range strings.FieldsFunc(raw, func(r rune) bool { return strings.ContainsRune(",;\n\r\uFF0C\uFF1B\u3001", r) }) {
+		for range Words(piece) {
+			parts = append(parts, i)
+		}
+	}
+	if len(parts) != count {
+		parts = parts[:0]
+		for i := 0; i < count; i++ {
+			parts = append(parts, -1-i)
+		}
+	}
+	return parts
 }
 
 func anyIn(values []string, set map[string]bool) bool {

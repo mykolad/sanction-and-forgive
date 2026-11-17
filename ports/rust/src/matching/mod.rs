@@ -34,7 +34,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "e6a5156d037b");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "29cac07855fe");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -168,6 +168,45 @@ mod tests {
     fn abd_before_a_surname_stays_a_given_name() {
         let (outcome, percent) = screen("Abdul Karimov", "Karimov Abdul", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// A country name names the street after a street type and a particle ("rue de Malte"), right after a street type
+    /// with more of the address after it ("Via Germania 12"), or right before a street type written after the name
+    /// ("Almanya Caddesi"); at the end after a street type it is still the country ("Some Road, Malta").
+    #[test]
+    fn a_street_named_after_a_country_is_a_street() {
+        let data = data::data();
+        let parse = |raw: &str| addresses::parse_address(data, &mut text::Tokenizer::new(data), raw, "");
+        for (raw, country) in [
+            ("12 rue de Malte, Paris", ""),
+            ("Almanya Caddesi 12, Istanbul", ""),
+            ("Via Germania 12, Roma", ""),
+            ("Corso Italia 3, Milano", ""),
+            ("12 Jordan Road, Kowloon", ""),
+            ("Sheikh Zayed Road, UAE", "AE"),
+            ("Office 4, Some Road, Malta", "MT"),
+            ("Platz der Türkei 12, Berlin", ""),
+            ("Ataturk Cad. 12, Istanbul", ""),
+            ("Irak Mahallesi 5, Ankara", ""),
+            ("Japonya Mah. 3, Ankara", ""),
+            ("Mısır Çarşısı No: 4, Eminönü, İstanbul", ""),
+            ("Suriye Pasajı 3, İstanbul", ""),
+            ("Kuba Kowalski, Kwiatowa 5, Warszawa", ""),
+            ("Corso Italia 3, Milano, Italia", "IT"),
+            ("12 Example Avenue, Germany, 10115", "DE"),
+            ("12 Example Avenue\nGermany 10115", "DE"),
+            ("Office 4 Some Road Malta", "MT"),
+        ] {
+            assert_eq!(parse(raw).country, country, "{raw}");
+        }
+        // A final ISO code reads like the country's name: the street keeps its word in both.
+        let texts = |raw: &str| parse(raw).words.iter().map(|t| t.text.clone()).collect::<Vec<_>>();
+        assert_eq!(texts("Via Germania, IT"), texts("Via Germania, Italia"));
+        assert_eq!(texts("Via Germania, IT"), ["germania"]);
+        // "Sokagi" is "Sokağı" typed without Turkish letters: a street type, dropped like the accented one.
+        for raw in ["Karanfil Sokagi 5", "Karanfil Sokağı 5", "Ataturk Bulvari 5"] {
+            assert_eq!(parse(raw).words.len(), 1, "{raw}");
+        }
     }
 
     /// Chinese and Korean names (data/cjk.json, #93): spacing, traditional and simplified characters, and company forms
