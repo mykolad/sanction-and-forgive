@@ -207,7 +207,9 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   aligned, the versions, the disclaimer; `@media print`), a detail panel per cell (listed name, alias matched, how it aligned,
   programme, address, the official record), the disclaimer, and the attribution footer (OGL, trade.gov's notice, EU).
   Every page starts with the same menu (`<nav class="menu">`, the current page `aria-current="page"`): Screen,
-  **Browse lists** (`wwwroot/lists/`: pick a list, filter, page through entries, expand one for every name, address,
+  **Manifest** (`wwwroot/manifest/`: a CSV read in the browser, columns mapped to receiver, company and address,
+  screened through the stream endpoint in chunks of 100, a summary, the rows that need a look and a results CSV
+  built in the browser; nothing stored), **Browse lists** (`wwwroot/lists/`: pick a list, filter, page through entries, expand one for every name, address,
   programme and the official record), **List status** (`wwwroot/status/`: lists searched, then lists not imported and
   why), **Allow-list** (admin only), **Admin**, API. A new page copies the menu; `SourcesTests` and `BrowseTests` check it. A new catalogued
   feed needs its `Homepage` (and `TermsUrl`), and a `Note` unless it's `Active`; `SourcesTests` checks.
