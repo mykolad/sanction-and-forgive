@@ -51,6 +51,10 @@ internal sealed class MatcherData
     /// <summary>The words joining a street type to the name (<c>de</c>, <c>du</c>, <c>des</c>, <c>la</c>, <c>le</c>).</summary>
     public required HashSet<string> StreetParticles { get; init; }
 
+    /// <summary>Street types written after the name (<c>Almanya Caddesi</c>, <c>Jordan Road</c>): a country name right
+    /// before one names the street.</summary>
+    public required HashSet<string> StreetSuffixes { get; init; }
+
     /// <summary>Latin spelling → spelling group.</summary>
     public required Dictionary<string, int> SpellingGroups { get; init; }
 
@@ -218,6 +222,7 @@ internal sealed class MatcherData
             AddressWords = Set("addressWords"),
             StreetWords = Set("streetWords"),
             StreetParticles = Set("streetParticles"),
+            StreetSuffixes = Set("streetSuffixes"),
             SpellingGroups = spellingGroups,
             SpellingGroupMembers = spellingMembers,
             CognateGroups = cognateGroups,

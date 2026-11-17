@@ -36,7 +36,7 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         {
             if (Lookup(tokens, i, data.MaxCountryWords, data.Countries) is { } countryMatch)
             {
-                if (NamesAStreet(tokens, i))
+                if (NamesAStreet(tokens, i, countryMatch.Length))
                 {
                     // The whole name is the street's: no country or place within it ("rue de la République
                     // démocratique du Congo" is neither the DRC nor the Congo).
@@ -80,11 +80,19 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
         return new AddressForm(raw, [.. remaining], [.. numbers], [.. places.Distinct()], country ?? namedCountry, impliedCountry);
     }
 
-    /// <summary>Whether the country name starting at <paramref name="start"/> follows a street type and one or two
-    /// particles, so it names the street (<c>12 rue de Malte, Paris</c> is in France, not Malta). A particle is required:
-    /// commas are gone by now, and <c>Sheikh Zayed Road, UAE</c> must still name its country.</summary>
-    private bool NamesAStreet(List<Token> tokens, int start)
+    /// <summary>Whether the country name of <paramref name="length"/> words starting at <paramref name="start"/> names
+    /// a street: after a street type and one or two particles (<c>12 rue de Malte, Paris</c> is in France, not Malta);
+    /// right after a street type with more of the address after it (<c>Via Germania 12</c>); or right before a street
+    /// type written after the name (<c>Almanya Caddesi 12</c>, <c>Jordan Road</c>). Commas are gone by now, so a
+    /// country name at the end after a street type is the country: <c>Sheikh Zayed Road, UAE</c>.</summary>
+    private bool NamesAStreet(List<Token> tokens, int start, int length)
     {
+        var end = start + length;
+        if (end < tokens.Count && Is(tokens[end], data.StreetSuffixes))
+        {
+            return true;
+        }
+
         var i = start - 1;
         var particles = 0;
         while (i >= 0 && particles < 2 && Is(tokens[i], data.StreetParticles))
@@ -93,7 +101,7 @@ internal sealed partial class AddressParser(MatcherData data, Tokenizer tokenize
             particles++;
         }
 
-        return particles > 0 && i >= 0 && Is(tokens[i], data.StreetWords);
+        return i >= 0 && Is(tokens[i], data.StreetWords) && (particles > 0 || end < tokens.Count);
     }
 
     private static bool Is(Token token, HashSet<string> words) => words.Contains(token.Text) || token.Forms.Any(words.Contains);

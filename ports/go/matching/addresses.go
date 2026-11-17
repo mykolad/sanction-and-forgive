@@ -80,7 +80,7 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	}
 	for i := 0; i < len(tokens); i++ {
 		if code, length, ok := lookup(tokens, i, p.data.MaxCountryWords, p.data.Countries); ok {
-			if p.namesAStreet(tokens, i) {
+			if p.namesAStreet(tokens, i, length) {
 				// The whole name is the street's: no country or place within it ("rue de la République
 				// démocratique du Congo" is neither the DRC nor the Congo).
 				for k := i; k < i+length; k++ {
@@ -114,17 +114,22 @@ func (p *addressParser) Parse(raw string, sourceCountryCode string) *addressForm
 	return &addressForm{raw, remaining, numbers, distinctPlaces, country, impliedCountry}
 }
 
-// namesAStreet: the country name starting at start follows a street type and one or two particles, so it names the
-// street ("12 rue de Malte, Paris" is in France). A particle is required: commas are gone, and "Sheikh Zayed Road,
-// UAE" must still name its country.
-func (p *addressParser) namesAStreet(tokens []*Token, start int) bool {
+// namesAStreet: the country name of length words starting at start names a street: after a street type and one or
+// two particles ("12 rue de Malte, Paris" is in France); right after a street type with more of the address after it
+// ("Via Germania 12"); or right before a street type written after the name ("Almanya Caddesi 12", "Jordan Road").
+// Commas are gone, so a country name at the end after a street type is the country: "Sheikh Zayed Road, UAE".
+func (p *addressParser) namesAStreet(tokens []*Token, start, length int) bool {
 	is := func(token *Token, words map[string]bool) bool { return words[token.Text] || anyIn(token.Forms, words) }
+	end := start + length
+	if end < len(tokens) && is(tokens[end], p.data.StreetSuffixes) {
+		return true
+	}
 	i, particles := start-1, 0
 	for i >= 0 && particles < 2 && is(tokens[i], p.data.StreetParticles) {
 		i--
 		particles++
 	}
-	return particles > 0 && i >= 0 && is(tokens[i], p.data.StreetWords)
+	return i >= 0 && is(tokens[i], p.data.StreetWords) && (particles > 0 || end < len(tokens))
 }
 
 func anyIn(values []string, set map[string]bool) bool {

@@ -84,7 +84,7 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
     let mut i = 0;
     while i < tokens.len() {
         if let Some((code, length)) = lookup(&tokens, i, data.max_country_words, &data.countries) {
-            if names_a_street(data, &tokens, i) {
+            if names_a_street(data, &tokens, i, length) {
                 // The whole name is the street's: no country or place within it ("rue de la République démocratique du
                 // Congo" is neither the DRC nor the Congo).
                 for token in &tokens[i..i + length] {
@@ -120,17 +120,22 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
 }
 
 /// The longest name starting at start, on the words' own text or one of their Latin readings.
-/// The country name starting at start follows a street type and one or two particles, so it names the street ("12 rue de
-/// Malte, Paris" is in France). A particle is required: commas are gone, and "Sheikh Zayed Road, UAE" must still name
-/// its country.
-fn names_a_street(data: &MatcherData, tokens: &[TokenRef], start: usize) -> bool {
+/// The country name of length words starting at start names a street: after a street type and one or two particles ("12
+/// rue de Malte, Paris" is in France); right after a street type with more of the address after it ("Via Germania 12");
+/// or right before a street type written after the name ("Almanya Caddesi 12", "Jordan Road"). Commas are gone, so a
+/// country name at the end after a street type is the country: "Sheikh Zayed Road, UAE".
+fn names_a_street(data: &MatcherData, tokens: &[TokenRef], start: usize, length: usize) -> bool {
     let is = |token: &TokenRef, words: &HashSet<String>| words.contains(&token.text) || token.forms.iter().any(|f| words.contains(f));
+    let end = start + length;
+    if end < tokens.len() && is(&tokens[end], &data.street_suffixes) {
+        return true;
+    }
     let (mut i, mut particles) = (start, 0);
     while i > 0 && particles < 2 && is(&tokens[i - 1], &data.street_particles) {
         i -= 1;
         particles += 1;
     }
-    particles > 0 && i > 0 && is(&tokens[i - 1], &data.street_words)
+    i > 0 && is(&tokens[i - 1], &data.street_words) && (particles > 0 || end < tokens.len())
 }
 
 fn lookup<'m, T>(tokens: &[TokenRef], start: usize, max_words: usize, names: &'m HashMap<String, T>) -> Option<(&'m T, usize)> {

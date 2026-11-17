@@ -33,7 +33,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "7ea0e54db126");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "62d0e84c5493");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -167,6 +167,31 @@ mod tests {
     fn abd_before_a_surname_stays_a_given_name() {
         let (outcome, percent) = screen("Abdul Karimov", "Karimov Abdul", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// A country name names the street after a street type and a particle ("rue de Malte"), right after a street type
+    /// with more of the address after it ("Via Germania 12"), or right before a street type written after the name
+    /// ("Almanya Caddesi"); at the end after a street type it is still the country ("Some Road, Malta").
+    #[test]
+    fn a_street_named_after_a_country_is_a_street() {
+        let data = data::data();
+        let parse = |raw: &str| addresses::parse_address(data, &mut text::Tokenizer::new(data), raw, "");
+        for (raw, country) in [
+            ("12 rue de Malte, Paris", ""),
+            ("Almanya Caddesi 12, Istanbul", ""),
+            ("Via Germania 12, Roma", ""),
+            ("Corso Italia 3, Milano", ""),
+            ("12 Jordan Road, Kowloon", ""),
+            ("Sheikh Zayed Road, UAE", "AE"),
+            ("Office 4, Some Road, Malta", "MT"),
+            ("Corso Italia 3, Milano, Italia", "IT"),
+        ] {
+            assert_eq!(parse(raw).country, country, "{raw}");
+        }
+        // "Sokagi" is "Sokağı" typed without Turkish letters: a street type, dropped like the accented one.
+        for raw in ["Karanfil Sokagi 5", "Karanfil Sokağı 5", "Ataturk Bulvari 5"] {
+            assert_eq!(parse(raw).words.len(), 1, "{raw}");
+        }
     }
 
     /// The same normalisation never makes different names match.

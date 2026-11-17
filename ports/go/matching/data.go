@@ -53,6 +53,8 @@ type MatcherData struct {
 	// ("rue de Malte"), as in the reference's AddressParser.
 	StreetWords          map[string]bool
 	StreetParticles      map[string]bool
+	// StreetSuffixes: street types written after the name ("Almanya Caddesi", "Jordan Road").
+	StreetSuffixes map[string]bool
 	SpellingGroups       map[string]int
 	SpellingGroupMembers [][]string
 	CognateGroups        map[string][]int
@@ -278,7 +280,7 @@ func loadData() (*MatcherData, error) {
 		return out
 	}
 	d.StopWords, d.Honorifics, d.AddressWords = set("stop"), set("honorifics"), set("addressWords")
-	d.StreetWords, d.StreetParticles = set("streetWords"), set("streetParticles")
+	d.StreetWords, d.StreetParticles, d.StreetSuffixes = set("streetWords"), set("streetParticles"), set("streetSuffixes")
 
 	d.SpellingGroups = map[string]int{}
 	for _, group := range documents["spelling-pairs.json"].(*jsonObject).Values["groups"].([]any) {

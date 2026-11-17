@@ -30,11 +30,25 @@ public class EdgeCaseTests
     [InlineData("Lenina 5, Moscou, RUSSIE", "Moscow, RU")]
     [InlineData("Sheikh Zayed Road, UAE", "Dubai, AE")]
     [InlineData("Office 4, Some Road, Malta", "Valletta, MT")]
+    [InlineData("Almanya Caddesi 12, Istanbul", "Istanbul, TR")]
+    [InlineData("Via Germania 12, Roma", "Via Germania 12, Roma, IT")]
+    [InlineData("Corso Italia 3, Milano, Italia", "Milano, IT")]
+    [InlineData("12 Jordan Road, Kowloon, Hong Kong", "Kowloon, HK")]
     public void AStreetNamedAfterACountry_IsAStreet_ButACountryNamedAfterAStreetIsStillTheCountry(string entered, string listed)
     {
         // French streets are often named after countries: "rue de Malte" in Paris is in France. A country name counts as
-        // the street only after a street type and a particle, so "Road, UAE" still names the UAE (commas are gone).
+        // the street after a street type and a particle, after a street type with more of the address after it ("Via
+        // Germania 12"), or before a street type written after the name ("Almanya Caddesi"). At the end after a street
+        // type, "Road, UAE" still names the UAE (commas are gone).
         Assert.Equal(AddressState.Corroborated, StateOf(entered, listed));
+    }
+
+    [Fact]
+    public void UnaccentedTurkishStreetTypes_AreStreetTypes()
+    {
+        // "Sokagi" is "Sokağı" typed without Turkish letters: a street type, not a word two streets can share.
+        Assert.NotEqual(AddressState.Corroborated, StateOf("Karanfil Sokagi 5 10", "Menekse Sokagi 5 10"));
+        AssertBand(AddressCell("Karanfil Sokagi 5 10", Subject("Northwind Shipping LLC", SubjectKind.Entity, "Menekse Sokagi 5 10")), Outcome.NoMatch);
     }
 
     [Fact]
