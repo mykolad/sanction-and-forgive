@@ -98,6 +98,10 @@ tens of minutes there, so it is a job to run in the background, not while someon
 
 Each record writes its own audit line, exactly like a single screening (below).
 
+The website's **Manifest** page (`/manifest`) is a client of this endpoint: it reads a CSV file in the browser, sends
+its rows in streams of 100 records (each record's reference is `manifest-<batch>-<row>`), resumes from `nextLine`,
+waits out 429 and 503 with `Retry-After`, and builds the results file in the browser.
+
 ## What's logged, and what never is
 
 **Nothing entered is stored or logged**: no receiver, company or address, in any log, trace or error. A test checks
