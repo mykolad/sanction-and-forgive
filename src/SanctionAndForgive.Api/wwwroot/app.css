@@ -301,7 +301,6 @@ table.flagged td.outcome { font-weight: 700; white-space: nowrap; }
 table.flagged td.outcome.Match { color: var(--match-ink); }
 table.flagged td.outcome.Review { color: var(--review-ink); }
 table.flagged td.outcome.Incomplete, table.flagged td.outcome.Error { color: var(--gap-ink); }
-/^>>>>>>> origin/master$/d
 /* The printed screening record (app.js buildRecord): only on paper, and then only it. */
 .result-actions { display: flex; justify-content: flex-end; margin: 10px 0 0; }
 .print-record { display: none; }
@@ -327,4 +326,3 @@ table.flagged td.outcome.Incomplete, table.flagged td.outcome.Error { color: var
   .print-hit { break-inside: avoid; }
   .print-disclaimer { border: 1px solid #000; padding: 4pt 6pt; margin-top: 10pt; }
 }
->>>>>>> origin/master
