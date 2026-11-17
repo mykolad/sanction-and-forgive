@@ -191,12 +191,13 @@ public sealed class SourcesTests : IDisposable
     [Fact]
     public async Task EveryPage_HasTheMenu_WithTheStatusPage_AndMarksWhereYouAre()
     {
-        foreach (var (path, current) in new[] { ("/", "/"), ("/status", "/status") })
+        foreach (var (path, current) in new[] { ("/", "/"), ("/status", "/status"), ("/manifest", "/manifest") })
         {
             var page = await client.GetStringAsync(new Uri(path, UriKind.Relative));
             var menu = page[page.IndexOf("<nav class=\"menu\"", StringComparison.Ordinal)..page.IndexOf("</nav>", StringComparison.Ordinal)];
 
             Assert.Contains("href=\"/status\"", menu, StringComparison.Ordinal);
+            Assert.Contains("href=\"/manifest\"", menu, StringComparison.Ordinal);
             Assert.Contains($"href=\"{current}\" aria-current=\"page\"", menu, StringComparison.Ordinal);
         }
     }
