@@ -740,7 +740,9 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         }
     }
     distinct.truncate(MAX_FORMS);
-    let folds = if is_number {
+    // A number, or a Han or Hangul word, is its own fold key: the Latin fold rules (repeated letters as one) would make
+    // 李娜 and 李娜娜 one name.
+    let folds = if is_number || cjk_script(text) != 0 {
         distinct.clone()
     } else {
         let mut folds: Vec<String> = Vec::new();

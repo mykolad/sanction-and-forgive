@@ -217,6 +217,15 @@ mod tests {
         assert_eq!(text::words("中国, 北京, 1"), ["中国", "北京", "1"]);
     }
 
+    /// A repeated Han or Hangul character makes another name, not a spelling of the same one.
+    #[test]
+    fn a_repeated_chinese_or_korean_character_is_another_name() {
+        for (query, listed) in [("李娜", "李娜娜"), ("김민수", "김민민수")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::NoMatch), "{query} / {listed}: {percent:?}");
+        }
+    }
+
     /// The company forms alone, or different names, never match.
     #[test]
     fn different_chinese_and_korean_names_dont_match() {
