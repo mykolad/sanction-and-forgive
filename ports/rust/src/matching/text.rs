@@ -520,7 +520,7 @@ fn allah_ending(word: &str) -> Option<String> {
 /// merged and a typed-together word share: Abu, Abou and Abo as abu before the next word's readings; abd + its name
 /// without the article (abdulrahman, abd-al-rahman → abdrahman); an article as al (elsayed, ulsayed, arrashid →
 /// alsayed, alrashid) and, written apart, the word without it (al-sayyid → sayyid); Allah in any spelling.
-fn arabic_readings(text: &str) -> Vec<String> {
+pub(crate) fn arabic_readings(text: &str) -> Vec<String> {
     let mut readings = Vec::new();
     let joined: String = text.chars().filter(|&c| c != '-').collect();
     if let Some((first, rest)) = text.split_once('-') {

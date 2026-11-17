@@ -127,6 +127,8 @@ mod tests {
             ("Ahmed Elsayed", "Ahmad al-Sayed", Outcome::Match),
             ("Harun ar-Rashid", "Harun al-Rashid", Outcome::Match),
             ("Abu Abd Allah Hassan", "Abu Abdullah Hassan", Outcome::Match),
+            ("Abdul Karim Hassan", "Abdul Kareem Hassan", Outcome::Match),
+            ("Abu Muhammad Hassan", "Abu Mohammed Hassan", Outcome::Match),
             ("Hassan Nasr Ellah", "Hassan Nasrellah", Outcome::Match),
             ("Abou Bakr Hassan", "Abu Bakr Hassan", Outcome::Match),
             ("Ahmed Ulsayed", "Ahmed al-Sayed", Outcome::Match),
