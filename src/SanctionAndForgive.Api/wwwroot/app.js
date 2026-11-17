@@ -15,6 +15,8 @@ let warmUpTimer = null;
 // Each screening (and each Clear) takes a new number; only the latest request may change the page.
 let current = 0;
 let pending = null;
+// The result on the page, with what was entered for it and when it came back: what a printed record shows.
+let shown = null;
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -150,6 +152,7 @@ async function screen(event) {
     const result = await response.json();
     if (request !== current) return;
     showState("");
+    shown = { result, entered: { Receiver: body.receiverName, Company: body.companyName, Address: body.address }, at: new Date() };
     render(result);
   } catch {
     if (request === current) showState("The service isn't answering. Try again in a moment.", true);
@@ -246,18 +249,84 @@ function showDetail(button, cell, entry, list) {
   detail.hidden = false;
 }
 
+// ---- The printed record ----
+
+// A record of the screening for a compliance file, built from the result on the page: what was entered (from the
+// page: the server doesn't keep it), against which lists as of when, what came back and why, the versions that
+// reproduce it, and the disclaimer. The browser prints it, or saves it as a PDF; nothing is sent or stored.
+function printRecord() {
+  if (!shown) return;
+  const { result, entered, at } = shown;
+  const when = (date) => date.toLocaleString(undefined, { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
+  const cellText = (cell) => {
+    if (!cell) return "";
+    if (cell.state === "NotChecked") return `${SYMBOLS.NotChecked} ${LABELS.NotChecked}`;
+    const state = cell.allowed ? "Allowed" : cell.outcome;
+    const who = cell.bestCandidate && cell.outcome !== "NoMatch" ? `: ${cell.bestCandidate.listedName}` : "";
+    return `${SYMBOLS[state]} ${LABELS[state]} ${percentText(cell.percent)}${who}`;
+  };
+  const listByCode = new Map(result.lists.map((list) => [list.code, list]));
+  const hits = result.entries.flatMap((entry) => entry.cells
+    .filter((cell) => cell.bestCandidate && cell.state !== "NotChecked" && (cell.outcome === "Match" || cell.outcome === "Review"))
+    .map((cell) => ({ entry, cell, list: listByCode.get(cell.list) })));
+
+  const record = $("print-record");
+  record.replaceChildren(
+    el("h1", {}, "Sanctions list screening record"),
+    el("p", { class: "print-sub" }, "Sanction & Forgive: a demo list check, not a legal determination"),
+    el("dl", { class: "print-meta" },
+      el("dt", {}, "Reference"), el("dd", {}, result.reference),
+      el("dt", {}, "Screened"), el("dd", {}, `${when(at)} (${at.toISOString()})`),
+      el("dt", {}, "Result"), el("dd", {}, el("strong", {}, OVERALL[result.outcome] || result.outcome), ". ", result.summary),
+      ...["Receiver", "Company", "Address"].flatMap((kind) => [el("dt", {}, `${kind} entered`), el("dd", {}, entered[kind] || "—")])),
+    el("h2", {}, "Lists searched"),
+    el("table", { class: "print-table" },
+      el("thead", {}, el("tr", {}, el("th", {}, "List"), el("th", {}, "As of"), result.entries.map((entry) => el("th", {}, KIND[entry.kind] || entry.kind)))),
+      el("tbody", {}, result.lists.map((list) => el("tr", {},
+        el("td", {}, list.name),
+        el("td", {}, listAsOf(list)),
+        list.state === "SwitchedOff"
+          ? el("td", { colspan: String(result.entries.length) }, "Not searched: switched off by an administrator")
+          : result.entries.map((entry) => el("td", {}, cellText(entry.cells.find((cell) => cell.list === list.code)))))))),
+    hits.length
+      ? el("section", {}, el("h2", {}, "Possible matches, and how the names aligned"),
+        hits.map(({ entry, cell, list }) => {
+          const candidate = cell.bestCandidate;
+          return el("div", { class: "print-hit" },
+            el("h3", {}, `${candidate.listedName}`),
+            el("p", {}, `${list ? list.name : cell.list} · ${KIND[entry.kind] || entry.kind} · ${percentText(cell.percent)} match likelihood (${LABELS[cell.allowed ? "Allowed" : cell.outcome]})`),
+            cell.allowed && entry.allowedBy ? el("p", {}, `Allowed by the allow-list: “${entry.allowedBy.name}”: ${entry.allowedBy.reason}.`) : null,
+            el("dl", { class: "print-meta" },
+              el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
+              el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
+              el("dt", {}, "Address"), el("dd", {}, addressText(candidate.addressState, entry)),
+              el("dt", {}, "Official record"), el("dd", {}, candidate.sourceUrl || `${list ? list.name : cell.list}, id ${candidate.externalId}`)),
+            el("ul", {}, candidate.alignment.map((line) => el("li", {}, line))),
+            cell.otherHits.length ? el("p", {}, `Other possible matches on this list: ${cell.otherHits.map((hit) => `${hit.listedName} (${percentText(hit.percent)})`).join("; ")}`) : null);
+        }))
+      : el("p", {}, "No possible match: no match found in the lists above, as of their dates."),
+    el("h2", {}, "Versions"),
+    el("p", {}, `Matcher ${result.matcherVersion} · allow-list ${result.allowListVersion} · lists: `,
+      result.lists.map((list) => `${list.code} ${list.version === null || list.version === undefined ? "–" : list.version} (${list.state})`).join(", ")),
+    el("p", { class: "print-disclaimer" }, result.disclaimer),
+    el("p", { class: "print-sub" }, `Printed from ${location.origin}. Check any match against the official publication of the list it comes from.`));
+  window.print();
+}
+
 function addressText(state, entry) {
   if (entry.kind === "Address") return "Compared on its own (address only)";
   return { Corroborated: "Agrees with a listed address", Conflicting: "In a different country from the listed addresses", NotCompared: "Not compared" }[state] || state;
 }
 
 form.addEventListener("submit", screen);
+$("print-button").addEventListener("click", printRecord);
 $("clear-button").addEventListener("click", () => {
   current++;
   if (pending) pending.abort();
   pending = null;
   $("screen-button").disabled = false;
   form.reset();
+  shown = null;
   $("result").hidden = true;
   showState("");
   $("receiverName").focus();
