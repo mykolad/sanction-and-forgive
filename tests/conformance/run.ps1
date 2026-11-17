@@ -4,25 +4,30 @@
   API started with the conformance settings, the CLI run in containers from the same image.
 
 .EXAMPLE
-  # The .NET implementation, built from this repository, against the local SQL Server container (CLAUDE.md):
+  # The reference, the Rust implementation (ports/rust), built from this repository, against the local SQL Server
+  # container (CLAUDE.md):
   ./tests/conformance/run.ps1 -Build
 
 .EXAMPLE
-  # The Go implementation (ports/go), its CLI at /app/cli in the image:
-  ./tests/conformance/run.ps1 -Build -Image sanction-and-forgive-go:conformance -Dockerfile ports/go/Dockerfile -CliCommand '--entrypoint /app/cli {image}'
+  # The .NET implementation, its CLI run with dotnet:
+  ./tests/conformance/run.ps1 -Build -Image sanction-and-forgive:conformance -Dockerfile Dockerfile -CliCommand '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll'
 
 .EXAMPLE
-  # Rewrite the golden files from the reference implementation after a deliberate change (review the diff):
+  # The Go implementation (ports/go), its CLI at /app/cli in the image:
+  ./tests/conformance/run.ps1 -Build -Image sanction-and-forgive-go:conformance -Dockerfile ports/go/Dockerfile
+
+.EXAMPLE
+  # Rewrite the golden files from the reference (Rust) after a deliberate change (review the diff):
   ./tests/conformance/run.ps1 -Build -UpdateGolden
 #>
 param(
     # The image to test. Its entry point serves the API on 8080; -CliCommand runs its CLI.
-    [string] $Image = 'sanction-and-forgive:conformance',
-    # Build $Image from this repository first, with -Dockerfile (the .NET implementation's by default).
+    [string] $Image = 'sanction-and-forgive-rust:conformance',
+    # Build $Image from this repository first, with -Dockerfile (the reference's, Rust, by default).
     [switch] $Build,
-    [string] $Dockerfile = 'Dockerfile',
-    # How the CLI is started inside the image (the .NET image: dotnet SanctionAndForgive.Cli.dll).
-    [string] $CliCommand = '--entrypoint dotnet {image} SanctionAndForgive.Cli.dll',
+    [string] $Dockerfile = 'ports/rust/Dockerfile',
+    # How the CLI is started inside the image (the Rust and Go images: /app/cli).
+    [string] $CliCommand = '--entrypoint /app/cli {image}',
     # SQL Server as this machine reaches it, and as the containers do.
     [string] $SqlServer = 'localhost,14333',
     [string] $ContainerSqlServer = 'host.docker.internal,14333',
