@@ -44,8 +44,24 @@ A plain `dotnet test` of the solution skips every conformance test: they need `C
 | .NET | `src/` | `Dockerfile`, 356 MB | `dotnet SanctionAndForgive.Cli.dll` | 23 of 23 |
 | Go | `ports/go/` | `ports/go/Dockerfile`, 68 MB | `/app/cli` | 23 of 23 |
 
-The CI job `conformance` runs the suite against each of them on every pull request. Only `conformance (rust)` is
-required on `master` (owner's decision, 2026-11-17): the .NET and Go jobs show how far those implementations are behind.
+The CI job `conformance` runs the suite against each of them on every pull request, each at its version of the suite
+(below), and all three are required on `master`.
+
+## Versions
+
+Since 2026-11-17 the suite has two versions, each with its own golden files (`tests/conformance/golden/v1`, `v2`;
+`CONFORMANCE_VERSION`, `run.ps1 -Version`), so every implementation is held to the answers it should give and every
+check stays green (owner's suggestion):
+
+| Version | Golden files from | Tested in CI |
+|---|---|---|
+| 2 | the Rust reference; they change with its improvements | Rust |
+| 1 | the .NET implementation, as all three answered on 2026-11-17 | .NET, Go |
+
+Version 1 changes only when a shared dictionary change moves the .NET implementation's answers (regenerate it from
+.NET: `run.ps1 -Build -UpdateGolden -Version 1` with the .NET image), so a regression in .NET or Go still fails its
+job. When .NET or Go catch up with Rust, their CI job moves to version 2. A test that only version 2 holds checks
+`Settings.Version`.
 
 ## What an implementation must provide
 
@@ -153,7 +169,8 @@ every result still the reference's.
 
 ## Changing the golden files
 
-A deliberate change in what the reference (Rust) answers (matching, wording, a field) changes the golden files in the
-same pull request: `./tests/conformance/run.ps1 -Build -UpdateGolden` (the Rust image by default), then review the diff.
+A deliberate change in what the reference (Rust) answers (matching, wording, a field) changes version 2's golden files
+in the same pull request: `./tests/conformance/run.ps1 -Build -UpdateGolden` (the Rust image and version 2 by default),
+then review the diff. A shared dictionary change regenerates version 1 from .NET as well.
 A matching change still needs the evaluation and the owner's approval where CLAUDE.md says so. Another implementation
 never rewrites the golden files: it changes until it matches them.
