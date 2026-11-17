@@ -1,6 +1,7 @@
 //! The Rust port of SanctionAndForgive.Matching: pure, deterministic, no I/O beyond its embedded dictionaries. Every
 //! rule follows the .NET reference exactly (docs/conformance.md), except where improvements land here first (owner's
-//! decision, 2026-11-17): Arabic-script names compared in their own script (data/arabic.json, #92). The speed work
+//! decision, 2026-11-17): Arabic-script names compared in their own script and Arabic name particles in Latin script
+//! (data/arabic.json, #92), Chinese and Korean names (data/cjk.json, #93). The speed work
 //! follows the Go port's (ports/go/README.md, "Speed and memory").
 
 /// The matcher's maps and sets: FxHash, not the default SipHash (which resists hash flooding, at a cost every lookup
@@ -33,7 +34,7 @@ mod tests {
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "408565f8b3c2");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "e6a5156d037b");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -167,6 +168,114 @@ mod tests {
     fn abd_before_a_surname_stays_a_given_name() {
         let (outcome, percent) = screen("Abdul Karimov", "Karimov Abdul", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// Chinese and Korean names (data/cjk.json, #93): spacing, traditional and simplified characters, and company forms
+    /// written without a space don't keep a name from matching.
+    #[test]
+    fn chinese_and_korean_names_match_however_spaced_or_written() {
+        for (query, listed, kind) in [
+            ("中兴通讯", "中兴通讯股份有限公司", SubjectKind::Entity),
+            ("中興通訊", "中兴通讯", SubjectKind::Entity),
+            ("中兴 通讯", "中兴通讯", SubjectKind::Entity),
+            ("華為技術有限公司", "华为技术有限公司", SubjectKind::Entity),
+            ("中兴通讯有限責任公司", "中兴通讯有限责任公司", SubjectKind::Entity),
+            ("김 정은", "김정은", SubjectKind::Individual),
+            ("주식회사 삼성전자", "삼성전자", SubjectKind::Entity),
+            ("삼성전자 주식회사", "삼성전자", SubjectKind::Entity),
+            ("삼성전자주식회사", "주식회사 삼성전자", SubjectKind::Entity),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// Joining Chinese and Korean words is for names: an address keeps its parts, so the same address in those scripts
+    /// is found, and its country stays a word of its own.
+    #[test]
+    fn chinese_and_korean_addresses_keep_their_parts() {
+        for address in ["서울 강남로 12", "中国, 北京, 长安街 1"] {
+            let subject = ListedSubject {
+                external_id: "X-1".to_string(),
+                kind: SubjectKind::Entity,
+                primary_name: "Northwind Trading".to_string(),
+                names: vec![ListedName { full_name: "Northwind Trading".to_string(), is_weak: false }],
+                addresses: vec![ListedAddress { raw: address.to_string(), country_code: String::new() }],
+                programme: None,
+                source_url: None,
+            };
+            let list = ScreenedList {
+                code: "eu".to_string(),
+                name: "EU".to_string(),
+                index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
+            };
+            let request = ScreeningRequest { receiver_name: String::new(), company_name: String::new(), address: address.to_string() };
+            let result = Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap();
+            let cell = &result.entries[0].cells[0];
+            assert!(cell.best.is_some(), "{address}: {:?} {:?}", cell.outcome, cell.percent);
+        }
+        assert_eq!(text::words("中国, 北京, 1"), ["中国", "北京", "1"]);
+    }
+
+    /// A two-character Chinese or Korean core is a name of its own, like a Latin one of six letters: an exact match stays
+    /// a Match with a generic word split off. A single character is still a short name.
+    #[test]
+    fn a_two_character_chinese_or_korean_name_is_not_short() {
+        for name in ["中兴集团", "华为公司", "中兴", "삼성"] {
+            let (outcome, percent) = screen(name, name, SubjectKind::Entity);
+            assert_eq!(outcome, Some(Outcome::Match), "{name}: {percent:?}");
+        }
+        let (outcome, percent) = screen("华", "华", SubjectKind::Entity);
+        assert_eq!(outcome, Some(Outcome::Review), "{percent:?}");
+    }
+
+    /// Every traditional character reads as its final simplified form, so a chain (薴 to 苧 to 苎) reads alike from
+    /// either end.
+    #[test]
+    fn traditional_characters_read_to_the_end_of_a_chain() {
+        assert_eq!(text::simplified("王薴華"), text::simplified("王苧華"));
+        let (outcome, percent) = screen("王薴華", "王苧華", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// A character beyond the Basic Multilingual Plane is Han too: 王𠵾 (simplified, extension B) is 王㗲 (traditional),
+    /// and its repeated characters still count.
+    #[test]
+    fn han_characters_beyond_the_basic_plane_are_han() {
+        let (outcome, percent) = screen("王𠵾", "王㗲", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+        let (outcome, percent) = screen("王𠵾", "王𠵾𠵾", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::NoMatch), "{percent:?}");
+        assert_eq!(text::words("王𠵾华 有限公司"), ["王𠵾华", "有限公司"]);
+    }
+
+    /// The ideographic zero is a character of the name: 七〇八研究所 isn't 七八研究所, at most a possible match for a
+    /// person to review, as one letter more in a long Latin name is.
+    #[test]
+    fn the_ideographic_zero_is_kept() {
+        let (outcome, percent) = screen("七〇八研究所", "七八研究所", SubjectKind::Entity);
+        assert_ne!(outcome, Some(Outcome::Match), "{percent:?}");
+        let (outcome, percent) = screen("七〇八研究所", "七〇八研究所", SubjectKind::Entity);
+        assert_eq!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
+    /// A repeated Han or Hangul character makes another name, not a spelling of the same one.
+    #[test]
+    fn a_repeated_chinese_or_korean_character_is_another_name() {
+        for (query, listed) in [("李娜", "李娜娜"), ("김민수", "김민민수")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::NoMatch), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// The company forms alone, or different names, never match.
+    #[test]
+    fn different_chinese_and_korean_names_dont_match() {
+        for (query, listed) in [("中兴通讯", "华为技术"), ("股份有限公司", "中兴通讯股份有限公司"), ("삼성전자", "현대자동차")]
+        {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Entity);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
     }
 
     /// The same normalisation never makes different names match.
