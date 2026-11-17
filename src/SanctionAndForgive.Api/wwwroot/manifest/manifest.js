@@ -14,7 +14,7 @@ const SHOWN = 200;
 
 const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible match, allowed", NoMatch: "No match", NotChecked: "Not checked" };
 const SYMBOLS = { Match: "●", Review: "▲", Allowed: "◇", NoMatch: "✓", NotChecked: "–" };
-const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete", Error: "Not screened" };
+const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete", Error: "Not screened", Nothing: "Nothing to screen" };
 const KINDS = { Receiver: "Receiver", Company: "Company", Address: "Address" };
 
 const $ = (id) => document.getElementById(id);
@@ -26,6 +26,8 @@ let table = null;
 let results = [];
 let headers = [];
 let aborter = null;
+// Each file chosen (or read again) takes a new number; a read that finishes after a newer one started is dropped.
+let reading = 0;
 
 function el(tag, attributes = {}, ...children) {
   const node = document.createElement(tag);
@@ -143,6 +145,7 @@ function parseCsv(text, separator) {
 }
 
 async function readFile() {
+  const generation = ++reading;
   const file = $("file").files[0];
   $("mapping-panel").hidden = true;
   $("result").hidden = true;
@@ -153,7 +156,9 @@ async function readFile() {
     showState(`The file is ${(file.size / 1048576).toFixed(1)} MB: up to ${MAX_BYTES / 1048576} MB here. Split it, or use the stream API.`, true);
     return;
   }
-  const { text, encoding } = decode(await file.arrayBuffer(), $("encoding").value);
+  const buffer = await file.arrayBuffer();
+  if (generation !== reading) return;
+  const { text, encoding } = decode(buffer, $("encoding").value);
   const clean = text.replace(/^﻿/, "");
   const separator = separatorOf(clean);
   let rows;
@@ -167,16 +172,18 @@ async function readFile() {
     showState("The file has no rows.", true);
     return;
   }
-  const width = Math.max(...rows.map((row) => row.length));
+  // Counted before anything else is done with the rows; the widest row by a loop (spreading a million rows into
+  // Math.max would throw).
   const hasHeader = $("has-header").checked;
-  const names = hasHeader
-    ? Array.from({ length: width }, (_, i) => (rows[0][i] || "").trim() || `Column ${i + 1}`)
-    : Array.from({ length: width }, (_, i) => `Column ${i + 1}`);
   const data = hasHeader ? rows.slice(1) : rows;
   if (data.length > MAX_ROWS) {
     showState(`The file has ${data.length.toLocaleString()} rows: up to ${MAX_ROWS.toLocaleString()} here. Split it, or use the stream API.`, true);
     return;
   }
+  const width = rows.reduce((widest, row) => Math.max(widest, row.length), 0);
+  const names = hasHeader
+    ? Array.from({ length: width }, (_, i) => (rows[0][i] || "").trim() || `Column ${i + 1}`)
+    : Array.from({ length: width }, (_, i) => `Column ${i + 1}`);
   table = { names, data, separator, firstRow: hasHeader ? 2 : 1 };
   const separatorName = { ",": "commas", ";": "semicolons", "\t": "tabs" }[separator];
   $("file-note").textContent = `${data.length.toLocaleString()} rows, ${width} columns, separated by ${separatorName}, read as ${encoding.toUpperCase()}.`;
@@ -517,7 +524,9 @@ function showResults() {
   const allowed = screened.filter((result) => result.outcome === "NoMatch" && hasAllowed(result)).length;
   // Match and Review first; otherwise anything not screened (stopped, failed, an error, a list not checked) makes the
   // batch incomplete: never a no-match badge for rows nobody screened.
-  const worst = count("Match") ? "Match" : count("Review") ? "Review" : count("Incomplete") || count("Error") || pending ? "Incomplete" : "NoMatch";
+  // A file whose every row had nothing to screen says so, neutrally: nothing was screened, so no outcome at all.
+  const worst = count("Match") ? "Match" : count("Review") ? "Review" : count("Incomplete") || count("Error") || pending ? "Incomplete"
+    : screened.length === 0 ? "Nothing" : "NoMatch";
   const snapshots = usedSnapshots();
   const latest = coverage(snapshots.length ? snapshots[snapshots.length - 1] : -1);
   const parts = [
@@ -562,7 +571,7 @@ function showResults() {
       el("td", { class: "found" }, found));
   }));
   $("disclaimer").textContent = headers.length > 0 ? headers[headers.length - 1].disclaimer : "";
-  $("result").hidden = screened.length === 0 && pending === 0;
+  $("result").hidden = results.length === 0;
 }
 
 function errorText(result) {
