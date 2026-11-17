@@ -6,6 +6,9 @@ const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible ma
 const SYMBOLS = { Match: "●", Review: "▲", Allowed: "◇", NoMatch: "✓", NotChecked: "–" };
 const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete" };
 const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address" };
+// A shipment's other parties (the "parties" feature, when the API offers it): the API's roles, and how they read.
+const ROLES = { shipper: "Shipper", consignee: "Consignee", notifyParty: "Notify party", forwarder: "Forwarder", carrier: "Carrier", endUser: "End user", other: "Other party" };
+const MAX_PARTIES = 10;
 
 const $ = (id) => document.getElementById(id);
 const form = $("screen-form");
@@ -59,6 +62,7 @@ async function loadStatus() {
     const response = await fetch("/api/v1/status", { headers: { Accept: "application/json" } });
     const status = await response.json();
     lists = status.lists;
+    $("parties").hidden = !(status.features || []).includes("parties");
     $("version").textContent = `Version ${status.version}, matcher ${status.matcherVersion}.`;
     $("sources").textContent = lists.length
       ? lists.map((list) => `${list.name} (${listAsOf(list)})`).join("; ") + "."
@@ -109,7 +113,13 @@ async function screen(event) {
     companyName: $("companyName").value.trim() || null,
     address: $("address").value.trim() || null,
   };
-  if (!body.receiverName && !body.companyName && !body.address) {
+  const parties = $("parties").hidden ? [] : partiesEntered();
+  if (parties.some((party) => !party.name && !party.address)) {
+    showState("Enter each party's name, its address, or both (or remove it).", true);
+    return;
+  }
+  if (parties.length) body.parties = parties;
+  if (!body.receiverName && !body.companyName && !body.address && !parties.length) {
     showState("Enter a receiver, a company or an address.", true);
     return;
   }
@@ -172,7 +182,7 @@ function render(result) {
 
   const table = $("result-table");
   const head = el("tr", {}, el("th", { scope: "col" }, "List"),
-    result.entries.map((entry) => el("th", { scope: "col" }, KIND[entry.kind] || entry.kind, el("span", { class: "entry-input" }, entry.input))));
+    result.entries.map((entry) => el("th", { scope: "col" }, entryTitle(entry), el("span", { class: "entry-input" }, entry.input))));
   table.tHead.replaceChildren(head);
 
   const body = table.tBodies[0];
@@ -195,6 +205,54 @@ function render(result) {
 
   $("disclaimer").textContent = result.disclaimer;
   $("result").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// An entry's column title: its kind, and for a party its number and role ("Party 2, consignee: Company"); a party's
+// name entered as a person's reads "Person" (the API's kind is Receiver).
+function entryTitle(entry) {
+  if (!entry.party) return KIND[entry.kind] || entry.kind;
+  const kind = entry.kind === "Receiver" ? "Person" : KIND[entry.kind] || entry.kind;
+  return `Party ${entry.party}, ${(ROLES[entry.role] || entry.role).toLowerCase()}: ${kind}`;
+}
+
+// The parties as entered, every row in order: the numbers in the result are the rows' numbers.
+function partiesEntered() {
+  return [...$("party-rows").children].map((row) => ({
+    role: row.querySelector(".party-role").value,
+    kind: row.querySelector(".party-kind").value,
+    name: row.querySelector(".party-name").value.trim() || null,
+    address: row.querySelector(".party-address").value.trim() || null,
+  }));
+}
+
+function addParty() {
+  const rows = $("party-rows");
+  if (rows.children.length >= MAX_PARTIES) return;
+  const number = rows.children.length + 1;
+  const row = el("div", { class: "party", role: "group" },
+    el("label", { class: "field" }, el("span", { class: "field-label" }, "Role"),
+      el("select", { class: "party-role" }, Object.entries(ROLES).map(([value, label]) => el("option", { value }, label)))),
+    el("label", { class: "field" }, el("span", { class: "field-label" }, "Name"),
+      el("input", { class: "party-name", maxlength: "300", autocomplete: "off", spellcheck: "false" })),
+    el("label", { class: "field" }, el("span", { class: "field-label" }, "Kind"),
+      el("select", { class: "party-kind" }, el("option", { value: "company" }, "Company"), el("option", { value: "person" }, "Person"))),
+    el("label", { class: "field field-wide" }, el("span", { class: "field-label" }, "Address", el("span", { class: "hint" }, "any format")),
+      el("textarea", { class: "party-address", maxlength: "300", rows: "1", spellcheck: "false" })),
+    el("button", { type: "button", class: "secondary party-remove", onclick: () => { row.remove(); partiesChanged(); } }, "Remove"));
+  // Roles in the usual order of a booking: the first party a shipper, the second a consignee, then notify party.
+  row.querySelector(".party-role").value = Object.keys(ROLES)[Math.min(number - 1, 2)];
+  rows.append(row);
+  partiesChanged();
+  row.querySelector(".party-name").focus();
+}
+
+function partiesChanged() {
+  const rows = $("party-rows").children;
+  [...rows].forEach((row, i) => {
+    row.setAttribute("aria-label", `Party ${i + 1}`);
+    row.querySelector(".party-remove").setAttribute("aria-label", `Remove party ${i + 1}`);
+  });
+  $("add-party").disabled = rows.length >= MAX_PARTIES;
 }
 
 function cellButton(cell, entry, list) {
@@ -252,12 +310,15 @@ function addressText(state, entry) {
 }
 
 form.addEventListener("submit", screen);
+$("add-party").addEventListener("click", addParty);
 $("clear-button").addEventListener("click", () => {
   current++;
   if (pending) pending.abort();
   pending = null;
   $("screen-button").disabled = false;
   form.reset();
+  $("party-rows").replaceChildren();
+  partiesChanged();
   $("result").hidden = true;
   showState("");
   $("receiverName").focus();

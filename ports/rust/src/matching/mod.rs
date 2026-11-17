@@ -25,7 +25,8 @@ pub use index::{ListIndex, ListedAddress, ListedName, ListedSubject, SubjectKind
 pub use options::{Options, Outcome};
 pub use scorer::WordAlignment;
 pub use screener::{
-    AllowList, AllowListEntry, Cell, Entry, EntryKind, ListedHit, OverallOutcome, ScreenedList, Screener, ScreeningRequest, ScreeningResult,
+    AllowList, AllowListEntry, Cell, Entry, EntryKind, ListedHit, OverallOutcome, Party, PartyTag, ScreenedList, Screener,
+    ScreeningRequest, ScreeningResult, ROLES,
 };
 
 #[cfg(test)]
@@ -503,6 +504,44 @@ mod tests {
         let best = result.entries[0].cells[0].best.as_ref().unwrap();
         let entered: Vec<Option<i32>> = best.words.iter().map(|w| w.entered).collect();
         assert_eq!(entered, [Some(1), Some(3)], "{:?}", best.words);
+    }
+
+    /// A shipment's parties (#65): each party's name and address are entries of their own, tagged with the party, and
+    /// the outcome is the highest of them all.
+    #[test]
+    fn every_party_of_a_shipment_is_screened() {
+        let subject = ListedSubject {
+            external_id: "X-1".to_string(),
+            kind: SubjectKind::Entity,
+            primary_name: "Northwind Trading LLC".to_string(),
+            names: vec![ListedName { full_name: "Northwind Trading LLC".to_string(), is_weak: false }],
+            addresses: Vec::new(),
+            programme: None,
+            source_url: None,
+        };
+        let list = ScreenedList {
+            code: "eu".to_string(),
+            name: "EU".to_string(),
+            index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
+        };
+        let request =
+            ScreeningRequest { receiver_name: String::new(), company_name: "Bluefield Logistics".to_string(), address: String::new() };
+        let parties = [
+            Party { role: "shipper", name: "Pinecrest Exports GmbH".to_string(), person: false, address: "Hamburg, Germany".to_string() },
+            Party { role: "consignee", name: "Northwind Trading LLC".to_string(), person: false, address: String::new() },
+        ];
+        let result = Screener::new(Options::default()).screen_parties(&request, &parties, &[list], &AllowList::empty()).unwrap();
+        let tags: Vec<(Option<u32>, &str)> = result.entries.iter().map(|e| (e.party.map(|p| p.number), e.kind.as_str())).collect();
+        assert_eq!(tags, [(None, "Company"), (Some(1), "Company"), (Some(1), "Address"), (Some(2), "Company")]);
+        assert_eq!(result.entries[3].party.unwrap().role, "consignee");
+        assert_eq!(result.outcome, OverallOutcome::Match);
+        // Parties alone are enough; nothing at all isn't.
+        let empty = ScreeningRequest::default();
+        let list = ScreenedList { code: "eu".to_string(), name: "EU".to_string(), index: None };
+        assert!(Screener::new(Options::default())
+            .screen_parties(&empty, &parties[..1], std::slice::from_ref(&list), &AllowList::empty())
+            .is_ok());
+        assert!(Screener::new(Options::default()).screen_parties(&empty, &[], &[list], &AllowList::empty()).is_err());
     }
 
     /// The same normalisation never makes different names match.

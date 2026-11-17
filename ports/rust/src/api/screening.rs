@@ -12,8 +12,8 @@ use super::catalog::{Catalog, LoadedList};
 use crate::lists::catalogue::find_source;
 use crate::log::Logger;
 use crate::matching::{
-    AllowList, Cell, Entry, Options, Outcome, OverallOutcome, ScreenedList, Screener, ScreeningRequest, ScreeningResult, SubjectMatch,
-    WordAlignment,
+    AllowList, Cell, Entry, Options, Outcome, OverallOutcome, Party, ScreenedList, Screener, ScreeningRequest, ScreeningResult,
+    SubjectMatch, WordAlignment, ROLES,
 };
 use crate::store::queries::Time;
 
@@ -48,13 +48,58 @@ pub fn format_time(t: Time) -> String {
     s
 }
 
-/// The request: the caller's reference and at least one field.
+/// The request: the caller's reference and at least one field, or parties (#65).
 #[derive(Debug, Clone, Default)]
 pub struct ScreeningRequestBody {
     pub reference: Option<String>,
     pub receiver_name: Option<String>,
     pub company_name: Option<String>,
     pub address: Option<String>,
+    pub parties: Vec<PartyBody>,
+}
+
+/// A party as sent: a role, a name with its kind (person or company), an address; each a string or null.
+#[derive(Debug, Clone, Default)]
+pub struct PartyBody {
+    pub role: Option<String>,
+    pub name: Option<String>,
+    pub kind: Option<String>,
+    pub address: Option<String>,
+}
+
+/// At most this many parties in one request.
+pub const MAX_PARTIES: usize = 10;
+
+impl PartyBody {
+    fn parse(value: &Value) -> Option<PartyBody> {
+        let mut party = PartyBody::default();
+        for (key, value) in value.as_object()? {
+            let target = match key.to_ascii_lowercase().as_str() {
+                "role" => &mut party.role,
+                "name" => &mut party.name,
+                "kind" => &mut party.kind,
+                "address" => &mut party.address,
+                _ => continue,
+            };
+            *target = match value {
+                Value::Null => None,
+                Value::String(s) => Some(s.clone()),
+                _ => return None,
+            };
+        }
+        Some(party)
+    }
+
+    /// The role as one of ROLES (matched ignoring case), or None.
+    pub fn role(&self) -> Option<&'static str> {
+        let role = self.role.as_deref()?.trim();
+        ROLES.iter().copied().find(|r| r.eq_ignore_ascii_case(role))
+    }
+
+    /// Whether the name is a person's: kind "person" (else a company's, "company" or none given).
+    pub fn is_person(&self) -> bool {
+        self.kind.as_deref().is_some_and(|k| k.trim().eq_ignore_ascii_case("person"))
+    }
 }
 
 impl ScreeningRequestBody {
@@ -65,6 +110,14 @@ impl ScreeningRequestBody {
         let object = value.as_object()?;
         let mut body = ScreeningRequestBody::default();
         for (key, value) in object {
+            if key.eq_ignore_ascii_case("parties") {
+                body.parties = match value {
+                    Value::Null => Vec::new(),
+                    Value::Array(items) => items.iter().map(PartyBody::parse).collect::<Option<Vec<_>>>()?,
+                    _ => return None,
+                };
+                continue;
+            }
             let target = match key.to_ascii_lowercase().as_str() {
                 "reference" => &mut body.reference,
                 "receivername" => &mut body.receiver_name,
@@ -122,7 +175,31 @@ pub fn validate(body: &ScreeningRequestBody) -> Errors {
             errors.insert(name.into(), vec![format!("At most {MAX_FIELD_LENGTH} characters.")]);
         }
     }
-    if is_blank(&body.receiver_name) && is_blank(&body.company_name) && is_blank(&body.address) {
+    if body.parties.len() > MAX_PARTIES {
+        errors.insert("Parties".into(), vec![format!("At most {MAX_PARTIES} parties.")]);
+    }
+    for (i, party) in body.parties.iter().enumerate().take(MAX_PARTIES) {
+        let field = |name: &str| format!("Parties[{i}].{name}");
+        if party.role().is_none() {
+            errors.insert(field("Role"), vec![format!("A role, one of: {}.", ROLES.join(", "))]);
+        }
+        if party
+            .kind
+            .as_deref()
+            .is_some_and(|k| !k.trim().is_empty() && !["person", "company"].iter().any(|v| v.eq_ignore_ascii_case(k.trim())))
+        {
+            errors.insert(field("Kind"), vec!["person or company.".into()]);
+        }
+        for (name, value) in [("Name", &party.name), ("Address", &party.address)] {
+            if value.as_deref().is_some_and(|v| utf16_len(v) > MAX_FIELD_LENGTH) {
+                errors.insert(field(name), vec![format!("At most {MAX_FIELD_LENGTH} characters.")]);
+            }
+        }
+        if is_blank(&party.name) && is_blank(&party.address) {
+            errors.insert(field("Name"), vec!["Enter the party's name, its address, or both.".into()]);
+        }
+    }
+    if is_blank(&body.receiver_name) && is_blank(&body.company_name) && is_blank(&body.address) && body.parties.is_empty() {
         errors.insert(String::new(), vec!["Enter a receiver, a company or an address.".into()]);
     }
     errors
@@ -254,6 +331,11 @@ pub struct AllowedByResponse {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryResponse {
+    /// The party (#65): its number in the request and its role; absent for the request's own fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub party: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<&'static str>,
     pub kind: &'static str,
     pub input: String,
     pub compared: &'static str,
@@ -263,6 +345,8 @@ pub struct EntryResponse {
 
 fn entry_response(entry: &Entry, o: &Options) -> EntryResponse {
     EntryResponse {
+        party: entry.party.map(|p| p.number),
+        role: entry.party.map(|p| p.role),
         kind: entry.kind.as_str(),
         input: entry.input.clone(),
         compared: entry.compared,
@@ -325,6 +409,10 @@ pub struct StreamCell {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StreamEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub party: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<&'static str>,
     pub kind: &'static str,
     pub cells: Vec<StreamCell>,
     pub allow_list_entry_id: Option<i32>,
@@ -362,6 +450,8 @@ pub struct StreamEndLine {
 
 pub fn stream_entry(entry: &Entry, o: &Options) -> StreamEntry {
     StreamEntry {
+        party: entry.party.map(|p| p.number),
+        role: entry.party.map(|p| p.role),
         kind: entry.kind.as_str(),
         cells: entry
             .cells
@@ -421,7 +511,17 @@ impl ScreeningService {
             company_name: body.company_name.clone().unwrap_or_default(),
             address: body.address.clone().unwrap_or_default(),
         };
-        let result = self.screener.screen(&request, &screened, allow_list).expect("validated: at least one field");
+        let parties: Vec<Party> = body
+            .parties
+            .iter()
+            .map(|p| Party {
+                role: p.role().expect("validated: a known role"),
+                name: p.name.clone().unwrap_or_default(),
+                person: p.is_person(),
+                address: p.address.clone().unwrap_or_default(),
+            })
+            .collect();
+        let result = self.screener.screen_parties(&request, &parties, &screened, allow_list).expect("validated: at least one field");
 
         let mut best: HashMap<&str, i32> = HashMap::new();
         for entry in &result.entries {
@@ -475,6 +575,10 @@ impl ScreeningService {
             .collect();
         let mut results = String::new();
         for entry in &result.entries {
+            // A party's number and role (a word from a fixed set): never what was entered.
+            if let Some(p) = entry.party {
+                results.push_str(&format!("party {} {} ", p.number, p.role));
+            }
             results.push_str(entry.kind.as_str());
             if let Some(a) = &entry.allowed_by {
                 results.push_str(&format!(" (allow-list entry {})", a.id));

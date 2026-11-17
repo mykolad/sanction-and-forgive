@@ -43,6 +43,12 @@
             <textarea id="address" name="address" maxlength="300" rows="2" spellcheck="false" placeholder="ул. Ленина 5, Москва — or just a city or a country"></textarea>
           </label>
         </div>
+        <!-- Offered only when the API's status lists the "parties" feature (app.js). -->
+        <fieldset id="parties" class="parties" hidden>
+          <legend class="field-label">Other parties of the shipment <span class="hint">shipper, consignee, notify party…: each against every list</span></legend>
+          <div id="party-rows" class="party-rows"></div>
+          <button type="button" class="secondary" id="add-party">Add a party</button>
+        </fieldset>
         <p class="form-note">Every field is optional; fill in at least one. Nothing you enter is stored.</p>
         <div class="actions">
           <button type="submit" class="primary" id="screen-button">Screen</button>

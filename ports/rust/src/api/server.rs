@@ -188,6 +188,9 @@ struct StatusResponse<'a> {
     state: &'a str,
     version: &'a str,
     matcher_version: &'a str,
+    /// What this implementation offers beyond the common API, for clients (the website) to ask instead of assume:
+    /// "parties", several parties per screening (#65, Rust first).
+    features: &'static [&'static str],
     lists: Vec<ListResponse>,
 }
 
@@ -197,7 +200,13 @@ async fn status(State(s): State<Shared>) -> Response {
     let state = if s.catalog.is_ready() { "ready" } else { "warmingUp" };
     json_response(
         StatusCode::OK,
-        &StatusResponse { state, version: &s.config.version, matcher_version: &s.screenings.screener.matcher_version, lists },
+        &StatusResponse {
+            state,
+            version: &s.config.version,
+            matcher_version: &s.screenings.screener.matcher_version,
+            features: &["parties"],
+            lists,
+        },
     )
 }
 

@@ -236,7 +236,9 @@ has two versions (docs/conformance.md, "Versions"): version 2's golden files (`t
 Rust reference's and change with it (`run.ps1 -Build -UpdateGolden`, Rust and version 2 by default; review the diff);
 version 1's (`golden/v1`) are what .NET and Go answer, regenerated from .NET only when a shared dictionary change moves
 them (`-Version 1` with the .NET image). CI tests Rust at version 2, .NET and Go at version 1; another implementation
-never rewrites a version's golden files. A dictionary change still reaches all three (the files are shared).
+never rewrites a version's golden files. New fields and endpoints (owner's decision on #76) are Rust only: `/api/v1/status` lists them in
+`features` (`parties`: several parties per screening, #65, docs/api.md), the shared website offers them only when listed,
+and their conformance tests are `[SinceVersionFact(2)]`. A dictionary change still reaches all three (the files are shared).
 The dictionaries and `wwwroot` are copied into the ports at build time; never edit copies. The dictionaries are LF
 in every checkout (`.gitattributes`): their bytes are hashed into the matcher version. A dictionary change therefore updates the
 version the ports pin in a test (`ports/go/matching/version_test.go`, `ports/rust/src/matching/mod.rs`) to the one the
