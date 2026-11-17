@@ -304,10 +304,11 @@ impl ListIndex {
                 let mut found: Vec<u32> = lookup_keys(&token).iter().flat_map(|k| postings(k).iter().copied()).collect();
                 found.sort_unstable();
                 found.dedup();
-                let mut extra: Vec<u32> = Vec::new();
+                // A set for membership (thousands of aliases can share a surname's reading), the list for the order.
+                let (mut extra, mut seen): (Vec<u32>, HashSet<u32>) = (Vec::new(), HashSet::default());
                 for k in korean_keys(&token) {
                     for &alias in postings(k) {
-                        if found.binary_search(&alias).is_err() && !extra.contains(&alias) {
+                        if found.binary_search(&alias).is_err() && seen.insert(alias) {
                             extra.push(alias);
                         }
                     }
