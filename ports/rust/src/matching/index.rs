@@ -94,6 +94,8 @@ pub struct ListIndex {
     /// By token key: ln(aliases / aliases with the key), the weight before its floor.
     idf: HashMap<String, f64>,
     aliases_by_fold: HashMap<String, Box<[u32]>>,
+    /// By the fold key of two adjacent words read as one (NameForm::joined).
+    aliases_by_joined: HashMap<String, Box<[u32]>>,
     name_vocabulary: FuzzyVocabulary,
     subjects_by_address_key: HashMap<String, Box<[u32]>>,
     address_vocabulary: FuzzyVocabulary,
@@ -189,12 +191,18 @@ impl ListIndex {
 
         let mut document_frequency: HashMap<String, usize> = HashMap::default();
         let mut by_fold = OrderedPostings::default();
+        let mut by_joined = OrderedPostings::default();
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
                 *document_frequency.entry(token.key().to_string()).or_default() += 1;
                 for k in lookup_keys(&token) {
                     by_fold.post(k, a);
                 }
+            }
+            // Two adjacent words read as one, by fold key (finding is loose, scoring exact), kept apart from the
+            // vocabulary (the fuzzy lookups don't see them).
+            for k in alias.form.joined.iter().filter(|k| !k.is_empty()) {
+                by_joined.post(&fold_key(k), a);
             }
         }
         let mut by_address = OrderedPostings::default();
@@ -210,6 +218,7 @@ impl ListIndex {
         let alias_count = aliases.len().max(1) as f64;
         let idf = document_frequency.into_iter().map(|(k, frequency)| (k, (alias_count / frequency.max(1) as f64).ln())).collect();
         let (fold_keys, aliases_by_fold) = by_fold.packed();
+        let (_, aliases_by_joined) = by_joined.packed();
         let (address_keys, subjects_by_address_key) = by_address.packed();
         let address_vocabulary: Vec<String> = address_keys.into_iter().filter(|k| !k.starts_with('#')).collect();
         ListIndex {
@@ -219,6 +228,7 @@ impl ListIndex {
             addresses,
             idf,
             aliases_by_fold,
+            aliases_by_joined,
             name_vocabulary: FuzzyVocabulary::new(&fold_keys),
             subjects_by_address_key,
             address_vocabulary: FuzzyVocabulary::new(&address_vocabulary),
@@ -277,11 +287,17 @@ impl ListIndex {
 
     /// The aliases with the most votes first (a stable sort: ties in the order of their first vote, the reference's
     /// dictionary order), at most CandidateLimit.
-    fn candidates(&self, query: &PreparedName, state: &mut SearchState, o: &Options) -> Vec<u32> {
+    /// Also returns, sorted, the aliases found through two words read as one (NameForm::joined): the only ones where a
+    /// join can apply, since a word that reads exactly as two folds as they do.
+    fn candidates(&self, query: &PreparedName, state: &mut SearchState, o: &Options) -> (Vec<u32>, Vec<u32>) {
         let votes = &mut state.votes;
         let voted = &mut state.voted;
-        let mut vote = |k: &str, weight: i32| {
-            if let Some(list) = self.aliases_by_fold.get(k) {
+        let mut joinable: Vec<u32> = Vec::new();
+        let mut vote = |postings: &HashMap<String, Box<[u32]>>, k: &str, weight: i32, joined: bool| {
+            if let Some(list) = postings.get(k) {
+                if joined {
+                    joinable.extend(list.iter());
+                }
                 for &alias in list.iter() {
                     if votes[alias as usize] == 0 {
                         voted.push(alias);
@@ -290,18 +306,25 @@ impl ListIndex {
                 }
             }
         };
+        let (by_fold, by_joined) = (&self.aliases_by_fold, &self.aliases_by_joined);
+        // Two entered words the list writes as one, and below, an entered word the list writes as two
+        // (NameForm::joined).
+        for k in query.entity.joined.iter().chain(query.person.joined.iter()).filter(|k| !k.is_empty()) {
+            vote(by_fold, &fold_key(k), 3, true);
+        }
         for token in distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned()) {
             for k in lookup_keys(&token) {
-                vote(k, 3);
+                vote(by_fold, k, 3, false);
+                vote(by_joined, k, 3, true);
             }
             for &group in token.cognate_groups() {
                 for fold in &self.data.cognate_folds[group] {
-                    vote(fold, 2);
+                    vote(by_fold, fold, 2, false);
                 }
             }
             for form in &token.forms {
                 for spelling in self.data.spelling_members(form) {
-                    vote(&fold_key(spelling), 2);
+                    vote(by_fold, &fold_key(spelling), 2, false);
                 }
             }
             let mut near: Vec<&str> = Vec::new();
@@ -313,7 +336,7 @@ impl ListIndex {
                 }
             }
             for other in near {
-                vote(other, 1);
+                vote(by_fold, other, 1, false);
             }
         }
         let mut ids = voted.clone();
@@ -323,7 +346,9 @@ impl ListIndex {
         }
         voted.clear();
         ids.truncate(o.candidate_limit);
-        ids
+        joinable.sort_unstable();
+        joinable.dedup();
+        (ids, joinable)
     }
 
     /// The subjects a name entry finds, best first (then by name): the best one, whatever its percentage, and every
@@ -331,7 +356,7 @@ impl ListIndex {
     pub fn search_name(&self, query: &PreparedName, o: &Options) -> Vec<SubjectMatch> {
         TokenComparer::with(|comparer| {
             let mut state = self.borrow_state();
-            let candidates = self.candidates(query, &mut state, o);
+            let (candidates, joinable) = self.candidates(query, &mut state, o);
             let mut weights: HashMap<*const Token, f64> = HashMap::default();
             let mut weight_of = |token: &Token| *weights.entry(token as *const Token).or_insert_with(|| self.weight(token, o));
             let mut scorer = NameScorer::new(comparer, o, self.data);
@@ -339,6 +364,7 @@ impl ListIndex {
             for alias_id in candidates {
                 let alias = &self.aliases[alias_id as usize];
                 let form = if alias.form.is_person { query.person } else { query.entity };
+                scorer.try_join = joinable.binary_search(&alias_id).is_ok();
                 let score = scorer.score(form, &alias.form, alias.is_weak, &mut weight_of);
                 let slot = state.slot[alias.subject as usize];
                 if slot == 0 {
@@ -397,6 +423,7 @@ impl ListIndex {
                 .map(|r| {
                     let alias = &self.aliases[r.alias];
                     let form = if alias.form.is_person { query.person } else { query.entity };
+                    scorer.try_join = joinable.binary_search(&(r.alias as u32)).is_ok();
                     let details = scorer.explain(form, &alias.form, alias.is_weak, &mut weight_of);
                     let mut alignment = details.explanation;
                     alignment.push(r.address.explanation);

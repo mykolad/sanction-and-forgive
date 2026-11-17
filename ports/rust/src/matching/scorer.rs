@@ -6,6 +6,7 @@ use super::data::MatcherData;
 use super::names::NameForm;
 use super::options::Options;
 use super::text::{to_upper_invariant, Token, TokenRef};
+use super::HashMap;
 
 /// One word of a name alignment, without the entered text.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -57,6 +58,9 @@ struct Evaluation {
     caps: Vec<ScoreCap>,
     percent: i32,
     contained: bool,
+    /// The cores as aligned, when a word one side writes as two was joined (join_compounds): the query's, each word's
+    /// position among the entered core words, and the listed name's.
+    joined: Option<(Vec<TokenRef>, Vec<usize>, Vec<TokenRef>)>,
 }
 
 /// Scores names for one search, on one thread: its buffers are reused from one alias to the next.
@@ -64,12 +68,18 @@ pub struct NameScorer<'a> {
     pub comparer: &'a mut TokenComparer,
     pub options: &'a Options,
     pub data: &'a MatcherData,
+    /// Whether to look for words one side writes as two (join_compounds): a search sets it per alias, on for those its
+    /// joined postings found (where a join can apply at all), so the rest don't pay for the check.
+    pub try_join: bool,
     scratch: Evaluation,
     cells: Vec<Alignment>,
     values: Vec<f64>,
     usable: Vec<bool>,
     columns: Vec<usize>,
     best: Vec<f64>,
+    /// Two adjacent words read as one, by their joined fold key: one token for the whole search, so the weights and
+    /// comparisons cached by token stay right.
+    compounds: HashMap<String, TokenRef>,
 }
 
 const MAX_EXACT_TOKENS: usize = 12;
@@ -84,13 +94,65 @@ impl<'a> NameScorer<'a> {
             comparer,
             options,
             data,
+            try_join: true,
             scratch: Evaluation::default(),
             cells: Vec::new(),
             values: Vec::new(),
             usable: Vec::new(),
             columns: Vec::new(),
             best: Vec::new(),
+            compounds: HashMap::default(),
         }
+    }
+
+    /// The two adjacent words read as one token (their first Latin readings joined: key), made once per search.
+    fn compound(&mut self, key: &str) -> TokenRef {
+        if let Some(token) = self.compounds.get(key) {
+            return token.clone();
+        }
+        let token = TokenRef::new(self.data.token(key));
+        self.compounds.insert(key.to_string(), token.clone());
+        token
+    }
+
+    /// A word one side writes as two: where a word of one name reads exactly as two adjacent words of the other read
+    /// as one (Zhongxing / Zhong Xing, Jongun / Jong-un), the two are one compound word for this comparison, so they
+    /// align one to one. Exactly: fold keys are too loose for this (khan and gia an fold alike). None when there's
+    /// nothing to join (most names: no allocation then).
+    fn join_compounds(&mut self, query: &NameForm, listed: &NameForm) -> Option<(Vec<TokenRef>, Vec<usize>, Vec<TokenRef>)> {
+        if !self.try_join {
+            return None;
+        }
+        let has = |tokens: &[TokenRef], key: &str| !key.is_empty() && tokens.iter().any(|t| t.forms.iter().any(|f| f == key));
+        if !listed.joined.iter().any(|k| has(&query.core, k)) && !query.joined.iter().any(|k| has(&listed.core, k)) {
+            return None;
+        }
+        let listed_join: Vec<bool> = listed.joined.iter().map(|k| has(&query.core, k)).collect();
+        let query_join: Vec<bool> = query.joined.iter().map(|k| has(&listed.core, k)).collect();
+        let mut listed_core = Vec::with_capacity(listed.core.len());
+        let mut j = 0;
+        while j < listed.core.len() {
+            if listed_join.get(j) == Some(&true) {
+                listed_core.push(self.compound(&listed.joined[j]));
+                j += 2;
+            } else {
+                listed_core.push(listed.core[j].clone());
+                j += 1;
+            }
+        }
+        let (mut query_core, mut positions) = (Vec::with_capacity(query.core.len()), Vec::with_capacity(query.core.len()));
+        let mut i = 0;
+        while i < query.core.len() {
+            positions.push(i);
+            if query_join.get(i) == Some(&true) {
+                query_core.push(self.compound(&query.joined[i]));
+                i += 2;
+            } else {
+                query_core.push(query.core[i].clone());
+                i += 1;
+            }
+        }
+        Some((query_core, positions, listed_core))
     }
 
     /// Scores query against one listed alias. Nothing it computes outlives the call: it's the inner loop.
@@ -102,6 +164,7 @@ impl<'a> NameScorer<'a> {
         e.caps.clear();
         e.percent = 0;
         e.contained = false;
+        e.joined = None;
         let value = self.evaluate(query, listed, weak_alias, weight, &mut e, false);
         self.scratch = e;
         value
@@ -124,8 +187,16 @@ impl<'a> NameScorer<'a> {
             return reading.details.unwrap_or_default();
         }
 
-        let mut paired_query = vec![false; query.core.len()];
-        let mut paired_listed = vec![false; listed.core.len()];
+        let identity: Vec<usize>;
+        let (query_core, positions, listed_core) = match &e.joined {
+            Some((q, positions, l)) => (q.as_slice(), positions.as_slice(), l.as_slice()),
+            None => {
+                identity = (0..query.core.len()).collect();
+                (query.core.as_slice(), identity.as_slice(), listed.core.as_slice())
+            }
+        };
+        let mut paired_query = vec![false; query_core.len()];
+        let mut paired_listed = vec![false; listed_core.len()];
         for p in &e.pairs {
             paired_query[p.query] = true;
             paired_listed[p.listed] = true;
@@ -133,29 +204,29 @@ impl<'a> NameScorer<'a> {
         let mut explanation = Vec::new();
         let mut words = Vec::new();
         for p in &e.pairs {
-            explanation.push(describe(&query.core[p.query], &listed.core[p.listed], p.alignment));
+            explanation.push(describe(&query_core[p.query], &listed_core[p.listed], p.alignment));
             words.push(WordAlignment {
-                entered: Some(p.query as i32 + 1),
-                listed: Some(listed.core[p.listed].text.clone()),
+                entered: Some(positions[p.query] as i32 + 1),
+                listed: Some(listed_core[p.listed].text.clone()),
                 how: how(p.alignment.method),
             });
         }
-        for (i, t) in query.core.iter().enumerate() {
+        for (i, t) in query_core.iter().enumerate() {
             if !paired_query[i] {
                 explanation.push(format!("{}: not in the listed name", t.text));
             }
         }
-        for (j, t) in listed.core.iter().enumerate() {
+        for (j, t) in listed_core.iter().enumerate() {
             if !paired_listed[j] {
                 explanation.push(format!("{}: listed, not entered", t.text));
             }
         }
         for (i, &paired) in paired_query.iter().enumerate() {
             if !paired {
-                words.push(WordAlignment { entered: Some(i as i32 + 1), listed: None, how: "NotListed" });
+                words.push(WordAlignment { entered: Some(positions[i] as i32 + 1), listed: None, how: "NotListed" });
             }
         }
-        for (j, t) in listed.core.iter().enumerate() {
+        for (j, t) in listed_core.iter().enumerate() {
             if !paired_listed[j] {
                 words.push(WordAlignment { entered: None, listed: Some(t.text.clone()), how: "NotEntered" });
             }
@@ -212,17 +283,22 @@ impl<'a> NameScorer<'a> {
         }
 
         let mut pairs = std::mem::take(&mut e.pairs);
-        self.align(&query.core, &listed.core, weight, &mut pairs);
+        e.joined = self.join_compounds(query, listed);
+        let (query_core, listed_core) = match &e.joined {
+            Some((q, _, l)) => (q.as_slice(), l.as_slice()),
+            None => (query.core.as_slice(), listed.core.as_slice()),
+        };
+        self.align(query_core, listed_core, weight, &mut pairs);
         let mut aligned = 0.0;
         for p in &pairs {
-            aligned += p.alignment.similarity * (weight(&query.core[p.query]) + weight(&listed.core[p.listed]));
+            aligned += p.alignment.similarity * (weight(&query_core[p.query]) + weight(&listed_core[p.listed]));
         }
         let mut total = 0.0;
-        for t in &query.core {
+        for t in query_core {
             total += weight(t);
         }
         let mut listed_total = 0.0;
-        for t in &listed.core {
+        for t in listed_core {
             listed_total += weight(t);
         }
         total += listed_total;
@@ -230,11 +306,11 @@ impl<'a> NameScorer<'a> {
 
         // Every pair holds one query word and one listed word, each at most once: a side is all aligned when it has
         // as many words as there are pairs.
-        let unaligned = pairs.len() < query.core.len() || pairs.len() < listed.core.len();
-        let shorter = query.core.len().min(listed.core.len());
+        let unaligned = pairs.len() < query_core.len() || pairs.len() < listed_core.len();
+        let shorter = query_core.len().min(listed_core.len());
         let contained = shorter >= 2
             && pairs.len() == shorter
-            && query.core.len() != listed.core.len()
+            && query_core.len() != listed_core.len()
             && pairs.iter().all(|p| {
                 matches!(
                     p.alignment.method,
@@ -250,10 +326,10 @@ impl<'a> NameScorer<'a> {
 
         if !query.is_person
             && !listed.is_person
-            && query.core.len() == 1
-            && listed.core.len() == 1
+            && query_core.len() == 1
+            && listed_core.len() == 1
             && pairs.len() == 1
-            && query.core[0].is_short_core()
+            && query_core[0].is_short_core()
             && !intersects(&query.legal_classes, &listed.legal_classes)
         {
             let reason =
@@ -271,8 +347,8 @@ impl<'a> NameScorer<'a> {
         }
         if has_initials {
             e.caps.push(ScoreCap { cap: o.not_all_aligned_cap, reason: "Initials couldn't be checked against given names" });
-            let unaligned_query = unpaired(&query.core, &pairs, true);
-            let unaligned_listed = unpaired(&listed.core, &pairs, false);
+            let unaligned_query = unpaired(query_core, &pairs, true);
+            let unaligned_listed = unpaired(listed_core, &pairs, false);
             let listed_candidates: Vec<TokenRef> = unaligned_listed.into_iter().chain(listed.initials.iter().cloned()).collect();
             let query_candidates: Vec<TokenRef> = unaligned_query.into_iter().chain(query.initials.iter().cloned()).collect();
             if self.contradicts(&query.initials, &listed_candidates) || self.contradicts(&listed.initials, &query_candidates) {

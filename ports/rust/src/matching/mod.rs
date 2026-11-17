@@ -317,6 +317,65 @@ mod tests {
         }
     }
 
+    /// A name one side writes as one word and the other as two (#93): the two read together align with the one, both
+    /// ways, and the list finds it by them.
+    #[test]
+    fn a_word_written_as_two_aligns_with_the_two() {
+        for (query, listed, kind) in [
+            ("Zhongxing Telecom", "Zhong Xing Telecom", SubjectKind::Entity),
+            ("Zhong Xing Telecom", "Zhongxing Telecom", SubjectKind::Entity),
+            ("Huawei", "Hua Wei", SubjectKind::Entity),
+            ("Hua Wei Technologies", "Huawei Technologies", SubjectKind::Entity),
+            ("Kim Jongun", "Kim Jong Un", SubjectKind::Individual),
+            ("Kim Jong Un", "Kim Jongun", SubjectKind::Individual),
+            ("Wang Xiaoming", "Wang Xiao-ming", SubjectKind::Individual),
+            ("Xiao Ming Wang", "Wang Xiaoming", SubjectKind::Individual),
+            ("Mc Donald Shipping", "McDonald Shipping", SubjectKind::Entity),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// Joining is for words that read together as the other side's word: different names stay apart.
+    #[test]
+    fn joining_words_never_makes_different_names_match() {
+        for (query, listed, kind) in [
+            ("Zhongxing Telecom", "Zhong Hua Telecom", SubjectKind::Entity),
+            ("Kim Jongun", "Kim Jong Il", SubjectKind::Individual),
+            ("Hua Wei", "Weihua", SubjectKind::Entity),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+    }
+
+    /// The explanation counts entered words as entered: two joined are the first's, and the word after them keeps its
+    /// own place (Telecom is the third entered).
+    #[test]
+    fn a_joined_pair_is_explained_by_the_entered_words() {
+        let subject = ListedSubject {
+            external_id: "X-1".to_string(),
+            kind: SubjectKind::Entity,
+            primary_name: "Zhongxing Telecom".to_string(),
+            names: vec![ListedName { full_name: "Zhongxing Telecom".to_string(), is_weak: false }],
+            addresses: Vec::new(),
+            programme: None,
+            source_url: None,
+        };
+        let list = ScreenedList {
+            code: "eu".to_string(),
+            name: "EU".to_string(),
+            index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
+        };
+        let request =
+            ScreeningRequest { receiver_name: String::new(), company_name: "Zhong Xing Telecom".to_string(), address: String::new() };
+        let result = Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap();
+        let best = result.entries[0].cells[0].best.as_ref().unwrap();
+        let entered: Vec<Option<i32>> = best.words.iter().map(|w| w.entered).collect();
+        assert_eq!(entered, [Some(1), Some(3)], "{:?}", best.words);
+    }
+
     /// The same normalisation never makes different names match.
     #[test]
     fn different_arabic_names_still_dont_match() {
