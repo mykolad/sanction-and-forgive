@@ -13,6 +13,7 @@ key to the API's audit log, so it carries the booking id, never a name.
 """
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -66,8 +67,9 @@ def screen(reference, receiver, company, address):
             else:
                 print(f"{reference}: the service answered {error.code}", file=sys.stderr)
             return None
-        except (urllib.error.URLError, ConnectionError, TimeoutError, ValueError) as error:
-            # No connection, a reset (ConnectionError), a timeout, or an answer cut off (ValueError: not JSON).
+        except (urllib.error.URLError, ConnectionError, TimeoutError, http.client.HTTPException, ValueError) as error:
+            # No connection, a reset (ConnectionError), a timeout, or an answer cut off: shorter than its length
+            # (http.client.IncompleteRead) or not whole JSON (ValueError).
             if left() > 4:
                 print(f"{reference}: no answer ({type(error).__name__}), trying again in 3 s", file=sys.stderr)
                 time.sleep(3)
