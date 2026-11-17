@@ -341,6 +341,18 @@ mod tests {
         }
     }
 
+    /// A title doesn't keep a name from reading as Korean, and a one-letter surname is the surname, not an initial.
+    #[test]
+    fn titles_and_one_letter_surnames_keep_a_name_korean() {
+        for (query, listed) in [("General Ri Yong Ho", "Lee Yong Ho"), ("I Yong Ho", "Ri Yong Ho"), ("Ri Yong Ho", "Yong Ho I")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        // Initials that aren't a surname stay initials.
+        let (outcome, percent) = screen("Kim J H", "Kim Jong Hun", SubjectKind::Individual);
+        assert_ne!(outcome, Some(Outcome::Match), "{percent:?}");
+    }
+
     /// Only a Korean name's words read alike: a different given name stays different, and Jung or Chung in a name
     /// that isn't Korean keeps its own spelling.
     #[test]

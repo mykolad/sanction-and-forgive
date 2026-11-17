@@ -112,6 +112,11 @@ pub fn is_korean_name(words: &[String]) -> bool {
     table.surnames.contains_key(&latin(&words[0])) || table.surnames.contains_key(&latin(&words[words.len() - 1]))
 }
 
+/// Whether word spells a Korean surname (korean.json surnames), I and O among them.
+pub fn is_surname(word: &str) -> bool {
+    KOREAN.surnames.contains_key(&latin(word))
+}
+
 /// A syllable's readings: its classes, and where the South drops or changes an initial r or n (before i or y: Ri, Yi;
 /// otherwise r as n: Ro, No), the reading without it too.
 fn syllable_readings(s: &Syllable) -> Vec<String> {

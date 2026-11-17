@@ -797,11 +797,20 @@ impl<'a> Tokenizer<'a> {
             self.replace_legal_phrases(join_and_split_cjk(words(&remove_hyphenated_honorifics(value)))),
         );
         let mut tokens = Vec::with_capacity(words.len());
-        // A Korean name's words carry its readings (korean.rs); the same word in any other name doesn't.
-        let korean = super::korean::is_korean_name(&words);
+        // A Korean name's words carry its readings (korean.rs); the same word in any other name doesn't. Titles and stop
+        // words don't count against it (General Ri Yong Ho), as the person reading drops them, and a one-letter
+        // surname first or last (I Yong Ho) is the surname, not an initial.
+        let named: Vec<String> = words
+            .iter()
+            .filter(|w| !self.data.honorifics.contains(w.as_str()) && !self.data.stop_words.contains(w.as_str()))
+            .cloned()
+            .collect();
+        let korean = super::korean::is_korean_name(&named);
+        let surname_letter =
+            |word: &String| korean && super::korean::is_surname(word) && (named.first() == Some(word) || named.last() == Some(word));
         let mut i = 0;
         while i < words.len() {
-            if !join_initials || !is_single_letter(&words[i]) {
+            if !join_initials || !is_single_letter(&words[i]) || surname_letter(&words[i]) {
                 let token = if korean { self.get_korean(&words[i]) } else { self.get(&words[i]) };
                 tokens.push(RawToken { token, initials: None });
                 i += 1;
