@@ -5,9 +5,11 @@ use super::HashMap;
 use std::sync::Arc;
 
 use super::addresses::parse_address;
+use super::addresses::AddressState;
 use super::data::{data, MatcherData};
 use super::destinations::{DestinationNotice, Destinations};
-use super::index::{ListIndex, PreparedName, SubjectMatch};
+use super::identifiers::{comparable, compare_birth_date, identifier_key, BirthDateComparison};
+use super::index::{ListIndex, ListedSubject, PreparedName, SubjectMatch};
 use super::names::NameParser;
 use super::options::{Options, Outcome};
 use super::text::{RawToken, Tokenizer};
@@ -18,6 +20,11 @@ pub struct ScreeningRequest {
     pub receiver_name: String,
     pub company_name: String,
     pub address: String,
+    /// Identifiers entered for the receiver and for the company (#68), as written; each compared by its key.
+    pub receiver_identifiers: Vec<String>,
+    pub company_identifiers: Vec<String>,
+    /// The receiver's date of birth (#68), as identifiers::entered_birth_date reads it.
+    pub receiver_birth_date: Option<String>,
 }
 
 /// A list as the screener sees it; no index means Not checked.
@@ -46,13 +53,16 @@ impl EntryKind {
 }
 
 /// A shipment's party (#65, Rust first): its role, and a name (a person's or a company's), an address, or both.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Party {
     /// One of ROLES: a word from a fixed set, never entered text, so the audit line can name it.
     pub role: &'static str,
     pub name: String,
     pub person: bool,
     pub address: String,
+    /// The name's identifiers and, for a person, date of birth (#68).
+    pub identifiers: Vec<String>,
+    pub birth_date: Option<String>,
 }
 
 /// The roles a party can have.
@@ -105,6 +115,8 @@ pub struct Entry {
     pub allowed_by: Option<AllowListEntry>,
     /// The party it belongs to; None for the request's own receiver, company and address.
     pub party: Option<PartyTag>,
+    /// How many identifiers were entered with the name (#68): the audit line says so, never which.
+    pub identifiers: usize,
     /// An address in a destination under broad restrictions (#67): it raises the outcome to at least Review.
     pub destination: Option<DestinationNotice>,
 }
@@ -177,11 +189,21 @@ impl Screener {
         destinations: &Destinations,
     ) -> Result<ScreeningResult, NothingEntered> {
         let checks = Checks { lists, allow_list, destinations };
-        let mut entries = self.entries(&request.receiver_name, &request.company_name, &request.address, None, &checks);
+        let own = Particulars {
+            receiver_identifiers: &request.receiver_identifiers,
+            company_identifiers: &request.company_identifiers,
+            birth_date: request.receiver_birth_date.as_deref(),
+        };
+        let mut entries = self.entries(&request.receiver_name, &request.company_name, &request.address, None, &own, &checks);
         for (i, party) in parties.iter().enumerate() {
             let tag = PartyTag { number: i as u32 + 1, role: party.role };
             let (receiver, company) = if party.person { (party.name.as_str(), "") } else { ("", party.name.as_str()) };
-            entries.extend(self.entries(receiver, company, &party.address, Some(tag), &checks));
+            let particulars = Particulars {
+                receiver_identifiers: if party.person { &party.identifiers } else { &[] },
+                company_identifiers: if party.person { &[] } else { &party.identifiers },
+                birth_date: if party.person { party.birth_date.as_deref() } else { None },
+            };
+            entries.extend(self.entries(receiver, company, &party.address, Some(tag), &particulars, &checks));
         }
         if entries.is_empty() {
             return Err(NothingEntered);
@@ -196,7 +218,15 @@ impl Screener {
     }
 
     /// One party's entries (or the request's own): a receiver, a company and an address, each when entered.
-    fn entries(&self, receiver: &str, company: &str, address: &str, party: Option<PartyTag>, checks: &Checks) -> Vec<Entry> {
+    fn entries(
+        &self,
+        receiver: &str,
+        company: &str,
+        address: &str,
+        party: Option<PartyTag>,
+        particulars: &Particulars,
+        checks: &Checks,
+    ) -> Vec<Entry> {
         let (lists, allow_list) = (checks.lists, checks.allow_list);
         let (receiver, company, address) = (clean(receiver), clean(company), clean(address));
         let mut tokenizer = Tokenizer::new(self.data);
@@ -214,17 +244,33 @@ impl Screener {
             let compared =
                 if address_form.is_some() { "Name, with the address where the list has one" } else { "Name only: no address entered" };
             let allowed_by = allow_list.find_tokens(&tokens).cloned();
+            let entered = if kind == EntryKind::Receiver { particulars.receiver_identifiers } else { particulars.company_identifiers };
+            let keys: Vec<String> = entered.iter().map(|v| identifier_key(v)).filter(|k| comparable(k)).collect();
+            let birth_date = if kind == EntryKind::Receiver { particulars.birth_date } else { None };
             let cells = lists
                 .iter()
                 .map(|list| {
-                    let mut cell = self.to_cell(list, |index| index.search_name(&prepared, &self.options));
+                    let mut cell = self.to_cell(list, |index| {
+                        let mut matches = index.search_name(&prepared, &self.options);
+                        apply_particulars(index, &mut matches, &keys, birth_date, &self.options);
+                        matches
+                    });
                     if allowed_by.is_some() && cell.outcome == Some(Outcome::Review) {
                         cell.allowed = true;
                     }
                     cell
                 })
                 .collect();
-            entries.push(Entry { kind, input: name.to_string(), compared, cells, allowed_by, party, destination: None });
+            entries.push(Entry {
+                kind,
+                input: name.to_string(),
+                compared,
+                cells,
+                allowed_by,
+                party,
+                destination: None,
+                identifiers: keys.len(),
+            });
         }
         if let Some(form) = &address_form {
             let cells = lists.iter().map(|list| self.to_cell(list, |index| index.search_address(form, &self.options))).collect();
@@ -237,6 +283,7 @@ impl Screener {
                 allowed_by: None,
                 party,
                 destination,
+                identifiers: 0,
             });
         }
         entries
@@ -285,6 +332,79 @@ impl Screener {
         let outcome = self.options.to_outcome(percent);
         Cell { list: list.code.clone(), checked: true, percent: Some(percent), outcome: Some(outcome), best, others, allowed: false }
     }
+}
+
+/// What was entered with a party's name besides it (#68): identifiers for the receiver or the company, and the
+/// receiver's date of birth.
+struct Particulars<'a> {
+    receiver_identifiers: &'a [String],
+    company_identifiers: &'a [String],
+    birth_date: Option<&'a str>,
+}
+
+/// The owner's rules for identifiers and dates of birth (#68), on one list's matches for a name:
+/// - a subject that lists an identifier equal to an entered one is a Match (100%), whether or not its name matched,
+///   the identifier its own explained line;
+/// - a subject the name found whose listed identifiers are none of the entered ones keeps its percentage: a line says
+///   they differ (never lower: a list may have an old or a second passport);
+/// - a date of birth is said to be the same as or different from the listed ones, and changes nothing.
+fn apply_particulars(index: &ListIndex, matches: &mut Vec<SubjectMatch>, keys: &[String], birth_date: Option<&str>, o: &Options) {
+    let say = |m: &mut SubjectMatch, line: String, first: bool| {
+        if first {
+            m.alignment.insert(0, line.clone());
+            m.notes.insert(0, line);
+        } else {
+            m.alignment.push(line.clone());
+            m.notes.push(line);
+        }
+    };
+    let mut identified: Vec<Arc<ListedSubject>> = Vec::new();
+    if !keys.is_empty() {
+        for (subject, identifier) in index.identified(keys) {
+            let country = identifier.country.as_deref().map(|c| format!(" ({c})")).unwrap_or_default();
+            let line = format!("Identifier: equals the listed {} {}{country}", identifier.kind, identifier.value);
+            match matches.iter_mut().find(|m| Arc::ptr_eq(&m.subject, &subject)) {
+                Some(m) => {
+                    m.percent = 100;
+                    m.outcome = o.to_outcome(100);
+                    say(m, line, true);
+                }
+                None => matches.push(SubjectMatch {
+                    alias: subject.primary_name.clone(),
+                    subject: subject.clone(),
+                    percent: 100,
+                    outcome: o.to_outcome(100),
+                    alignment: vec![line.clone(), "Name: not what matched: the identifier did".to_string()],
+                    address_state: AddressState::NotCompared,
+                    words: Vec::new(),
+                    notes: vec![line],
+                }),
+            }
+            identified.push(subject);
+        }
+        for m in matches.iter_mut() {
+            if m.outcome == Outcome::NoMatch || m.subject.identifiers.is_empty() || identified.iter().any(|s| Arc::ptr_eq(s, &m.subject)) {
+                continue;
+            }
+            let listed: Vec<String> = m.subject.identifiers.iter().take(3).map(|i| format!("{} {}", i.kind, i.value)).collect();
+            let more = if m.subject.identifiers.len() > 3 { ", …" } else { "" };
+            say(m, format!("Identifiers: the entered ones aren't among the listed ({}{more}); a person decides", listed.join(", ")), false);
+        }
+    }
+    if let Some(entered) = birth_date {
+        for m in matches.iter_mut().filter(|m| m.outcome != Outcome::NoMatch && !m.subject.birth_dates.is_empty()) {
+            let listed = m.subject.birth_dates.join(", ");
+            let same = m.subject.birth_dates.iter().any(|l| compare_birth_date(entered, l) == Some(BirthDateComparison::Same));
+            let line = if same {
+                format!("Date of birth: the entered one is among the listed ({listed})")
+            } else {
+                format!("Date of birth: differs from the listed ({listed})")
+            };
+            say(m, line, false);
+        }
+    }
+    // Best first again, then by name, as search_name orders them.
+    matches.sort_by(|a, b| b.percent.cmp(&a.percent).then_with(|| a.subject.primary_name.cmp(&b.subject.primary_name)));
 }
 
 /// What one screening is checked against.

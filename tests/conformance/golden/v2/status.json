@@ -4,7 +4,8 @@
   "matcherVersion": "*",
   "features": [
     "parties",
-    "destinations"
+    "destinations",
+    "identifiers"
   ],
   "lists": [
     {

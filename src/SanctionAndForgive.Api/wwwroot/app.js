@@ -11,6 +11,13 @@ const DESTINATION = { restricted: "Destination under broad restrictions", possib
 // A shipment's other parties (the "parties" feature, when the API offers it): the API's roles, and how they read.
 const ROLES = { shipper: "Shipper", consignee: "Consignee", notifyParty: "Notify party", forwarder: "Forwarder", carrier: "Carrier", endUser: "End user", other: "Other party" };
 const MAX_PARTIES = 10;
+// Identifiers and dates of birth (the "identifiers" feature, when the API offers it).
+let identifiersOffered = false;
+
+// The identifiers typed in one field: commas or semicolons between them.
+function identifiersIn(text) {
+  return text.split(/[,;]/).map((value) => value.trim()).filter(Boolean);
+}
 
 const $ = (id) => document.getElementById(id);
 const form = $("screen-form");
@@ -67,6 +74,8 @@ async function loadStatus() {
     const status = await response.json();
     lists = status.lists;
     $("parties").hidden = !(status.features || []).includes("parties");
+    identifiersOffered = (status.features || []).includes("identifiers");
+    document.querySelectorAll(".particulars").forEach((field) => { field.hidden = !identifiersOffered; });
     $("version").textContent = `Version ${status.version}, matcher ${status.matcherVersion}.`;
     $("sources").textContent = lists.length
       ? lists.map((list) => `${list.name} (${listAsOf(list)})`).join("; ") + "."
@@ -117,6 +126,14 @@ async function screen(event) {
     companyName: $("companyName").value.trim() || null,
     address: $("address").value.trim() || null,
   };
+  if (identifiersOffered) {
+    const receiverIds = identifiersIn($("receiverIdentifiers").value);
+    const companyIds = identifiersIn($("companyIdentifiers").value);
+    const dateOfBirth = $("receiverDateOfBirth").value.trim();
+    if (receiverIds.length) body.receiverIdentifiers = receiverIds;
+    if (companyIds.length) body.companyIdentifiers = companyIds;
+    if (dateOfBirth) body.receiverDateOfBirth = dateOfBirth;
+  }
   const parties = $("parties").hidden ? [] : partiesEntered();
   if (parties.some((party) => !party.name && !party.address)) {
     showState("Enter each party's name, its address, or both (or remove it).", true);
@@ -164,7 +181,16 @@ async function screen(event) {
     const result = await response.json();
     if (request !== current) return;
     showState("");
-    shown = { result, entered: { Receiver: body.receiverName, Company: body.companyName, Address: body.address }, parties: body.parties || [], at: new Date() };
+    shown = {
+      result,
+      entered: {
+        Receiver: body.receiverName, Company: body.companyName, Address: body.address,
+        "Receiver's ID numbers": (body.receiverIdentifiers || []).join(", "), "Receiver's date of birth": body.receiverDateOfBirth,
+        "Company's ID numbers": (body.companyIdentifiers || []).join(", "),
+      },
+      parties: body.parties || [],
+      at: new Date(),
+    };
     render(result);
     buildRecord();
   } catch {
@@ -262,12 +288,19 @@ function entryTitle(entry) {
 
 // The parties as entered, every row in order: the numbers in the result are the rows' numbers.
 function partiesEntered() {
-  return [...$("party-rows").children].map((row) => ({
-    role: row.querySelector(".party-role").value,
-    kind: row.querySelector(".party-kind").value,
-    name: row.querySelector(".party-name").value.trim() || null,
-    address: row.querySelector(".party-address").value.trim() || null,
-  }));
+  return [...$("party-rows").children].map((row) => {
+    const party = {
+      role: row.querySelector(".party-role").value,
+      kind: row.querySelector(".party-kind").value,
+      name: row.querySelector(".party-name").value.trim() || null,
+      address: row.querySelector(".party-address").value.trim() || null,
+    };
+    const ids = row.querySelector(".party-ids");
+    if (ids && identifiersIn(ids.value).length) party.identifiers = identifiersIn(ids.value);
+    const dateOfBirth = row.querySelector(".party-dob");
+    if (dateOfBirth && dateOfBirth.value.trim() && party.kind === "person") party.dateOfBirth = dateOfBirth.value.trim();
+    return party;
+  });
 }
 
 function addParty() {
@@ -281,6 +314,10 @@ function addParty() {
       el("input", { class: "party-name", maxlength: "300", autocomplete: "off", spellcheck: "false" })),
     el("label", { class: "field" }, el("span", { class: "field-label" }, "Kind"),
       el("select", { class: "party-kind" }, el("option", { value: "company" }, "Company"), el("option", { value: "person" }, "Person"))),
+    identifiersOffered ? el("label", { class: "field" }, el("span", { class: "field-label" }, "ID numbers", el("span", { class: "hint" }, "commas between")),
+      el("input", { class: "party-ids", maxlength: "400", autocomplete: "off", spellcheck: "false" })) : null,
+    identifiersOffered ? el("label", { class: "field" }, el("span", { class: "field-label" }, "Date of birth", el("span", { class: "hint" }, "a person's")),
+      el("input", { class: "party-dob", maxlength: "10", autocomplete: "off", spellcheck: "false", placeholder: "YYYY-MM-DD" })) : null,
     el("label", { class: "field field-wide" }, el("span", { class: "field-label" }, "Address", el("span", { class: "hint" }, "any format")),
       el("textarea", { class: "party-address", maxlength: "300", rows: "1", spellcheck: "false" })),
     el("button", { type: "button", class: "secondary party-remove", onclick: () => { row.remove(); partiesChanged(); } }, "Remove"));
@@ -337,6 +374,10 @@ function showDetail(button, cell, entry, list) {
       el("dt", {}, "Type"), el("dd", {}, candidate.type === "Unknown" ? "Not stated by the list" : candidate.type),
       el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
       el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses.length ? el("ul", {}, candidate.listedAddresses.map((address) => el("li", {}, address))) : "None listed"),
+      candidate.listedIdentifiers ? el("dt", {}, "Listed identifiers") : null,
+      candidate.listedIdentifiers ? el("dd", {}, el("ul", {}, candidate.listedIdentifiers.map((id) => el("li", {}, identifierText(id))))) : null,
+      candidate.listedBirthDates ? el("dt", {}, "Listed dates of birth") : null,
+      candidate.listedBirthDates ? el("dd", {}, candidate.listedBirthDates.join(", ")) : null,
       el("dt", {}, "Address"), el("dd", {}, addressText(candidate.addressState, entry)),
       el("dt", {}, "Compared"), el("dd", {}, entry.compared),
       el("dt", {}, "Official record"), el("dd", {}, candidate.sourceUrl ? el("a", { href: candidate.sourceUrl, target: "_blank", rel: "noopener noreferrer" }, "Open the list's own record") : `${list.name}, id ${candidate.externalId}`)),
@@ -347,6 +388,11 @@ function showDetail(button, cell, entry, list) {
       el("ul", {}, cell.otherHits.map((hit) => el("li", {}, `${hit.listedName} — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null,
   ].filter(Boolean));
   detail.hidden = false;
+}
+
+// A listed identifier as the detail panel and the record show it: kind, value, issuing country.
+function identifierText(id) {
+  return `${id.kind}: ${id.value}${id.country ? ` (${id.country})` : ""}`;
 }
 
 // ---- The printed record ----
@@ -385,6 +431,10 @@ function buildRecord() {
       el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
       el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
       el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses && candidate.listedAddresses.length ? candidate.listedAddresses.join("; ") : "None listed"),
+      candidate.listedIdentifiers ? el("dt", {}, "Listed identifiers") : null,
+      candidate.listedIdentifiers ? el("dd", {}, candidate.listedIdentifiers.map(identifierText).join("; ")) : null,
+      candidate.listedBirthDates ? el("dt", {}, "Listed dates of birth") : null,
+      candidate.listedBirthDates ? el("dd", {}, candidate.listedBirthDates.join(", ")) : null,
       el("dt", {}, "Address"), el("dd", {}, addressText(candidate.addressState, entry)),
       el("dt", {}, "Official record"), el("dd", {}, candidate.sourceUrl || `${list ? list.name : cell.list}, id ${candidate.externalId}`)),
     el("ul", {}, (candidate.alignment || []).map((line) => el("li", {}, line))));
@@ -397,10 +447,12 @@ function buildRecord() {
       el("dt", {}, "Screened"), el("dd", {}, `${when(at)} (${at.toISOString()})`),
       el("dt", {}, "Result"), el("dd", {}, el("strong", {}, OVERALL[result.outcome] || result.outcome), ". ", result.summary),
       ...["Receiver", "Company", "Address"].flatMap((kind) => [el("dt", {}, `${kind} entered`), el("dd", {}, entered[kind] || "—")]),
+      ...["Receiver's ID numbers", "Receiver's date of birth", "Company's ID numbers"].filter((label) => entered[label])
+        .flatMap((label) => [el("dt", {}, label), el("dd", {}, entered[label])]),
       // Each party as entered, numbered as the result numbers them.
       ...shown.parties.flatMap((party, i) => [
         el("dt", {}, `Party ${i + 1}, ${(ROLES[party.role] || party.role).toLowerCase()} (${party.kind === "person" ? "person" : "company"})`),
-        el("dd", {}, [party.name, party.address].filter(Boolean).join(" · ") || "—")])),
+        el("dd", {}, [party.name, party.address, party.identifiers && `ID numbers ${party.identifiers.join(", ")}`, party.dateOfBirth && `born ${party.dateOfBirth}`].filter(Boolean).join(" · ") || "—")])),
     el("h2", {}, "Lists searched"),
     el("table", { class: "print-table" },
       el("thead", {}, el("tr", {}, el("th", {}, "List"), el("th", {}, "As of"), result.entries.map((entry) => el("th", {}, entryTitle(entry))))),

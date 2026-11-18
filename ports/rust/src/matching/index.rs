@@ -1,6 +1,7 @@
 //! One list's in-memory index (spec section 5.5): aliases read both ways, document frequencies, postings by fold key,
 //! fuzzy vocabularies, address postings. Immutable once built.
 
+use super::identifiers::listed_keys;
 use super::{HashMap, HashSet};
 use std::any::Any;
 use std::sync::{Arc, Mutex};
@@ -42,6 +43,18 @@ pub struct ListedSubject {
     pub addresses: Vec<ListedAddress>,
     pub programme: Option<String>,
     pub source_url: Option<String>,
+    /// Identifiers the list gives (#68): an entered one equal to one of them makes this subject a Match.
+    pub identifiers: Vec<ListedIdentifier>,
+    /// Dates of birth the list gives (#68), in the parsers' form ("1960-03-12", "1963", "1955..1957").
+    pub birth_dates: Vec<String>,
+}
+
+/// An identifier as a list gives it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedIdentifier {
+    pub kind: String,
+    pub value: String,
+    pub country: Option<String>,
 }
 
 /// One listed subject's match for one entry: the best of its names.
@@ -99,6 +112,8 @@ pub struct ListIndex {
     name_vocabulary: FuzzyVocabulary,
     subjects_by_address_key: HashMap<String, Box<[u32]>>,
     address_vocabulary: FuzzyVocabulary,
+    /// By identifier key (identifiers::listed_keys, #68): the subjects that list it, each once.
+    subjects_by_identifier: HashMap<String, Box<[u32]>>,
     states: Mutex<Vec<SearchState>>,
     memo: Mutex<HashMap<String, Arc<dyn Any + Send + Sync>>>,
 }
@@ -231,9 +246,22 @@ impl ListIndex {
         let (_, aliases_by_joined) = by_joined.packed();
         let (address_keys, subjects_by_address_key) = by_address.packed();
         let address_vocabulary: Vec<String> = address_keys.into_iter().filter(|k| !k.starts_with('#')).collect();
+        let mut by_identifier: HashMap<String, Vec<u32>> = HashMap::default();
+        for (s, subject) in subjects.iter().enumerate() {
+            for identifier in &subject.identifiers {
+                for key in listed_keys(&identifier.value) {
+                    let ids = by_identifier.entry(key).or_default();
+                    if ids.last() != Some(&(s as u32)) {
+                        ids.push(s as u32);
+                    }
+                }
+            }
+        }
+        let subjects_by_identifier = by_identifier.into_iter().map(|(k, v)| (k, v.into_boxed_slice())).collect();
         ListIndex {
             data,
             subjects: subjects.into_iter().map(Arc::new).collect(),
+            subjects_by_identifier,
             aliases,
             addresses,
             idf,
@@ -249,6 +277,25 @@ impl ListIndex {
 
     pub fn subjects(&self) -> &[Arc<ListedSubject>] {
         &self.subjects
+    }
+
+    /// The subjects that list an identifier equal to an entered one (its key, identifiers::identifier_key), each with
+    /// the listed identifier that matched, in list order, each subject once.
+    pub fn identified(&self, entered_keys: &[String]) -> Vec<(Arc<ListedSubject>, ListedIdentifier)> {
+        let mut found: Vec<(Arc<ListedSubject>, ListedIdentifier)> = Vec::new();
+        for key in entered_keys {
+            for &s in postings(&self.subjects_by_identifier, key) {
+                let subject = &self.subjects[s as usize];
+                if found.iter().any(|(f, _)| Arc::ptr_eq(f, subject)) {
+                    continue;
+                }
+                if let Some(identifier) = subject.identifiers.iter().find(|i| listed_keys(&i.value).contains(key)) {
+                    found.push((subject.clone(), identifier.clone()));
+                }
+            }
+        }
+        found.sort_by_key(|(subject, _)| self.subjects.iter().position(|s| Arc::ptr_eq(s, subject)));
+        found
     }
 
     pub fn alias_count(&self) -> usize {

@@ -245,7 +245,8 @@ them (`-Version 1` with the .NET image). CI tests Rust at version 2, .NET and Go
 never rewrites a version's golden files. New fields and endpoints (owner's decision on #76) are Rust only: `/api/v1/status` lists them in
 `features` (`parties`: several parties per screening, #65; `destinations`: the table of destinations under broad
 restrictions, #67, kept on the admin page in `RestrictedDestinations`, whose migration comes from .NET like every
-table; docs/api.md), the shared website offers them only when listed,
+table; `identifiers`: identifiers and dates of birth entered with a name, #68; docs/api.md), the shared website
+offers them only when listed,
 and their conformance tests are `[SinceVersionFact(2)]`. A dictionary change still reaches all three (the files are shared).
 The dictionaries and `wwwroot` are copied into the ports at build time; never edit copies. The dictionaries are LF
 in every checkout (`.gitattributes`): their bytes are hashed into the matcher version. A dictionary change therefore updates the

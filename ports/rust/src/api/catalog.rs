@@ -8,7 +8,9 @@ use chrono::Duration;
 use tokio::sync::Mutex;
 
 use crate::log::Logger;
-use crate::matching::{AllowList, AllowListEntry, Destinations, ListIndex, ListedAddress, ListedName, ListedSubject, SubjectKind};
+use crate::matching::{
+    AllowList, AllowListEntry, Destinations, ListIndex, ListedAddress, ListedIdentifier, ListedName, ListedSubject, SubjectKind,
+};
 use crate::store::db::{Database, DbResult};
 use crate::store::queries::{self, HistoryEntry, Subject, Time};
 
@@ -492,6 +494,8 @@ pub fn to_listed(s: Subject) -> ListedSubject {
             .collect(),
         programme: s.programmes,
         source_url: s.source_url,
+        identifiers: s.identifiers.into_iter().map(|i| ListedIdentifier { kind: i.kind, value: i.value, country: i.country }).collect(),
+        birth_dates: s.birth_dates,
     }
 }
 
