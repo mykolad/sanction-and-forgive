@@ -611,7 +611,8 @@ fn parse_new_zealand_ships(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubject>,
             }
         }
         b.add_imo_number(cell(Some(imo)).as_deref(), "IMO number as listed");
-        out.extend(b.build());
+        // A ship listed without a name is a broken file, never a ship quietly lost.
+        out.push(b.build().ok_or_else(|| format_error(format!("Ship {id} in New Zealand's Ships sheet has no name.")))?);
     }
     Ok(out)
 }
@@ -967,6 +968,8 @@ mod tests {
         assert!(super::parse_new_zealand_ships(vec![row(&["Ship"])]).is_err());
         let unnamed = row(&["Ship", "", "9288693", "Andaman Skies", "45827", "", "", "Sanctioned", ""]);
         assert!(super::parse_new_zealand_ships(vec![header.clone(), unnamed]).is_err());
+        let nameless = row(&["Ship", "SHP-9", "9288693", "", "45827", "", "", "Sanctioned", ""]);
+        assert!(super::parse_new_zealand_ships(vec![header.clone(), nameless]).is_err());
         let blank = row(&["", "", "", "", "", "", "", "", ""]);
         assert!(super::parse_new_zealand_ships(vec![header, blank]).unwrap().is_empty());
     }
