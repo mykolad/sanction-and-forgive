@@ -315,7 +315,7 @@ union isfuzzy=true
   (ContainerAppConsoleLogs_CL)
 | where tostring(column_ifexists("ContainerAppName_s", "")) == "__APP__"
 | extend Entry = parse_json(tostring(column_ifexists("Log_s", "")))
-| extend Message = tostring(Entry.Message), Reference = tostring(Entry.Reference)
+| extend Message = tostring(Entry.Message), Reference = coalesce(tostring(Entry.Reference), tostring(Entry.State.Reference))
 | where Message startswith "Screening " and not(Reference startswith "smoke-") and not(Reference startswith "load-")
 | summarize Screenings = count(), Incomplete = countif(Message has ": Incomplete; matcher ")
 | where Screenings >= 3
