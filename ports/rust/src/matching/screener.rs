@@ -8,11 +8,12 @@ use super::addresses::parse_address;
 use super::addresses::AddressState;
 use super::data::{data, MatcherData};
 use super::destinations::{DestinationNotice, Destinations};
-use super::identifiers::{comparable, compare_birth_date, identifier_key, BirthDateComparison};
-use super::index::{ListIndex, ListedSubject, PreparedName, SubjectMatch};
+use super::identifiers::{comparable, compare_birth_date, entered_keys, identifier_key, BirthDateComparison};
+use super::index::{vessel_name, ListIndex, ListedIdentifier, ListedSubject, PreparedName, SubjectMatch};
 use super::names::NameParser;
 use super::options::{Options, Outcome};
 use super::text::{RawToken, Tokenizer};
+use crate::lists::parse::IMO_NUMBER;
 
 /// What the user entered; every field optional, at least one required.
 #[derive(Debug, Clone, Default)]
@@ -25,6 +26,9 @@ pub struct ScreeningRequest {
     pub company_identifiers: Vec<String>,
     /// The receiver's date of birth (#68), as identifiers::entered_birth_date reads it.
     pub receiver_birth_date: Option<String>,
+    /// The vessel (#69): its name, and its IMO number's seven digits (lists::parse::imo_number); either or both.
+    pub vessel_name: String,
+    pub vessel_imo_number: Option<String>,
 }
 
 /// A list as the screener sees it; no index means Not checked.
@@ -40,6 +44,8 @@ pub enum EntryKind {
     Receiver,
     Company,
     Address,
+    /// A vessel (#69): its name against the lists' vessels only, and its IMO number.
+    Vessel,
 }
 
 impl EntryKind {
@@ -48,6 +54,7 @@ impl EntryKind {
             EntryKind::Receiver => "Receiver",
             EntryKind::Company => "Company",
             EntryKind::Address => "Address",
+            EntryKind::Vessel => "Vessel",
         }
     }
 }
@@ -142,7 +149,7 @@ pub struct NothingEntered;
 
 impl std::fmt::Display for NothingEntered {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("enter a receiver, a company or an address")
+        f.write_str("enter a receiver, a company, an address or a vessel")
     }
 }
 
@@ -195,6 +202,7 @@ impl Screener {
             birth_date: request.receiver_birth_date.as_deref(),
         };
         let mut entries = self.entries(&request.receiver_name, &request.company_name, &request.address, None, &own, &checks);
+        entries.extend(self.vessel_entry(&request.vessel_name, request.vessel_imo_number.as_deref(), lists));
         for (i, party) in parties.iter().enumerate() {
             let tag = PartyTag { number: i as u32 + 1, role: party.role };
             let (receiver, company) = if party.person { (party.name.as_str(), "") } else { ("", party.name.as_str()) };
@@ -245,14 +253,14 @@ impl Screener {
                 if address_form.is_some() { "Name, with the address where the list has one" } else { "Name only: no address entered" };
             let allowed_by = allow_list.find_tokens(&tokens).cloned();
             let entered = if kind == EntryKind::Receiver { particulars.receiver_identifiers } else { particulars.company_identifiers };
-            let keys: Vec<String> = entered.iter().map(|v| identifier_key(v)).filter(|k| comparable(k)).collect();
+            let keys: Vec<String> = entered.iter().flat_map(|v| entered_keys(v)).filter(|k| comparable(k)).collect();
             let birth_date = if kind == EntryKind::Receiver { particulars.birth_date } else { None };
             let cells = lists
                 .iter()
                 .map(|list| {
                     let mut cell = self.to_cell(list, |index| {
                         let mut matches = index.search_name(&prepared, &self.options);
-                        apply_particulars(index, &mut matches, &keys, birth_date, &self.options);
+                        apply_particulars(index, &mut matches, &keys, None, birth_date, &self.options);
                         matches
                     });
                     if allowed_by.is_some() && cell.outcome == Some(Outcome::Review) {
@@ -269,7 +277,7 @@ impl Screener {
                 allowed_by,
                 party,
                 destination: None,
-                identifiers: keys.len(),
+                identifiers: entered.iter().filter(|v| comparable(&identifier_key(v))).count(),
             });
         }
         if let Some(form) = &address_form {
@@ -287,6 +295,51 @@ impl Screener {
             });
         }
         entries
+    }
+
+    /// A vessel (#69): its name against each list's vessels (read as a company's name, without a prefix like "M/V"),
+    /// and its IMO number as an identifier: an equal one is a Match, whatever the name. None when neither is entered.
+    fn vessel_entry(&self, name: &str, imo_number: Option<&str>, lists: &[ScreenedList]) -> Option<Entry> {
+        let name = clean(name);
+        if name.is_empty() && imo_number.is_none() {
+            return None;
+        }
+        let tokens = Tokenizer::new(self.data).tokenize(vessel_name(name), true);
+        let entity = NameParser { data: self.data }.entity(&tokens);
+        let prepared = PreparedName { entity: &entity, person: &entity, address: None };
+        let keys: Vec<String> = imo_number.map(str::to_string).into_iter().collect();
+        let cells = lists
+            .iter()
+            .map(|list| {
+                // A list that lists ships but whose import has none was imported before vessels were kept: Not checked
+                // until it's imported again, never a NoMatch it can't vouch for.
+                let unready = list.index.as_ref().is_some_and(|index| index.vessels().is_none())
+                    && crate::lists::catalogue::LISTS_WITH_VESSELS.contains(&list.code.as_str());
+                let unchecked = ScreenedList { code: list.code.clone(), name: list.name.clone(), index: None };
+                self.to_cell(if unready { &unchecked } else { list }, |index| {
+                    // A list without vessels has none to find: searched, and nothing found.
+                    let Some(vessels) = index.vessels() else { return Vec::new() };
+                    let mut matches = if name.is_empty() { Vec::new() } else { vessels.search_name(&prepared, &self.options) };
+                    apply_particulars(vessels, &mut matches, &keys, Some(IMO_NUMBER), None, &self.options);
+                    matches
+                })
+            })
+            .collect();
+        let (input, compared) = match (name.is_empty(), imo_number) {
+            (true, Some(imo)) => (format!("IMO {imo}"), "IMO number only: no name entered"),
+            (false, Some(_)) => (name.to_string(), "Vessel name, and the IMO number"),
+            (_, None) => (name.to_string(), "Vessel name only: no IMO number entered"),
+        };
+        Some(Entry {
+            kind: EntryKind::Vessel,
+            input,
+            compared,
+            cells,
+            allowed_by: None,
+            party: None,
+            identifiers: keys.len(),
+            destination: None,
+        })
     }
 
     /// Every listed subject at Review or above for name, on each list that can be searched.
@@ -348,7 +401,17 @@ struct Particulars<'a> {
 /// - a subject the name found whose listed identifiers are none of the entered ones keeps its percentage: a line says
 ///   they differ (never lower: a list may have an old or a second passport);
 /// - a date of birth is said to be the same as or different from the listed ones, and changes nothing.
-fn apply_particulars(index: &ListIndex, matches: &mut Vec<SubjectMatch>, keys: &[String], birth_date: Option<&str>, o: &Options) {
+///
+/// `only`: the one kind of listed identifier compared (a vessel's IMO number with listed IMO numbers alone), or every kind.
+fn apply_particulars(
+    index: &ListIndex,
+    matches: &mut Vec<SubjectMatch>,
+    keys: &[String],
+    only: Option<&str>,
+    birth_date: Option<&str>,
+    o: &Options,
+) {
+    let compared = |i: &ListedIdentifier| only.is_none_or(|kind| i.kind == kind);
     let say = |m: &mut SubjectMatch, line: String, first: bool| {
         if first {
             m.alignment.insert(0, line.clone());
@@ -360,7 +423,7 @@ fn apply_particulars(index: &ListIndex, matches: &mut Vec<SubjectMatch>, keys: &
     };
     let mut identified: Vec<Arc<ListedSubject>> = Vec::new();
     if !keys.is_empty() {
-        for (subject, identifier) in index.identified(keys) {
+        for (subject, identifier) in index.identified(keys, compared) {
             let country = identifier.country.as_deref().map(|c| format!(" ({c})")).unwrap_or_default();
             let line = format!("Identifier: equals the listed {} {}{country}", identifier.kind, identifier.value);
             match matches.iter_mut().find(|m| Arc::ptr_eq(&m.subject, &subject)) {
@@ -387,11 +450,12 @@ fn apply_particulars(index: &ListIndex, matches: &mut Vec<SubjectMatch>, keys: &
             identified.push(subject);
         }
         for m in matches.iter_mut() {
-            if m.outcome == Outcome::NoMatch || m.subject.identifiers.is_empty() || identified.iter().any(|s| Arc::ptr_eq(s, &m.subject)) {
+            let listed: Vec<&ListedIdentifier> = m.subject.identifiers.iter().filter(|i| compared(i)).collect();
+            if m.outcome == Outcome::NoMatch || listed.is_empty() || identified.iter().any(|s| Arc::ptr_eq(s, &m.subject)) {
                 continue;
             }
-            let listed: Vec<String> = m.subject.identifiers.iter().take(3).map(|i| format!("{} {}", i.kind, i.value)).collect();
-            let more = if m.subject.identifiers.len() > 3 { ", …" } else { "" };
+            let more = if listed.len() > 3 { ", …" } else { "" };
+            let listed: Vec<String> = listed.iter().take(3).map(|i| format!("{} {}", i.kind, i.value)).collect();
             say(m, format!("Identifiers: the entered ones aren't among the listed ({}{more}); a person decides", listed.join(", ")), false);
         }
     }

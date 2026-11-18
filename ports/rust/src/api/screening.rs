@@ -10,8 +10,9 @@ use serde_json::Value;
 
 use super::catalog::{Catalog, LoadedList};
 use crate::lists::catalogue::find_source;
+use crate::lists::parse::imo_number;
 use crate::log::Logger;
-use crate::matching::identifiers::{comparable, entered_birth_date, identifier_key};
+use crate::matching::identifiers::{comparable, entered_birth_date, identifier_key, imo_check_digit_ok};
 use crate::matching::{
     AllowList, Cell, DestinationNotice, DestinationState, Destinations, Entry, Options, Outcome, OverallOutcome, Party, ScreenedList,
     Screener, ScreeningRequest, ScreeningResult, SubjectMatch, WordAlignment, ROLES,
@@ -62,6 +63,9 @@ pub struct ScreeningRequestBody {
     pub receiver_identifiers: Vec<String>,
     pub company_identifiers: Vec<String>,
     pub receiver_date_of_birth: Option<String>,
+    /// The vessel (#69): its name and its IMO number, either or both.
+    pub vessel_name: Option<String>,
+    pub vessel_imo_number: Option<String>,
 }
 
 /// A list of identifiers as sent: strings, or null for none. None when it's anything else.
@@ -200,6 +204,8 @@ impl ScreeningRequestBody {
                 "companyname" => &mut body.company_name,
                 "address" => &mut body.address,
                 "receiverdateofbirth" => &mut body.receiver_date_of_birth,
+                "vesselname" => &mut body.vessel_name,
+                "vesselimonumber" => &mut body.vessel_imo_number,
                 _ => continue,
             };
             *target = match value {
@@ -247,7 +253,12 @@ pub fn validate(body: &ScreeningRequestBody) -> Errors {
         }
         _ => {}
     }
-    for (name, value) in [("ReceiverName", &body.receiver_name), ("CompanyName", &body.company_name), ("Address", &body.address)] {
+    for (name, value) in [
+        ("ReceiverName", &body.receiver_name),
+        ("CompanyName", &body.company_name),
+        ("Address", &body.address),
+        ("VesselName", &body.vessel_name),
+    ] {
         if value.as_deref().is_some_and(|v| utf16_len(v) > MAX_FIELD_LENGTH) {
             errors.insert(name.into(), vec![format!("At most {MAX_FIELD_LENGTH} characters.")]);
         }
@@ -293,8 +304,24 @@ pub fn validate(body: &ScreeningRequestBody) -> Errors {
         true,
     );
     validate_particulars(&mut errors, "Company", !is_blank(&body.company_name), &body.company_identifiers, &None, false);
-    if is_blank(&body.receiver_name) && is_blank(&body.company_name) && is_blank(&body.address) && body.parties.is_empty() {
-        errors.insert(String::new(), vec!["Enter a receiver, a company or an address.".into()]);
+    // An IMO number (#69): seven digits, "IMO" before them or not, the last the check digit (a slip of a digit fails).
+    if !is_blank(&body.vessel_imo_number) {
+        let value = body.vessel_imo_number.as_deref().unwrap_or_default();
+        if utf16_len(value) > MAX_IDENTIFIER_LENGTH || !imo_number(value).is_some_and(|d| imo_check_digit_ok(&d)) {
+            errors.insert(
+                "VesselImoNumber".into(),
+                vec!["An IMO number: seven digits, \"IMO\" before them or not, the last one its check digit.".into()],
+            );
+        }
+    }
+    if is_blank(&body.receiver_name)
+        && is_blank(&body.company_name)
+        && is_blank(&body.address)
+        && is_blank(&body.vessel_name)
+        && is_blank(&body.vessel_imo_number)
+        && body.parties.is_empty()
+    {
+        errors.insert(String::new(), vec!["Enter a receiver, a company, an address or a vessel.".into()]);
     }
     errors
 }
@@ -373,6 +400,7 @@ pub fn kind_name(kind: crate::matching::SubjectKind) -> &'static str {
         crate::matching::SubjectKind::Individual => "Individual",
         crate::matching::SubjectKind::Entity => "Entity",
         crate::matching::SubjectKind::Unknown => "Unknown",
+        crate::matching::SubjectKind::Vessel => "Vessel",
     }
 }
 
@@ -670,6 +698,8 @@ impl ScreeningService {
             receiver_identifiers: body.receiver_identifiers.clone(),
             company_identifiers: body.company_identifiers.clone(),
             receiver_birth_date: body.receiver_date_of_birth.as_deref().and_then(entered_birth_date),
+            vessel_name: body.vessel_name.clone().unwrap_or_default(),
+            vessel_imo_number: body.vessel_imo_number.as_deref().and_then(imo_number),
         };
         let parties: Vec<Party> = body
             .parties
@@ -804,8 +834,18 @@ impl ScreeningService {
         let mut not_checked = Vec::new();
         let mut switched_off = Vec::new();
         let by_code: HashMap<&str, &LoadedList> = lists.iter().map(|l| (l.code.as_str(), l.as_ref())).collect();
+        // A list searched for some entries but not all (a vessel on a list imported before ships were kept, #69): never
+        // "No match found" in it, and a sentence of its own.
+        let partly: Vec<&str> = lists
+            .iter()
+            .filter(|l| l.is_searched() && result.entries.iter().flat_map(|e| &e.cells).any(|c| c.list == l.code && !c.checked))
+            .map(|l| l.code.as_str())
+            .collect();
+        let mut vessel_not_checked = Vec::new();
         for list in lists {
-            if list.is_searched() {
+            if list.is_searched() && partly.contains(&list.code.as_str()) {
+                vessel_not_checked.push(list.name.clone());
+            } else if list.is_searched() {
                 checked.push(format!("{}, as of {}", list.name, as_of(list.last_checked_at)));
             }
             if list.switched_off.is_none() && !list.is_searched() {
@@ -833,6 +873,12 @@ impl ScreeningService {
         }
         if !switched_off.is_empty() {
             gap += &format!(" Not searched: {}.", switched_off.join("; "));
+        }
+        if !vessel_not_checked.is_empty() {
+            gap += &format!(
+                " The vessel wasn't checked in: {} (imported before ships were kept; checked from its next import).",
+                vessel_not_checked.join(", ")
+            );
         }
         for age in &ages {
             gap +=
@@ -890,7 +936,10 @@ impl ScreeningService {
             OverallOutcome::Review => {
                 format!("Review needed: a similar listed party on {}.{destination}{gap}{allowed}", hits.join(", "))
             }
-            OverallOutcome::Incomplete if checked.is_empty() => format!("Incomplete: no list could be checked.{gap}"),
+            OverallOutcome::Incomplete if checked.is_empty() && vessel_not_checked.is_empty() => {
+                format!("Incomplete: no list could be checked.{gap}")
+            }
+            OverallOutcome::Incomplete if checked.is_empty() => format!("Incomplete.{gap}{allowed}"),
             OverallOutcome::Incomplete => format!("Incomplete. No match found in: {}.{gap}{allowed}", checked.join("; ")),
             OverallOutcome::NoMatch if !allowed.is_empty() => {
                 format!("No match found in: {}, apart from what the allow-list allows.{gap}{allowed}", checked.join("; "))

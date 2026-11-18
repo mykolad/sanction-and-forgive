@@ -121,7 +121,8 @@ fn parse_ofac(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError
         let kind = match t.as_deref() {
             Some("Individual") => SubjectType::Individual,
             Some("Entity") => SubjectType::Entity,
-            Some("Vessel") | Some("Aircraft") => return Ok(()),
+            Some("Vessel") => SubjectType::Vessel,
+            Some("Aircraft") => return Ok(()),
             _ => SubjectType::Unknown,
         };
         let id = entity.attr("id").ok_or_else(|| format_error("An OFAC entity has no id."))?;
@@ -165,9 +166,24 @@ fn parse_ofac(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError
         }
         // Identifiers and dates of birth (#68): each identity document, and each Birthdate feature's range of days.
         for d in entity.el("identityDocuments").els("identityDocument") {
-            b.add_identifier(d.val("type").as_deref(), d.val("documentNumber").as_deref(), d.val("issuingCountry").as_deref());
+            let (kind, number) = (d.val("type"), d.val("documentNumber"));
+            // A vessel's IMO number (#69) is a "Vessel Registration Identification" written "IMO 9187629".
+            if kind.as_deref() == Some("Vessel Registration Identification") && number.as_deref().is_some_and(|n| n.contains("IMO")) {
+                b.add_imo_number(number.as_deref(), "Vessel Registration Identification");
+                continue;
+            }
+            b.add_identifier(kind.as_deref(), number.as_deref(), d.val("issuingCountry").as_deref());
         }
+        let mut vessel = Vec::new();
         for f in entity.el("features").els("feature") {
+            // A vessel's details (#69), said in the remarks.
+            for (feature, label) in
+                [("Vessel Flag", "Flag"), ("VESSEL TYPE", "Type"), ("Vessel Year of Build", "Built"), ("Vessel Owner", "Owner")]
+            {
+                if eq(&f.val("type"), feature) {
+                    vessel.push(f.val("value").map(|v| format!("{label}: {v}")));
+                }
+            }
             if eq(&f.val("type"), "Birthdate") {
                 let v = f.el("valueDate");
                 let first = parse_date(v.val("fromDateBegin").as_deref(), "%Y-%m-%d");
@@ -176,6 +192,9 @@ fn parse_ofac(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError
                     b.add_birth_date(birth_date(first, last));
                 }
             }
+        }
+        if kind == SubjectType::Vessel {
+            b.remarks = join("; ", &vessel);
         }
         out.extend(b.build());
         Ok(())
@@ -247,7 +266,7 @@ fn parse_uk(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
         let kind = match d.val("IndividualEntityShip").as_deref() {
             Some("Individual") => SubjectType::Individual,
             Some("Entity") => SubjectType::Entity,
-            Some("Ship") => return Ok(()),
+            Some("Ship") => SubjectType::Vessel,
             _ => SubjectType::Unknown,
         };
         let id = d.val("UniqueID").ok_or_else(|| format_error("A UK Designation has no UniqueID."))?;
@@ -301,6 +320,23 @@ fn parse_uk(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
                 b.add_identifier(Some("Business registration number"), Some(&number), None);
             }
         }
+        // A ship (#69): its IMO numbers, and its flag, type and owner or operator in the remarks.
+        let ship = d.el("ShipDetails").el("Ship");
+        for n in ship.el("IMONumbers").els("IMONumber") {
+            b.add_imo_number(Some(n.value()), "IMO number as listed");
+        }
+        if kind == SubjectType::Vessel {
+            let all = |outer: &str, inner: &'static str| {
+                join(", ", &ship.el(outer).els(inner).into_iter().map(|e| s(e.value())).collect::<Vec<_>>())
+            };
+            let details = [
+                all("CurrentBelievedFlagOfShips", "CurrentBelievedFlagOfShip").map(|v| format!("Flag: {v}")),
+                all("TypeOfShipDetails", "TypeOfShip").map(|v| format!("Type: {v}")),
+                all("YearsBuilt", "YearBuilt").map(|v| format!("Built: {v}")),
+                all("CurrentOwnerOperators", "CurrentOwnerOperator").map(|v| format!("Owner or operator: {v}")),
+            ];
+            b.remarks = join("; ", &[b.remarks.take(), join("; ", &details)]);
+        }
         out.extend(b.build());
         Ok(())
     })?;
@@ -348,13 +384,14 @@ fn parse_us_export(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
         let kept = ["Bureau of Industry and Security", "State Department"]
             .iter()
             .any(|agency| source.as_deref().is_some_and(|s| s.ends_with(agency)));
-        if !kept || eq(&kind_text, "Vessel") || eq(&kind_text, "Aircraft") {
+        if !kept || eq(&kind_text, "Aircraft") {
             continue;
         }
         let id = super::parse::clean(json_text(record, "id")?.as_deref()).ok_or_else(|| format_error("A US export record has no id."))?;
         let kind = match kind_text.as_deref() {
             Some("Individual") => SubjectType::Individual,
             Some("Entity") => SubjectType::Entity,
+            Some("Vessel") => SubjectType::Vessel,
             _ => SubjectType::Unknown,
         };
         let mut b = Builder::new(&id, kind);
@@ -447,8 +484,14 @@ fn read_seco_target(target: &Element, programmes: &HashMap<String, String>) -> R
     if modifications.first().is_some_and(|m| eq(&m.attr("modification-type"), "de-listed")) {
         return Ok(None);
     }
-    let Some(subject) = target.el("individual").or_else(|| target.el("entity")) else { return Ok(None) };
-    let kind = if subject.name == "individual" { SubjectType::Individual } else { SubjectType::Entity };
+    // A vessel (#69) is an object of type vessel; other objects stay out.
+    let vessel = target.el("object").filter(|o| eq(&o.attr("object-type"), "vessel"));
+    let Some(subject) = target.el("individual").or_else(|| target.el("entity")).or(vessel) else { return Ok(None) };
+    let kind = match subject.name.as_str() {
+        "individual" => SubjectType::Individual,
+        "entity" => SubjectType::Entity,
+        _ => SubjectType::Vessel,
+    };
     let id = target.attr("ssid").ok_or_else(|| format_error("A SECO target has no ssid."))?;
     let mut b = Builder::new(&id, kind);
     if let Some(p) = target.val("sanctions-set-id").and_then(|set| programmes.get(&set)) {
@@ -510,6 +553,16 @@ fn read_seco_target(target: &Element, programmes: &HashMap<String, String>) -> R
                 .push((join(", ", &[a.val("c-o"), a.val("p-o-box"), a.val("address-details"), a.val("zip-code")]), a.attr("place-id")));
         }
     }
+    if kind == SubjectType::Vessel {
+        // "IMO number: 8405270" (and once "IMO Numbe: …") in the vessel's other information.
+        static IMO: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        let imo = IMO.get_or_init(|| Regex::new(r"(?i)\bIMO\b[^0-9]{0,12}([0-9]{7})\b").unwrap());
+        for info in subject.els("other-information") {
+            for found in imo.captures_iter(info.value()) {
+                b.add_imo_number(Some(&found[1]), "IMO number as listed");
+            }
+        }
+    }
     if !b.has_names() {
         return Ok(None);
     }
@@ -555,12 +608,18 @@ fn parse_canada(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
     let label = LABEL.get_or_init(|| Regex::new(r"^\s*\p{L}+:\s*").unwrap());
     let mut out = Vec::new();
     records(reader, "data-set", 1, |record| {
-        if record.name != "record" || record.val("ShipIMONumber-NumeroOMIDuNavire").is_some() {
+        if record.name != "record" {
             return Ok(());
         }
         let entity_name = record.val("EntityOrShip-EntiteOuNavire");
         let person_name = join(" ", &[record.val("GivenName-Prenom"), record.val("LastName-NomDeFamille")]);
-        let kind = if entity_name.is_some() { SubjectType::Entity } else { SubjectType::Individual };
+        // A ship (#69) is a record with an IMO number.
+        let imo = record.val("ShipIMONumber-NumeroOMIDuNavire");
+        let kind = match (&imo, &entity_name) {
+            (Some(_), _) => SubjectType::Vessel,
+            (None, Some(_)) => SubjectType::Entity,
+            (None, None) => SubjectType::Individual,
+        };
         let country = record.val("Country-Pays");
         let id = join("/", &[country.clone(), record.val("Schedule-Annexe"), record.val("Item-NumeroDarticle")])
             .ok_or_else(|| format_error("A Canada SEMA record has no country, schedule or item."))?;
@@ -573,6 +632,14 @@ fn parse_canada(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
             for alias in aliases.split([',', ';']).filter(|a| !a.is_empty()) {
                 b.add_name(Some(&label.replace(alias, "")), false, false);
             }
+        }
+        if kind == SubjectType::Vessel {
+            b.add_imo_number(imo.as_deref(), "IMO number as listed");
+            // "General Cargo | Cargo classique": the English half.
+            let ship_type =
+                record.val("TitleOrShipType-TitreOuTypeDeNavire").map(|t| t.split(" | ").next().unwrap_or_default().to_string());
+            let built = record.val("DateOfBirthOrShipBuildDate-DateDeNaissanceOuDateDeConstructionDuNavire");
+            b.remarks = join("; ", &[ship_type.map(|t| format!("Type: {t}")), built.map(|y| format!("Built: {y}"))]);
         }
         out.extend(b.build());
         Ok(())
@@ -659,7 +726,7 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
         let kind = match record.get("Nature").and_then(Value::as_str) {
             Some("Personne physique") => SubjectType::Individual,
             Some("Personne morale") => SubjectType::Entity,
-            Some("Navire") => continue,
+            Some("Navire") => SubjectType::Vessel,
             _ => SubjectType::Unknown,
         };
 
@@ -686,6 +753,7 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
                         "ADRESSE_PM" | "ADRESSE_PP" => &["Adresse", "Pays"],
                         "MOTIFS" => &["Motifs"],
                         "FONDEMENT_JURIDIQUE" => &["FondementJuridiqueLabel"],
+                        "NUMERO_OMI" => &["NumeroOMI"],
                         _ => &[],
                     };
                     for key in required {
@@ -725,6 +793,10 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
             let raw = join(", ", &[json_str(address, "Adresse"), json_str(address, "Pays")]);
             b.add_address(raw.as_deref(), None);
         }
+        // A ship's IMO number (#69).
+        for number in values("NUMERO_OMI") {
+            b.add_imo_number(json_str(number, "NumeroOMI").as_deref(), "IMO number as listed");
+        }
         out.extend(b.build());
     }
     Ok(out)
@@ -732,8 +804,9 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_eu, parse_france, parse_ofac, parse_uk, parse_un};
+    use super::{parse_canada, parse_eu, parse_france, parse_ofac, parse_seco, parse_uk, parse_un};
     use crate::lists::parse::ParsedIdentifier;
+    use crate::lists::parse::SubjectType;
 
     fn id(kind: &str, value: &str, country: Option<&str>) -> ParsedIdentifier {
         ParsedIdentifier { kind: kind.to_string(), value: value.to_string(), country: country.map(str::to_string) }
@@ -836,6 +909,68 @@ mod tests {
             let error = parse_france(&mut document.as_bytes()).expect_err(document);
             assert!(error.downcast_ref::<super::super::parse::FormatError>().is_some(), "{document}: {error}");
         }
+    }
+
+    /// Vessels (#69), each format's way: a Vessel subject with its IMO number's seven digits.
+    #[test]
+    fn vessels_are_kept_with_their_imo_numbers() {
+        let imo = |subject: &super::ParsedSubject| {
+            assert_eq!(subject.kind, SubjectType::Vessel, "{}", subject.primary_name);
+            subject.identifiers.iter().find(|i| i.kind == "IMO number").map(|i| i.value.clone())
+        };
+        let ofac = parse_ofac(
+            &mut r#"<sanctionsData><entities><entity id="9"><generalInfo><entityType>Vessel</entityType></generalInfo>
+            <names><name><isPrimary>true</isPrimary><translations><translation><isPrimary>true</isPrimary><formattedFullName>OCEAN FAYE</formattedFullName></translation></translations></name></names>
+            <features><feature><type featureTypeId="3">Vessel Flag</type><value>Panama</value></feature><feature><type featureTypeId="2">VESSEL TYPE</type><value>Crude Oil Tanker</value></feature></features>
+            <identityDocuments><identityDocument><type>Vessel Registration Identification</type><documentNumber>IMO 9321689</documentNumber></identityDocument>
+            <identityDocument><type>MMSI</type><documentNumber>636019825</documentNumber></identityDocument></identityDocuments>
+            </entity><entity id="10"><generalInfo><entityType>Aircraft</entityType></generalInfo>
+            <names><name><isPrimary>true</isPrimary><translations><translation><isPrimary>true</isPrimary><formattedFullName>EP-ABC</formattedFullName></translation></translations></name></names></entity></entities></sanctionsData>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((ofac.len(), imo(&ofac[0]).as_deref()), (1, Some("9321689")));
+        assert_eq!(ofac[0].identifiers[1].kind, "MMSI");
+        assert_eq!(ofac[0].remarks.as_deref(), Some("Flag: Panama; Type: Crude Oil Tanker"));
+
+        let uk = parse_uk(
+            &mut r#"<Designations><Designation><UniqueID>RUS2001</UniqueID><IndividualEntityShip>Ship</IndividualEntityShip>
+            <Names><Name><Name6>Andaman Skies</Name6><NameType>Primary name</NameType></Name></Names>
+            <ShipDetails><Ship><IMONumbers><IMONumber>IMO9288693</IMONumber><IMONumber>IMO9288693</IMONumber></IMONumbers>
+            <CurrentBelievedFlagOfShips><CurrentBelievedFlagOfShip>Comoros</CurrentBelievedFlagOfShip></CurrentBelievedFlagOfShips></Ship></ShipDetails>
+            </Designation></Designations>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((imo(&uk[0]).as_deref(), uk[0].identifiers.len()), (Some("9288693"), 1));
+        assert_eq!(uk[0].remarks.as_deref(), Some("Flag: Comoros"));
+
+        let canada = parse_canada(
+            &mut r#"<data-set><record><Country-Pays>Russia / Russie</Country-Pays><EntityOrShip-EntiteOuNavire>M/V Maria </EntityOrShip-EntiteOuNavire>
+            <TitleOrShipType-TitreOuTypeDeNavire>General Cargo | Cargo classique</TitleOrShipType-TitreOuTypeDeNavire>
+            <ShipIMONumber-NumeroOMIDuNavire> 8517839 </ShipIMONumber-NumeroOMIDuNavire><Schedule-Annexe>1.1</Schedule-Annexe><Item-NumeroDarticle>2</Item-NumeroDarticle></record></data-set>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((imo(&canada[0]).as_deref(), canada[0].remarks.as_deref()), (Some("8517839"), Some("Type: General Cargo")));
+
+        let france = parse_france(
+            &mut r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 2218, "Nature": "Navire", "Nom": "HUI CHON",
+            "RegistreDetail": [{"TypeChamp": "ALIAS", "Valeur": [{"Alias": "HWANG GUM SAN 2"}]}, {"TypeChamp": "NUMERO_OMI", "Valeur": [{"NumeroOMI": "8405270"}]}]}]}}"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((imo(&france[0]).as_deref(), france[0].names.len()), (Some("8405270"), 2));
+
+        let seco = parse_seco(
+            &mut r#"<swiss-sanctions-list><target ssid="34461"><sanctions-set-id>1</sanctions-set-id><object object-type="vessel"><identity ssid="2" main="true">
+            <name ssid="3" name-type="primary-name" quality="good" lang="eng"><name-part order="1" name-part-type="whole-name"><value>Hui Chon</value></name-part></name></identity>
+            <other-information ssid="4">IMO Numbe: 8405270</other-information></object><modification modification-type="listed" effective-date="2016-05-18"/></target>
+            <target ssid="5"><object object-type="aircraft"><identity ssid="6" main="true"><name ssid="7" name-type="primary-name" quality="good"><name-part order="1"><value>EP-ABC</value></name-part></name></identity></object></target></swiss-sanctions-list>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!((seco.len(), imo(&seco[0]).as_deref()), (1, Some("8405270")));
     }
 
     #[test]
