@@ -109,15 +109,31 @@ pub fn birth_date_text(value: &str) -> Option<String> {
     }
 }
 
-/// The numbers in a free-text identifier field ("(УНН/ИНН): 190950894 (Belarus), 7704734000/770301001 (Russia)"):
-/// runs of letters, digits and hyphens with at least four digits and six characters.
-pub fn identifier_numbers(text: &str) -> Vec<String> {
+/// The identifiers in a free-text field ("(УНН/ИНН): 190950894 (Belarus), 7704734000/770301001 (Russia)", "HRB 12345",
+/// "CHE-123.456.789"): the parts between commas, semicolons, brackets and line breaks, each as written after any label
+/// ending in a colon, with at least five digits (so a year alone isn't one). Two long numbers joined by a slash (the
+/// Russian INN/KPP) are two. Matching (part 2) compares the numbers within a value too, so a label kept with its
+/// number ("OGRN 1027700132195") still matches the number alone.
+pub fn identifier_values(text: &str) -> Vec<String> {
+    let digits = |s: &str| s.chars().filter(char::is_ascii_digit).count();
     let mut out: Vec<String> = Vec::new();
-    for token in text.split(|c: char| !(c.is_alphanumeric() || c == '-')) {
-        let token = token.trim_matches('-');
-        let digits = token.chars().filter(char::is_ascii_digit).count();
-        if digits >= 4 && token.chars().count() >= 6 && !out.iter().any(|t| t == token) {
-            out.push(token.to_string());
+    let mut push = |value: &str| {
+        if let Some(value) = clean(Some(value)) {
+            if !out.contains(&value) {
+                out.push(value);
+            }
+        }
+    };
+    for segment in text.split([',', ';', '(', ')', '[', ']', '\n', '\r']) {
+        let segment = segment.rsplit_once(':').map(|(_, after)| after).unwrap_or(segment).trim();
+        if digits(segment) < 5 {
+            continue;
+        }
+        let pieces: Vec<&str> = segment.split('/').map(str::trim).collect();
+        if pieces.len() > 1 && pieces.iter().all(|p| p.len() >= 6 && p.chars().all(|c| c.is_ascii_digit())) {
+            pieces.iter().for_each(|p| push(p));
+        } else {
+            push(segment);
         }
     }
     out
@@ -461,7 +477,7 @@ pub fn records(
 
 #[cfg(test)]
 mod tests {
-    use super::{birth_date, birth_date_text, identifier_numbers};
+    use super::{birth_date, birth_date_text, identifier_values};
 
     #[test]
     fn dates_of_birth_read_in_one_form() {
@@ -486,13 +502,16 @@ mod tests {
     }
 
     #[test]
-    fn numbers_are_found_in_a_free_text_identifier() {
+    fn identifiers_are_found_in_a_free_text_field_whole() {
         assert_eq!(
-            identifier_numbers("(УНН/ИНН): 190950894 (Belarus), 7704734000/770301001 (Russia)"),
+            identifier_values("(УНН/ИНН): 190950894 (Belarus), 7704734000/770301001 (Russia)"),
             ["190950894", "7704734000", "770301001"]
         );
-        assert_eq!(identifier_numbers("OGRN 1027700132195; reg. no. HRB-12345"), ["1027700132195", "HRB-12345"]);
-        assert!(identifier_numbers("Company no. 123 (2010)").is_empty());
+        assert_eq!(identifier_values("OGRN 1027700132195; reg. no.: HRB-12345"), ["OGRN 1027700132195", "HRB-12345"]);
+        assert_eq!(identifier_values("HRB 12345"), ["HRB 12345"]);
+        assert_eq!(identifier_values("CHE-123.456.789"), ["CHE-123.456.789"]);
+        assert_eq!(identifier_values("AB 12345678"), ["AB 12345678"]);
+        assert!(identifier_values("Company no. 123 (2010)").is_empty());
     }
     use super::*;
 

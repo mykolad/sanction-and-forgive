@@ -702,10 +702,13 @@ async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, r
     insert_rows(conn, "SubjectIdentifiers", &["SubjectId", "Kind", "Value", "Country"], &identifiers).await
 }
 
-/// Subjects.BirthDates: the dates joined, cut to the column's 400 characters at a whole date; null when none.
+/// Subjects.BirthDates: the dates sorted (as the content hash takes them, so a list that only reorders them changes
+/// neither) and joined, cut to the column's 400 characters at a whole date; null when none.
 fn birth_dates_column(dates: &[String]) -> Option<String> {
+    let mut sorted: Vec<&String> = dates.iter().collect();
+    sorted.sort();
     let mut joined = String::new();
-    for date in dates {
+    for date in sorted {
         let next = if joined.is_empty() { date.clone() } else { format!("{joined}{BIRTH_DATE_SEPARATOR}{date}") };
         if next.len() > 400 {
             break;

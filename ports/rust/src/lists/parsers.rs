@@ -7,7 +7,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::parse::{
-    birth_date, birth_date_text, eq, format_error, identifier_numbers, join, parse_date, records, Builder, Element, OptionalElement,
+    birth_date, birth_date_text, eq, format_error, identifier_values, join, parse_date, records, Builder, Element, OptionalElement,
     ParseError, ParsedSubject, SubjectType,
 };
 
@@ -285,7 +285,7 @@ fn parse_uk(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
             b.add_address(raw.as_deref(), None);
         }
         // Identifiers and dates of birth (#68). A business registration number is free text, often several numbers
-        // with their kinds and countries in words: each number found in it.
+        // with their kinds and countries in words: each identifier found in it, whole.
         let individual = d.el("IndividualDetails").el("Individual");
         for p in individual.el("PassportDetails").els("Passport") {
             b.add_identifier(Some("Passport"), p.val("PassportNumber").as_deref(), None);
@@ -297,7 +297,7 @@ fn parse_uk(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
             b.add_birth_date(birth_date_text(dob.value()));
         }
         for r in d.el("EntityDetails").el("Entity").el("BusinessRegistrationNumbers").els("BusinessRegistrationNumber") {
-            for number in identifier_numbers(r.value()) {
+            for number in identifier_values(r.value()) {
                 b.add_identifier(Some("Business registration number"), Some(&number), None);
             }
         }

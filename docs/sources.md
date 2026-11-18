@@ -130,7 +130,7 @@ form: a day `1948-12-10`, a month `1960-03`, a year `1963`, or a range of years 
 | Source | Identifiers from | Dates of birth from | 2026-11-18: parties with identifiers (identifiers) | with dates of birth |
 |---|---|---|---|---|
 | OFAC SDN, consolidated | `identityDocument` (type, `documentNumber`, `issuingCountry`) | `Birthdate` features (the range of days) | 12,464 (20,692); 348 (739) | 7,470; 113 |
-| UK | `PassportNumber`, `NationalIdentifierNumber`, each number in the free-text `BusinessRegistrationNumber` | `DOB` (`dd/mm/1963` is a year) | 1,462 (2,138) | 3,362 |
+| UK | `PassportNumber`, `NationalIdentifierNumber`, each identifier in the free-text `BusinessRegistrationNumber` (kept whole) | `DOB` (`dd/mm/1963` is a year) | 1,462 (2,138) | 3,362 |
 | EU | `identification` (`number`, type description, country unless `00`) | `birthdate` (date, or year and month) | 2,011 (3,038) | 3,774 |
 | UN | `INDIVIDUAL_DOCUMENT` (type, number, issuing country) | `DATE_OF_BIRTH` (date, year, or from and to years) | 296 (502) | 680 |
 
