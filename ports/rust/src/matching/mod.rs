@@ -132,9 +132,25 @@ mod tests {
         assert_eq!(shipment.outcome, OverallOutcome::Match);
     }
 
+    /// Belarusian and Russian forms of one name (cognates.json, #91): a cognate caps the match at Review, and an initial
+    /// never stands for a patronymic (no patronymic pairs).
+    #[test]
+    fn belarusian_and_russian_forms_of_a_name_are_a_review() {
+        for (query, listed, expected) in [
+            ("Лідзія Ярмошына", "Lidia Yermoshina", Outcome::Review),
+            ("Аляксандр Лукашэнка", "Alexander Lukashenko", Outcome::Review),
+            ("Віктар Сямашка", "Viktor Semashko", Outcome::Review),
+            ("Дзяніс Быкаў", "Denis Bykov", Outcome::Review),
+            ("Popov M.", "Aleksandr Nikolaevich Popov", Outcome::NoMatch),
+        ] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(expected), "{query} / {listed}: {percent:?}");
+        }
+    }
+
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "9689bc372b9d");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "688b7434be57");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.

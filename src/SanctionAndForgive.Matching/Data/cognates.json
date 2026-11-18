@@ -1,5 +1,5 @@
 {
-  "note": "Russian and Ukrainian (and some Belarusian) forms of one given name that transliteration can't connect. A cognate alignment caps the match at Review. Latin entries are common romanisations that neither table produces. Belarusian and Russian forms of names (#91) came from the EU's aliases tagged BE and RU, where the matcher didn't connect them (Ярмошына / Ермошина, Быкаў / Быков, Дзяніс / Денис); given names and surnames only: a patronymic pair would let an initial stand for the patronymic (Popov M. / Aleksandr Nikolaevich Popov).",
+  "note": "Russian and Ukrainian (and some Belarusian) forms of one given name that transliteration can't connect. A cognate alignment caps the match at Review. Latin entries are common romanisations that neither table produces. Belarusian and Russian forms of names (#91) came from the EU's aliases tagged BE and RU, where the matcher didn't connect them (Ярмошына / Ермошина, Быкаў / Быков, Дзяніс / Денис); given names and surnames only (Лідзія / Лидия and Лукашэнка / Лукашенко added by hand: the EU writes them in another word order); a patronymic pair would let an initial stand for the patronymic (Popov M. / Aleksandr Nikolaevich Popov).",
   "groups": [
     ["Николай", "Микола", "Мікалай", "Nikolai", "Nicolai"],
     ["Сергей", "Сергій", "Сяргей"],
@@ -110,6 +110,8 @@
     ["Карпянкоў", "Карпенков"],
     ["Урублеўскі", "Врублевский"],
     ["Сямашка", "Семашко"],
+    ["Лидия", "Лідзія", "Лідія", "Lidia"],
+    ["Лукашенко", "Лукашэнка", "Лукашенка"],
     ["Цяцерын", "Тетерин"],
     ["Зайцаў", "Зайцев"],
     ["Каўрыжкін", "Коврижкин"],
