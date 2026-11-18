@@ -3,6 +3,8 @@
 //! differs never lowers a result, it's only said. A date of birth is supporting detail: same or different, never a
 //! Match on its own. Deterministic, and nothing entered is kept.
 
+use super::data::{data, keys as name_keys};
+
 /// An identifier as compared: its letters and digits, upper case ("AB 123-456" and "ab123456" are the same).
 pub fn identifier_key(value: &str) -> String {
     value.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_uppercase).collect()
@@ -51,7 +53,7 @@ const LABEL_WORDS: [&str; 30] = [
 /// The keys a listed identifier is found by: the whole value's, and each alternative within it, without the words
 /// that label it: the parts between commas, semicolons, slashes, brackets and colons, each without its leading label
 /// words (LABEL_WORDS: "OGRN 1027700132195" is found by "1027700132195" too, "7704734000/770301001" by each number)
-/// and its trailing words of four letters or more ("190950894 Belarus"). Anything else stays: a series ("AB 123456"
+/// and a country named after it ("190950894 Belarus"). Anything else stays: a series ("AB 123456"
 /// is never "123456") and a number's own spaces ("4510 123456" is never "123456"). Each key comparable.
 pub fn listed_keys(value: &str) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
@@ -71,8 +73,17 @@ pub fn listed_keys(value: &str) -> Vec<String> {
         while words.first().is_some_and(|w| !has_digit(w) && label(w)) {
             words.remove(0);
         }
-        while words.last().is_some_and(|w| !has_digit(w) && w.chars().filter(|c| c.is_alphabetic()).count() >= 4) {
-            words.pop();
+        // A country after the number ("190950894 Belarus", "… Russian Federation") is no part of it; any other word
+        // after it may be (a letter suffix), so it stays.
+        'countries: while !words.is_empty() {
+            for n in (1..=words.len().min(3)).rev() {
+                let tail = words[words.len() - n..].join(" ");
+                if !has_digit(&tail) && name_keys(&tail).iter().any(|k| data().countries.contains_key(k)) {
+                    words.truncate(words.len() - n);
+                    continue 'countries;
+                }
+            }
+            break;
         }
         if !words.iter().any(|w| has_digit(w)) {
             continue;
@@ -154,6 +165,9 @@ mod tests {
         // A series is part of the number, spaced or not; only a label is dropped.
         assert_eq!(listed_keys("AB 123456"), ["AB123456"]);
         assert_eq!(listed_keys("ABC12345/01"), ["ABC1234501"]);
+        // A letter suffix stays; only a country goes.
+        assert_eq!(listed_keys("1234567 KZTV"), ["1234567KZTV"]);
+        assert_eq!(listed_keys("1234567 Russian Federation"), ["1234567RUSSIANFEDERATION", "1234567"]);
         // Labels and countries go before the slash is read.
         assert_eq!(listed_keys("INN 7704734000/770301001"), ["INN7704734000770301001", "7704734000770301001", "7704734000", "770301001"]);
         assert_eq!(
