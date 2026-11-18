@@ -133,7 +133,7 @@
         "version": "KqlItem/1.0",
         "query": "let screenings = ContainerAppConsoleLogs_CL\n| where ContainerAppName_s == \"__APP_NAME__\"\n| extend Entry = parse_json(Log_s)\n| extend Message = tostring(Entry.Message), Reference = coalesce(tostring(Entry.Reference), tostring(Entry.State.Reference))\n| where Message startswith \"Screening \"\n| extend Outcome = extract(@\": (Match|Review|Incomplete|NoMatch); matcher \", 1, Message)\n| extend Caller = case(Reference startswith \"web-\", \"Website\", Reference startswith \"manifest-\", \"Manifest page\", Reference startswith \"smoke-\", \"Smoke test\", Reference startswith \"load-\", \"Load test\", \"API\")\n| where Caller in ({Callers});\nscreenings\n| extend Hits = extract_all(@\"(?:: |; )([a-z0-9-]+) (Match|Review)( allowed)? [0-9]+%\", Message)\n| mv-expand Hit = Hits\n| where isnotempty(Hit)\n| extend List = tostring(Hit[0]), Cell = strcat(tostring(Hit[1]), tostring(Hit[2]))\n| summarize Cells = count() by List, Cell\n| evaluate pivot(Cell, sum(Cells))\n| order by List asc",
         "size": 0,
-        "title": "Possible matches by list (cells at Match or Review; allowed: cleared by the allow-list)",
+        "title": "Possible matches by list (cells at Match or Review; \"allowed\": a Review the allow-list keeps from raising the outcome, still there to review)",
         "noDataMessage": "No audit line in the range names a possible match.",
         "timeContextFromParameter": "TimeRange",
         "queryType": 0,
