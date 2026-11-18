@@ -27,7 +27,8 @@ def records(count: int) -> list[bytes]:
     lines = []
     for i in range(count):
         row = rows[i % len(rows)]
-        record = {'reference': f'batch-{i + 1}'}
+        # load-: the operations workbook and the Incomplete alert tell load tests by this prefix (#81).
+        record = {'reference': f'load-batch-{i + 1}'}
         for field in ('receiverName', 'companyName', 'address'):
             if row.get(field):
                 record[field] = row[field]
