@@ -75,7 +75,7 @@ date of birth is `YYYY-MM-DD`, `YYYY-MM` or `YYYY`. Either needs the name it bel
 ```
 
 Identifiers are compared on their letters and digits, case aside ("p 0458-1926" is "P04581926"), with every
-identifier the lists give (OFAC, UK, EU and UN so far; docs/sources.md), and with each number within one ("OGRN
+identifier the lists give (OFAC, UK, EU, UN, SECO, France, SFMS, Japan and New Zealand; docs/sources.md), and with each number within one ("OGRN
 1027700132195" is found by "1027700132195"):
 
 - **Equal**: the listed party is a **Match** (100%) on that list, whether or not its name matches (a renamed company,
