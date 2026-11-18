@@ -19,7 +19,7 @@ use super::screening::{utf16_len, Errors, JsonTime};
 use super::server::{bad_request, json_response, not_found, one_error, Shared};
 use crate::matching::data::data;
 use crate::matching::{Destination, DestinationKind, DestinationStatus, Destinations};
-use crate::store::queries::{self, DestinationAddition, DestinationRecord};
+use crate::store::queries::{self, DestinationAddition, DestinationRecord, DestinationRemoval};
 
 const MAX_NAME: usize = 200;
 const MAX_OTHER_NAMES: usize = 100;
@@ -279,13 +279,22 @@ fn parse_row(object: &Map<String, Value>) -> Result<(Destination, bool), Errors>
 #[derive(Debug, PartialEq)]
 enum Refusal {
     Parent,
+    /// A change of a region its settlements name into something else: their names.
+    InUse(Vec<String>),
     Confirm(Vec<String>),
 }
 
 fn refused_by_table(row: &Destination, in_force: &[Destination], confirmed: bool) -> Option<Refusal> {
     if let Some(parent) = row.parent.as_deref() {
-        if !in_force.iter().any(|d| d.code == parent && d.kind == DestinationKind::Region) {
+        if parent == row.code || !in_force.iter().any(|d| d.code == parent && d.kind == DestinationKind::Region) {
             return Some(Refusal::Parent);
+        }
+    }
+    if row.kind != DestinationKind::Region {
+        let children: Vec<String> =
+            in_force.iter().filter(|d| d.parent.as_deref() == Some(row.code.as_str())).map(|d| d.name.clone()).collect();
+        if !children.is_empty() {
+            return Some(Refusal::InUse(children));
         }
     }
     if confirmed {
@@ -322,6 +331,7 @@ async fn add(State(s): State<Shared>, headers: HeaderMap, body: Bytes) -> Respon
         Ok(DestinationAddition::Refused(Refusal::Parent)) => {
             bad_request(one_error("Parent", "Its region (Parent) isn't a region in the table: add the region first."))
         }
+        Ok(DestinationAddition::Refused(Refusal::InUse(names))) => in_use(&names),
         Ok(DestinationAddition::Refused(Refusal::Confirm(conflicts))) => json_response(
             StatusCode::CONFLICT,
             &json!({
@@ -351,13 +361,25 @@ async fn remove(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<Stri
     };
     match removed {
         Err(_) => server_error(),
-        Ok(None) => not_found(),
-        Ok(Some(code)) => {
+        Ok(DestinationRemoval::NotFound) => not_found(),
+        Ok(DestinationRemoval::InUse(names)) => in_use(&names),
+        Ok(DestinationRemoval::Removed(code)) => {
             s.loader.logger.info(&format!("Destination row {id} ({code}) removed by {}", user.name), &[]);
             let reloaded = s.loader.reload_destinations(Some(&code)).await;
             json_response(StatusCode::OK, &json!({ "id": id, "reloaded": reloaded }))
         }
     }
+}
+
+fn in_use(names: &[String]) -> Response {
+    json_response(
+        StatusCode::CONFLICT,
+        &json!({
+            "code": "inUse",
+            "message": "Settlements in the table name this region. Remove them, or move them to another region, first.",
+            "settlements": names,
+        }),
+    )
 }
 
 /// Loads the starting rows into a table that has never had a row; 409 otherwise.

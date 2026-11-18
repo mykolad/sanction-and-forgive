@@ -88,7 +88,7 @@ function destinationRow(row, status) {
   const buttons = me?.isAdmin ? el("td", { class: "actions" },
     el("button", { type: "button", class: "secondary", onclick: () => showForm(row) }, "Edit"),
     el("button", { type: "button", class: "secondary", onclick: (event) => askRemove(event.target.parentElement, row, status) }, "Remove")) : el("td", {});
-  return el("tr", {},
+  return el("tr", { "data-id": String(row.id) },
     el("td", { class: indent },
       el("strong", {}, row.name), ` ${row.kind.toLowerCase()}${row.country ? `, ${row.country}` : ""}${row.needsRegion ? ", only with its region" : ""}`,
       row.otherNames.length ? el("span", { class: "entry-input" }, `Also: ${row.otherNames.join(", ")}`) : null,
@@ -120,12 +120,27 @@ function failure(response) {
 async function remove(row, status) {
   status.textContent = "Removing…";
   try {
-    const { response } = await send(`/api/v1/admin/destinations/${row.id}/remove`);
-    status.textContent = response.ok ? `Removed: ${row.name}.` : response.status === 404 ? "It isn't in the table any more." : failure(response);
+    const { response, body } = await send(`/api/v1/admin/destinations/${row.id}/remove`);
+    status.textContent = response.ok ? `Removed: ${row.name}.`
+      : response.status === 404 ? "It isn't in the table any more."
+      : response.status === 409 && body?.code === "inUse" ? `${body.message} (${body.settlements.join(", ")})`
+      : failure(response);
+    // The table is shown again only when it changed: a refusal stays on screen.
+    if (response.ok || response.status === 404) setTimeout(loadDestinations, 800);
+    else showButtons(row, status);
   } catch {
     status.textContent = "The service isn't answering. Try again in a moment.";
   }
-  setTimeout(loadDestinations, 800);
+}
+
+// Puts a row's Edit and Remove buttons back after a refusal.
+function showButtons(row, status) {
+  const cell = [...$("destinations").querySelectorAll("tr")].find((tr) => tr.dataset.id === String(row.id))?.lastElementChild;
+  if (cell) {
+    cell.replaceChildren(
+      el("button", { type: "button", class: "secondary", onclick: () => showForm(row) }, "Edit"),
+      el("button", { type: "button", class: "secondary", onclick: (event) => askRemove(event.target.parentElement, row, status) }, "Remove"));
+  }
 }
 
 async function start(status) {
@@ -179,6 +194,8 @@ function showForm(row) {
         note.textContent = answer.replaced ? "Saved: it replaces the row with the same code." : "Added.";
         box.replaceChildren();
         setTimeout(loadDestinations, 800);
+      } else if (response.status === 409 && answer?.code === "inUse") {
+        note.textContent = `${answer.message} (${answer.settlements.join(", ")})`;
       } else if (response.status === 409 && answer?.code === "confirm") {
         note.replaceChildren(el("span", {}, answer.message), el("ul", {}, answer.conflicts.map((c) => el("li", {}, c))),
           el("button", { type: "button", class: "primary", onclick: () => submit(true) }, "Yes, save it anyway"));

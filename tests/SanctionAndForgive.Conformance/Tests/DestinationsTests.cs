@@ -217,6 +217,19 @@ public sealed class DestinationsTests
             var current = await WaitForTableAsync(table => table.GetProperty("destinations").EnumerateArray().Any(row => row.GetProperty("code").GetString() == "xx-town" && row.GetProperty("status").GetString() == "Restricted"));
             Assert.Equal(("Review", "restricted"), await StateAsync("Hollowmere, Hollow Vale Oblast"));
 
+            // A region its settlements name is neither removed nor turned into something else.
+            var regionId = current.GetProperty("destinations").EnumerateArray().Single(row => row.GetProperty("code").GetString() == "xx-region").GetProperty("id").GetInt32();
+            using (var inUse = await Suite.AdminAsync(HttpMethod.Post, $"api/v1/admin/destinations/{regionId}/remove", body: null))
+            {
+                Assert.Equal(HttpStatusCode.Conflict, inUse.StatusCode);
+                Assert.Equal("inUse", (await inUse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+            }
+
+            using (var demoted = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-region", "Country", "Hollow Vale", "Restricted", country: "UA")))
+            {
+                Assert.Equal(HttpStatusCode.Conflict, demoted.StatusCode);
+            }
+
             // Moscow is a place in another country: confirmed, or refused.
             using (var conflict = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-moscow", "Settlement", "Moscow", "Restricted", parent: "xx-region")))
             {

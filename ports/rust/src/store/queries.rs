@@ -500,15 +500,41 @@ pub async fn destination_add<R>(
     result
 }
 
-/// Marks a row removed (rows are never deleted): its code, or None if there's no such row in force.
-pub async fn destination_remove(conn: &mut Connection, id: i32, removed_by: &str, now: Time) -> DbResult<Option<String>> {
-    let removed = rows(
-        conn,
-        "UPDATE RestrictedDestinations SET RemovedBy = @P1, RemovedAt = @P2 OUTPUT INSERTED.Code WHERE Id = @P3 AND RemovedAt IS NULL",
-        &[&removed_by, &now.fixed_offset(), &id],
-    )
-    .await?;
-    Ok(removed.first().map(|r| text(r, 0)))
+/// What removing a row did.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DestinationRemoval {
+    /// Removed: its code.
+    Removed(String),
+    /// No such row in force.
+    NotFound,
+    /// A region whose settlements in force name it: their names. Removed only once they're removed or moved.
+    InUse(Vec<String>),
+}
+
+/// Marks a row removed (rows are never deleted), unless it's a region a settlement in force names: checked and written
+/// in one transaction, under the table's lock.
+pub async fn destination_remove(conn: &mut Connection, id: i32, removed_by: &str, now: Time) -> DbResult<DestinationRemoval> {
+    simple(conn, "BEGIN TRANSACTION").await?;
+    let result = async {
+        lock_destinations(conn).await?;
+        let (in_force, _) = destinations_current(conn).await?;
+        let Some(row) = in_force.iter().find(|d| d.id == id) else { return Ok(DestinationRemoval::NotFound) };
+        let children: Vec<String> =
+            in_force.iter().filter(|d| d.parent.as_deref() == Some(row.code.as_str())).map(|d| d.name.clone()).collect();
+        if !children.is_empty() {
+            return Ok(DestinationRemoval::InUse(children));
+        }
+        execute(
+            conn,
+            "UPDATE RestrictedDestinations SET RemovedBy = @P1, RemovedAt = @P2 WHERE Id = @P3 AND RemovedAt IS NULL",
+            &[&removed_by, &now.fixed_offset(), &id],
+        )
+        .await?;
+        Ok(DestinationRemoval::Removed(row.code.clone()))
+    }
+    .await;
+    simple(conn, if matches!(result, Ok(DestinationRemoval::Removed(_))) { "COMMIT" } else { "IF @@TRANCOUNT > 0 ROLLBACK" }).await?;
+    result
 }
 
 /// Adds the starting rows, only to a table that has never had a row: true if it did.

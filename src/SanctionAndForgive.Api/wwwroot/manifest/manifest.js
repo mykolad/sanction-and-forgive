@@ -323,7 +323,7 @@ async function* ndjson(response) {
 }
 
 function snapshotKey(header) {
-  return JSON.stringify([header.matcherVersion, header.allowListVersion, header.destinationsVersion, header.lists.map((list) => [list.code, list.version, list.asOf, list.state])]);
+  return JSON.stringify([header.matcherVersion, header.allowListVersion, header.destinationsVersion, header.destinationsReviewOverdue ?? null, header.lists.map((list) => [list.code, list.version, list.asOf, list.state])]);
 }
 
 // Sends one chunk of records, and whatever of it isn't answered again (the stream's limits, or a connection or answer

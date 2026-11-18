@@ -196,19 +196,43 @@ impl Destinations {
                 out.push(line);
             }
         };
+        // Read as an address is read: each name's words, on their own text or one of their Latin readings, so a Cyrillic
+        // spelling of a name already in the table ("Атлантис" and "Atlantis") counts.
+        let mut tokenizer = Tokenizer::new(data);
+        let mut whole = |name: &str| -> Vec<TokenRef> { words(name).iter().map(|w| tokenizer.get(w)).collect() };
+        let whole_name = |tokens: &[TokenRef], max: usize| max.min(tokens.len());
+        let this = Destinations::build(vec![row.clone()], "new");
         for name in row.names() {
-            for k in keys(name) {
-                for &i in self.by_key.get(&k).map(Vec::as_slice).unwrap_or_default() {
-                    let other = &self.rows[i];
-                    if other.code != row.code {
-                        push(format!("{name}: also a name of {} ({})", other.name, other.code));
-                    }
+            let tokens = whole(name);
+            if tokens.is_empty() {
+                continue;
+            }
+            let full = |found: Option<(&Vec<usize>, usize)>| found.filter(|(_, length)| *length == tokens.len()).map(|(f, _)| f.clone());
+            for i in full(lookup(&tokens, 0, whole_name(&tokens, self.max_words), &self.by_key)).unwrap_or_default() {
+                let other = &self.rows[i];
+                if other.code != row.code {
+                    push(format!("{name}: also a name of {} ({})", other.name, other.code));
                 }
-                if let Some(place) = data.places.get(&k).filter(|p| p.country != row.country) {
+            }
+            if let Some((place, length)) = lookup(&tokens, 0, whole_name(&tokens, data.max_place_words), &data.places) {
+                if length == tokens.len() && place.country != row.country {
                     push(format!("{name}: also {} ({})", place.name, place.country));
                 }
-                if let Some(code) = data.countries.get(&k).filter(|c| row.kind != DestinationKind::Country || **c != row.country) {
+            }
+            if let Some((code, length)) = lookup(&tokens, 0, whole_name(&tokens, data.max_country_words), &data.countries) {
+                if length == tokens.len() && (row.kind != DestinationKind::Country || *code != row.country) {
                     push(format!("{name}: also the name of a country ({code})"));
+                }
+            }
+        }
+        // And the other way: a name in the table that this row's names would be found for.
+        for other in self.rows.iter().filter(|o| o.code != row.code) {
+            for name in other.names() {
+                let tokens = whole(name);
+                if !tokens.is_empty()
+                    && lookup(&tokens, 0, whole_name(&tokens, this.max_words), &this.by_key).is_some_and(|(_, l)| l == tokens.len())
+                {
+                    push(format!("{name}: a name of {} ({}), also read as this row", other.name, other.code));
                 }
             }
         }
@@ -401,6 +425,20 @@ mod tests {
         let mut tokenizer = Tokenizer::new(data);
         let form = parse_address(data, &mut tokenizer, "Simferopol", "");
         assert_eq!(Destinations::empty().find(data, &mut tokenizer, "Simferopol", &form), None);
+    }
+
+    #[test]
+    fn a_name_read_as_another_row_or_place_is_a_conflict_whatever_its_script() {
+        use DestinationKind::*;
+        use DestinationStatus::*;
+        let t = table();
+        let cyrillic = row(20, "xx-krym", Settlement, &["Крым"], "UA", Some("ua-crimea"), Outside);
+        assert!(t.name_conflicts(data(), &cyrillic).iter().any(|c| c.contains("ua-crimea")), "{:?}", t.name_conflicts(data(), &cyrillic));
+        let latin = row(21, "xx-simf", Settlement, &["Simferopol"], "UA", Some("ua-crimea"), Outside);
+        assert!(t.name_conflicts(data(), &latin).iter().any(|c| c.contains("ua-simferopol")));
+        let moscow = row(22, "xx-moscow", Settlement, &["Москва"], "UA", Some("ua-crimea"), Restricted);
+        assert!(t.name_conflicts(data(), &moscow).iter().any(|c| c.contains("(RU)")));
+        assert!(t.name_conflicts(data(), &row(23, "xx-new", Settlement, &["Hollowmere"], "UA", Some("ua-crimea"), Restricted)).is_empty());
     }
 
     #[test]

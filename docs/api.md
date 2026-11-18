@@ -103,7 +103,9 @@ only a destination raised starts "Review needed for the destination." and then s
   (required unless `Outside`), `asOf`, `reviewBy`, `confirmed`); a row with the code of one in force **replaces** it
   (the old one is kept, removed: `replaced` in the answer). 409 `confirm` with `conflicts` when a name is also read as
   another place (another row, a place of another country in `places.json`, a country): send it again with
-  `confirmed: true`. `POST /api/v1/admin/destinations/{id}/remove`. `POST /api/v1/admin/destinations/start` loads
+  `confirmed: true`. `POST /api/v1/admin/destinations/{id}/remove`; a region that settlements in force name is neither removed nor changed
+  into another kind (409 `inUse`, with their names): remove or move them first. Name conflicts are read as addresses
+  are, every script and reading, and checked again under the table's lock when the row is stored. `POST /api/v1/admin/destinations/start` loads
   the starting rows the owner approved (`ports/rust/src/api/starting-destinations.json`) into a table that has never
   had a row (409 `started` otherwise). Rows are never deleted. Each change reloads the table on the replica that made
   it, and on the others within seconds (the check for changes counts the table's rows).
