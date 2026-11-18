@@ -12,7 +12,7 @@ use super::data::{data, MatcherData};
 use super::names::{NameForm, NameParser};
 use super::options::{Options, Outcome};
 use super::scorer::{NameScorer, ScoreValue, WordAlignment};
-use super::text::{fold_key, is_latin_word, latin_reads_as, Token, TokenRef, Tokenizer};
+use super::text::{fold_key, is_latin_word, latin_reads_as, latin_spellings, Token, TokenRef, Tokenizer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubjectKind {
@@ -425,6 +425,7 @@ impl ListIndex {
         let (by_fold, by_joined) = (&self.aliases_by_fold, &self.aliases_by_joined);
         // The aliases a Chinese word's pinyin found by fold key: those that read exactly so are put first (below).
         let mut by_pinyin_reading: Vec<u32> = Vec::new();
+        let mut exact: Vec<u32> = Vec::new();
         let tokens = distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned());
         for token in &tokens {
             for k in lookup_keys(token) {
@@ -456,8 +457,10 @@ impl ListIndex {
                 }
             }
             if is_latin_word(token) {
-                for form in &token.forms {
-                    vote(postings(&self.aliases_by_pinyin, form), 3, false);
+                for spelling in latin_spellings(token) {
+                    let list = postings(&self.aliases_by_pinyin, &spelling);
+                    vote(list, 3, false);
+                    exact.extend_from_slice(list);
                 }
             }
             for &group in token.cognate_groups() {
@@ -507,27 +510,33 @@ impl ListIndex {
         for form in [query.entity, query.person] {
             for (pair, k) in form.core.windows(2).zip(&form.joined) {
                 if !k.is_empty() && pair.iter().all(|t| is_latin_word(t)) && !read.contains(&k.as_str()) {
-                    vote(postings(&self.aliases_by_pinyin, k), 3, true);
+                    let list = postings(&self.aliases_by_pinyin, k);
+                    vote(list, 3, true);
+                    exact.extend_from_slice(list);
                     read.push(k);
                 }
             }
         }
-        // An alias that reads exactly as a Chinese word's pinyin (one word, or two in Latin script read as one) gets a
-        // full vote more, so aliases alike only after folding (Zang Wei for 张伟) never crowd it out of the limit.
+        // Aliases that read exactly as pinyin go first, whatever the votes (#93): a Chinese word's reading as an alias in
+        // Latin script (one word, or two read as one), or a Latin word's as a Chinese alias (aliases_by_pinyin holds only
+        // exact readings). So aliases alike only after folding (Zang Wei for 张伟) never crowd one out of the limit.
         let readings: Vec<&String> = tokens.iter().flat_map(|t| t.pinyin.iter().flatten()).collect();
         by_pinyin_reading.sort_unstable();
         by_pinyin_reading.dedup();
         for &alias in &by_pinyin_reading {
             let form = &self.aliases[alias as usize].form;
-            let exact = form.core.iter().any(|t| readings.iter().any(|r| latin_reads_as(t, r)))
-                || form.core.windows(2).zip(&form.joined).any(|(pair, k)| pair.iter().all(|t| is_latin_word(t)) && readings.contains(&k));
-            if exact {
-                state.votes[alias as usize] += 12;
+            if form.core.iter().any(|t| readings.iter().any(|r| latin_reads_as(t, r)))
+                || form.core.windows(2).zip(&form.joined).any(|(pair, k)| pair.iter().all(|t| is_latin_word(t)) && readings.contains(&k))
+            {
+                exact.push(alias);
             }
         }
+        exact.sort_unstable();
+        exact.dedup();
         let (votes, voted) = (&mut state.votes, &mut state.voted);
         let mut ids = voted.clone();
-        ids.sort_by(|a, b| votes[*b as usize].cmp(&votes[*a as usize]));
+        let is_exact = |alias: &u32| exact.binary_search(alias).is_ok();
+        ids.sort_by(|a, b| is_exact(b).cmp(&is_exact(a)).then_with(|| votes[*b as usize].cmp(&votes[*a as usize])));
         for &alias in voted.iter() {
             votes[alias as usize] = 0;
         }

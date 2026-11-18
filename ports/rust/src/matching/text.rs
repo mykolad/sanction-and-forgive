@@ -242,7 +242,8 @@ pub fn pinyin_readings(word: &str) -> Vec<String> {
         }
     };
     // The surname's own reading only where the first part is that one character (not a word read as a whole).
-    let surname = table.surnames.get(&chars[0]).filter(|_| first_alone && chars.len() > 1);
+    // A surname written as a word of its own (曾 Guofan) is one too.
+    let surname = table.surnames.get(&chars[0]).filter(|_| first_alone);
     let firsts: Vec<&String> = std::iter::once(&parts[0]).chain(surname).collect();
     for first in &firsts {
         add(format!("{first}{}", parts[1..].concat()));
@@ -265,7 +266,17 @@ pub fn is_latin_word(token: &Token) -> bool {
 /// A word in Latin script's letters as a pinyin reading is compared with them: its forms, and a word joined from
 /// particles as written, without its hyphens (an-na: anna), never an Arabic reading that drops a part.
 pub fn latin_reads_as(token: &Token, reading: &str) -> bool {
-    is_latin_word(token) && (token.forms.iter().any(|f| f == reading) || token.text.replace('-', "") == reading)
+    is_latin_word(token) && latin_spellings(token).iter().any(|s| s == reading)
+}
+
+/// A word in Latin script's full spellings: its forms, or for a word joined from particles its text without hyphens
+/// alone (Al Lina: allina, never the lina of a reading that drops a part).
+pub fn latin_spellings(token: &Token) -> Vec<String> {
+    if token.text.contains('-') {
+        vec![token.text.replace('-', "")]
+    } else {
+        token.forms.clone()
+    }
 }
 
 /// A Han character: the unified and compatibility ideographs, in the Basic Multilingual Plane and beyond it.

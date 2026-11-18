@@ -387,7 +387,11 @@ impl<'a> NameScorer<'a> {
             && pairs.iter().all(|p| {
                 matches!(
                     p.alignment.method,
-                    AlignMethod::Identical | AlignMethod::Transliteration | AlignMethod::SpellingPair | AlignMethod::FoldKey
+                    AlignMethod::Identical
+                        | AlignMethod::Transliteration
+                        | AlignMethod::SpellingPair
+                        | AlignMethod::FoldKey
+                        | AlignMethod::Pinyin
                 )
             });
 
