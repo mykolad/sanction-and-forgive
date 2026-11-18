@@ -421,9 +421,9 @@ pub async fn destinations_current(conn: &mut Connection) -> DbResult<(Vec<Destin
 
 /// What adding a row did: its id and the row with the same code it replaced, or why it wasn't added.
 #[derive(Debug)]
-pub enum DestinationAddition {
+pub enum DestinationAddition<R> {
     Added { id: i32, replaced: Option<i32> },
-    Refused(String),
+    Refused(R),
 }
 
 async fn lock_destinations(conn: &mut Connection) -> DbResult<()> {
@@ -469,13 +469,13 @@ OUTPUT INSERTED.Id VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, @P
 
 /// Adds a row, replacing the one in force with the same code, unless check refuses it against the rows in force: checked
 /// and written in one transaction, under the table's lock.
-pub async fn destination_add(
+pub async fn destination_add<R>(
     conn: &mut Connection,
     row: &Destination,
     added_by: &str,
     now: Time,
-    check: impl FnOnce(&[Destination]) -> Option<String>,
-) -> DbResult<DestinationAddition> {
+    check: impl FnOnce(&[Destination]) -> Option<R>,
+) -> DbResult<DestinationAddition<R>> {
     simple(conn, "BEGIN TRANSACTION").await?;
     let result = async {
         lock_destinations(conn).await?;

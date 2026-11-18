@@ -157,8 +157,9 @@ function showForm(row) {
     status: select("status", Object.entries(STATUSES), row?.status || "Restricted"),
     restrictedBy: el("input", { name: "restrictedBy", maxlength: "200", value: row?.restrictedBy || "", placeholder: "EU, UK, US" }),
     legalSource: el("textarea", { name: "legalSource", rows: "2", maxlength: "1000" }),
-    asOf: el("input", { type: "date", name: "asOf", value: today }),
-    reviewBy: el("input", { type: "date", name: "reviewBy", value: "" }),
+    // A change keeps the row's dates: a new check of the sources is a new As of (and Review by), entered as such.
+    asOf: el("input", { type: "date", name: "asOf", value: row?.asOf || today }),
+    reviewBy: el("input", { type: "date", name: "reviewBy", value: row?.reviewBy || "" }),
   };
   inputs.otherNames.value = (row?.otherNames || []).join("\n");
   inputs.legalSource.value = row?.legalSource || "";
@@ -212,3 +213,6 @@ function showForm(row) {
     note));
   inputs.name.focus();
 }
+
+// admin.js calls loadDestinations once the account is known; if that happened before this script ran, start here.
+if (me !== null) loadDestinations();

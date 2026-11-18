@@ -248,7 +248,22 @@ impl Destinations {
                 }
             }
         }
-        let country = form.effective_country();
+        // The address's country: named (parse_address already leaves out a country's name that names a street), or
+        // else the country of the first place named, unless that names a street ("12 Tehran Road" isn't in Iran).
+        let mut country = form.country.as_str();
+        if country.is_empty() {
+            let mut i = 0;
+            while i < tokens.len() {
+                match lookup(&tokens, i, data.max_place_words, &data.places) {
+                    Some((place, length)) if !names_a_street(data, &tokens, &parts, i, length, false) => {
+                        country = place.country.as_str();
+                        break;
+                    }
+                    Some((_, length)) => i += length,
+                    None => i += 1,
+                }
+            }
+        }
         if !country.is_empty() {
             for (row, destination) in self.rows.iter().enumerate() {
                 if destination.kind == DestinationKind::Country && destination.country == country {
@@ -353,6 +368,9 @@ mod tests {
         assert_eq!(find("12 Azadi Street, Tehran, Iran"), Some((DestinationState::Restricted, "ir".to_string())));
         assert_eq!(find("Tehran"), Some((DestinationState::Restricted, "ir".to_string())));
         assert_eq!(find("Dubai, United Arab Emirates"), None);
+        // A street named after a place is no evidence of its country.
+        assert_eq!(find("12 Tehran Road, Leeds"), None);
+        assert_eq!(find("12 Tehran Road"), None);
     }
 
     #[test]

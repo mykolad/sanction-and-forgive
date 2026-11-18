@@ -18,7 +18,7 @@ use super::admin::{field, path_id, refuse, server_error};
 use super::screening::{utf16_len, Errors, JsonTime};
 use super::server::{bad_request, json_response, not_found, one_error, Shared};
 use crate::matching::data::data;
-use crate::matching::{Destination, DestinationKind, DestinationStatus};
+use crate::matching::{Destination, DestinationKind, DestinationStatus, Destinations};
 use crate::store::queries::{self, DestinationAddition, DestinationRecord};
 
 const MAX_NAME: usize = 200;
@@ -274,11 +274,25 @@ fn parse_row(object: &Map<String, Value>) -> Result<(Destination, bool), Errors>
     ))
 }
 
-/// What a new row can't be among the rows in force: a settlement's region must be a region in force.
-fn refused_by_table(row: &Destination, in_force: &[Destination]) -> Option<String> {
-    let parent = row.parent.as_deref()?;
-    let found = in_force.iter().any(|d| d.code == parent && d.kind == DestinationKind::Region);
-    (!found).then(|| "Its region (Parent) isn't a region in the table: add the region first.".to_string())
+/// Why a new row isn't added among the rows in force (read under the table's lock, so another replica's addition
+/// counts too): a settlement's region must be a region in force, and a name also read as another place needs confirming.
+#[derive(Debug, PartialEq)]
+enum Refusal {
+    Parent,
+    Confirm(Vec<String>),
+}
+
+fn refused_by_table(row: &Destination, in_force: &[Destination], confirmed: bool) -> Option<Refusal> {
+    if let Some(parent) = row.parent.as_deref() {
+        if !in_force.iter().any(|d| d.code == parent && d.kind == DestinationKind::Region) {
+            return Some(Refusal::Parent);
+        }
+    }
+    if confirmed {
+        return None;
+    }
+    let conflicts = Destinations::build(in_force.to_vec(), "in force").name_conflicts(data(), row);
+    (!conflicts.is_empty()).then_some(Refusal::Confirm(conflicts))
 }
 
 /// Adds a row, or changes the one in force with the same code. A name also read as another place needs confirming.
@@ -293,20 +307,10 @@ async fn add(State(s): State<Shared>, headers: HeaderMap, body: Bytes) -> Respon
         Ok(parsed) => parsed,
         Err(errors) => return bad_request(errors),
     };
-    let conflicts = s.catalog.destinations().name_conflicts(data(), &row);
-    if !conflicts.is_empty() && !confirmed {
-        return json_response(
-            StatusCode::CONFLICT,
-            &json!({
-                "code": "confirm",
-                "message": "A name of this row is also read as another place. Once it's in the table, an address with that name is read as this one. Confirm only if that's right.",
-                "conflicts": conflicts,
-            }),
-        );
-    }
     let added = match s.db.connect().await {
         Ok(mut conn) => {
-            queries::destination_add(&mut conn, &row, &user.name, chrono::Utc::now(), |in_force| refused_by_table(&row, in_force)).await
+            let check = |in_force: &[Destination]| refused_by_table(&row, in_force, confirmed);
+            queries::destination_add(&mut conn, &row, &user.name, chrono::Utc::now(), check).await
         }
         Err(e) => Err(e),
     };
@@ -315,7 +319,17 @@ async fn add(State(s): State<Shared>, headers: HeaderMap, body: Bytes) -> Respon
             s.loader.logger.error("Adding to the destinations under broad restrictions failed", &[("error", e.to_string().into())]);
             server_error()
         }
-        Ok(DestinationAddition::Refused(reason)) => bad_request(one_error("Parent", &reason)),
+        Ok(DestinationAddition::Refused(Refusal::Parent)) => {
+            bad_request(one_error("Parent", "Its region (Parent) isn't a region in the table: add the region first."))
+        }
+        Ok(DestinationAddition::Refused(Refusal::Confirm(conflicts))) => json_response(
+            StatusCode::CONFLICT,
+            &json!({
+                "code": "confirm",
+                "message": "A name of this row is also read as another place. Once it's in the table, an address with that name is read as this one. Confirm only if that's right.",
+                "conflicts": conflicts,
+            }),
+        ),
         Ok(DestinationAddition::Added { id, replaced }) => {
             let replaced_text = replaced.map(|r| format!(", replacing row {r}")).unwrap_or_default();
             s.loader.logger.info(&format!("Destination row {id} ({}) added by {}{replaced_text}", row.code, user.name), &[]);
@@ -441,7 +455,7 @@ mod tests {
             });
             let (parsed, _) = parse_row(body.as_object().unwrap()).unwrap_or_else(|e| panic!("{}: {e:?}", row.code));
             assert_eq!(&parsed, row);
-            assert_eq!(refused_by_table(row, &in_force), None, "{}", row.code);
+            assert_eq!(refused_by_table(row, &in_force, true), None, "{}", row.code);
             assert!(!in_force.iter().any(|d| d.code == row.code), "{} twice", row.code);
             in_force.push(row.clone());
         }

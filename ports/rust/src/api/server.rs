@@ -488,6 +488,7 @@ async fn stream(State(s): State<Shared>, request: Request) -> Response {
         max_seconds,
         allow_list_version: allow_list.version.clone(),
         destinations_version: destinations.version.clone(),
+        destinations_review_overdue: destinations.review_overdue(now.date_naive()).map(|d| d.format("%Y-%m-%d").to_string()),
     };
     let body = request.into_body();
     let state = s.clone();

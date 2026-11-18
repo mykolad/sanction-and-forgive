@@ -85,8 +85,8 @@ country in the table, has no `destination`: missing data is never evidence. The 
 broad restrictions by EU, UK, US: Simferopol (as of 18 Nov 2026). Check the rules for the goods."); a `Review` that
 only a destination raised starts "Review needed for the destination." and then says what the lists answered.
 
-- Responses carry **`destinationsVersion`** (the table's additions plus removals; stream headers too), and stream
-  entries a `destination` the same way. The audit line has `destinations <version>` and, on an address entry,
+- Responses carry **`destinationsVersion`** (the table's additions plus removals; stream headers too, with
+  `destinationsReviewOverdue` when a review date has passed), and stream entries a `destination` the same way. The audit line has `destinations <version>` and, on an address entry,
   `(destination restricted ua-simferopol)`: the table's own code, never the address.
 - `GET /api/v1/destinations`: the table in force (anyone): `{version, reviewOverdue, destinations: [{id, code, kind,
   name, otherNames, country, parent, needsRegion, status, restrictedBy, legalSource, asOf, reviewBy}]}`. Never who

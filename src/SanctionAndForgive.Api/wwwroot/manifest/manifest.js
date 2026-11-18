@@ -530,6 +530,7 @@ function usedSnapshots() {
 // searched; overdue, not-checked and switched-off lists are said so.
 function coverage(snapshot) {
   const lists = listsOf(snapshot);
+  const overdue = snapshot >= 0 ? headers[snapshot].destinationsReviewOverdue : null;
   const name = (list) => `${list.name}, as of ${utc(list.asOf)}`;
   return {
     searched: lists.filter((list) => list.state === "Current" || list.state === "Overdue").map(name),
@@ -541,6 +542,7 @@ function coverage(snapshot) {
       lists.some((list) => list.state === "SwitchedOff")
         ? `Not searched: ${lists.filter((list) => list.state === "SwitchedOff").map((list) => list.name).join("; ")} (switched off by an administrator).`
         : null,
+      overdue ? `Warning: the table of destinations under broad restrictions was due for review on ${overdue}.` : null,
     ].filter(Boolean),
   };
 }
@@ -650,6 +652,11 @@ function download() {
       output.push(line([`snapshot ${i + 1}`, list.name, list.code, list.version, utc(list.asOf), list.state, headers[snapshot].matcherVersion, headers[snapshot].allowListVersion, headers[snapshot].destinationsVersion ?? ""]));
     }
   });
+  for (const snapshot of snapshots) {
+    if (headers[snapshot].destinationsReviewOverdue) {
+      output.push(line([`snapshot ${snapshots.indexOf(snapshot) + 1}`, `Warning: the table of destinations under broad restrictions was due for review on ${headers[snapshot].destinationsReviewOverdue}.`]));
+    }
+  }
   output.push("", line(["Screening started", run.started ? run.started.toISOString() : ""]), line(["Screening ended", run.ended ? run.ended.toISOString() : ""]));
   output.push(line([headers.length ? headers[headers.length - 1].disclaimer : ""]));
   // A byte order mark, so a spreadsheet reads the file as UTF-8.

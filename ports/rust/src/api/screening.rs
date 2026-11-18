@@ -414,6 +414,10 @@ pub struct StreamHeaderLine {
     pub max_seconds: u64,
     pub allow_list_version: String,
     pub destinations_version: String,
+    /// The earliest review date of the destinations table already passed (#67): every result of the stream is
+    /// screened against a table that is due for review. Absent when none is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destinations_review_overdue: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
