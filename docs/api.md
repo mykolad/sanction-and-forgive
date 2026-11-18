@@ -61,6 +61,59 @@ Only an implementation whose `GET /api/v1/status` lists `"parties"` in **`featur
 production runs, since 2026-11-17; owner's decision on #76); the website offers "Add a party" only there. Elsewhere
 `parties` is ignored, so a caller checks `features` first.
 
+## Destinations under broad restrictions (Rust only so far)
+
+Of embargoes, screening covers only the destinations in a table that administrators keep from the official sources
+(#67; owner's decisions, 2026-11-18): countries (Iran, North Korea; Cuba for the US), regions (Crimea, Sevastopol, the
+so-called people's republics, and the Donetsk, Luhansk, Zaporizhzhia and Kherson oblasts, partly restricted) and
+settlements in them. Every address entered, the request's own and each party's, is read for the table's names,
+whatever country the address names ("Simferopol, Russia" is in Crimea), and for its country:
+
+- In a restricted area, the address entry carries a **`destination`** with `state` `restricted`.
+- In a partly restricted region (Partly) but at no place in it the table knows, `state` is `possiblyRestricted`: the
+  address doesn't tell which side of the line it is.
+- A settlement decides for its region, a region for its country: a settlement **outside** the restricted area (Kherson
+  city, Zaporizhzhia city) clears its region's notice. Places named apart from each other: the most severe.
+- A name that repeats elsewhere ("Vasylivka") can be marked to count only when the address names its region, or
+  names no region at all (neither one of the table's nor another, such as "Vinnytsia Oblast").
+- A name that names a street ("Crimea Road", "5 Kherson Rd", "vul. Simferopol", "rue de Cuba") is the street's, as for
+  countries, and so is a place's name that names one: "12 Tehran Road" isn't in Iran.
+
+`destination` is `{state, code, kind, name, restrictedBy, legalSource, asOf}`: the row that decided it. Either state
+makes the outcome at least **`Review`**, and the allow-list never clears it (it covers names only); a `Match` stays a
+`Match`. It never changes a list's cell and never carries a percentage. No address, or one that names no place or
+country in the table, has no `destination`: missing data is never evidence. The summary says it ("Destination under
+broad restrictions by EU, UK, US: Simferopol (as of 18 Nov 2026). Check the rules for the goods."); a `Review` that
+only a destination raised starts "Review needed for the destination." and then says what the lists answered.
+
+- Responses carry **`destinationsVersion`** (the table's additions plus removals; stream headers too, with
+  `destinationsReviewOverdue` when a review date has passed), and stream entries a `destination` the same way. The audit line has `destinations <version>` and, on an address entry,
+  `(destination restricted ua-simferopol)`: the table's own code, never the address.
+- `GET /api/v1/destinations`: the table in force (anyone): `{version, reviewOverdue, destinations: [{id, code, kind,
+  name, otherNames, country, parent, needsRegion, status, restrictedBy, legalSource, asOf, reviewBy}]}`. Never who
+  edited it. 503 `{"state":"warmingUp"}` before the first load.
+- Each row has a review date: 12 months after `asOf` unless given, and never later than that. Once one has passed (`reviewOverdue`, the earliest),
+  every summary warns: "the table of destinations under broad restrictions was due for review on …", as for a list
+  that couldn't be updated.
+- Administrators (the `/admin` page, or the API with the `Lists.Admin` role and the site's header for changes):
+  `GET /api/v1/admin/destinations` (every row ever added, newest first, with who added and removed it; `canStart`,
+  `startingCount`), `POST /api/v1/admin/destinations` (a row: `code` (`[a-z0-9-]`, stable), `kind` (`Country`,
+  `Region`, `Settlement`), `name`, `otherNames` (every script and spelling), `country` (ISO alpha-2: required for a
+  country, else the country it lies in), `parent` (a settlement's region, which must be in the table), `needsRegion`,
+  `status` (`Restricted`, `Partly`, `Outside`; a country is never `Outside`), `restrictedBy` and `legalSource`
+  (required unless `Outside`), `asOf`, `reviewBy`, `confirmed`); a row with the code of one in force **replaces** it
+  (the old one is kept, removed: `replaced` in the answer). 409 `confirm` with `conflicts` when a name is also read as
+  another place (another row, a place of another country in `places.json`, a country): send it again with
+  `confirmed: true`. `POST /api/v1/admin/destinations/{id}/remove`; a region that settlements in force name is neither removed nor changed
+  into another kind (409 `inUse`, with their names): remove or move them first. Name conflicts are read as addresses
+  are, every script and reading, and checked again under the table's lock when the row is stored. `POST /api/v1/admin/destinations/start` loads
+  the starting rows the owner approved (`ports/rust/src/api/starting-destinations.json`) into a table that has never
+  had a row (409 `started` otherwise). Rows are never deleted. Each change reloads the table on the replica that made
+  it, and on the others within seconds (the check for changes counts the table's rows).
+
+Only an implementation whose status lists `"destinations"` in `features` reads the table; the website shows notices,
+and the admin and status pages the table, only there.
+
 ## Batches: `POST /api/v1/screenings/stream`
 
 For many records at once. The request is **NDJSON**: one screening per line, each the same object as the single

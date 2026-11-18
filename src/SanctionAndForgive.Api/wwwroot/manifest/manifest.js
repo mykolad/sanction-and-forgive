@@ -323,7 +323,7 @@ async function* ndjson(response) {
 }
 
 function snapshotKey(header) {
-  return JSON.stringify([header.matcherVersion, header.allowListVersion, header.lists.map((list) => [list.code, list.version, list.asOf, list.state])]);
+  return JSON.stringify([header.matcherVersion, header.allowListVersion, header.destinationsVersion, header.destinationsReviewOverdue ?? null, header.lists.map((list) => [list.code, list.version, list.asOf, list.state])]);
 }
 
 // Sends one chunk of records, and whatever of it isn't answered again (the stream's limits, or a connection or answer
@@ -505,6 +505,14 @@ function foundIn(result, code) {
 }
 
 // Whether a row has possible matches the allow-list allows (its outcome stays NoMatch).
+// A row's address in a destination under broad restrictions (#67, when the API reads them), or "".
+function destinationOf(result) {
+  const notice = result.entries.map((entry) => entry.destination).find(Boolean);
+  if (!notice) return "";
+  const what = notice.state === "restricted" ? "Destination under broad restrictions" : "The destination may be under broad restrictions";
+  return `${what}: ${notice.name} (${notice.restrictedBy}, as of ${notice.asOf})`;
+}
+
 function hasAllowed(result) {
   return result.entries.some((entry) => entry.cells.some((cell) => cell.allowed && cell.outcome === "Review"));
 }
@@ -522,6 +530,7 @@ function usedSnapshots() {
 // searched; overdue, not-checked and switched-off lists are said so.
 function coverage(snapshot) {
   const lists = listsOf(snapshot);
+  const overdue = snapshot >= 0 ? headers[snapshot].destinationsReviewOverdue : null;
   const name = (list) => `${list.name}, as of ${utc(list.asOf)}`;
   return {
     searched: lists.filter((list) => list.state === "Current" || list.state === "Overdue").map(name),
@@ -533,6 +542,7 @@ function coverage(snapshot) {
       lists.some((list) => list.state === "SwitchedOff")
         ? `Not searched: ${lists.filter((list) => list.state === "SwitchedOff").map((list) => list.name).join("; ")} (switched off by an administrator).`
         : null,
+      overdue ? `Warning: the table of destinations under broad restrictions was due for review on ${overdue}.` : null,
     ].filter(Boolean),
   };
 }
@@ -581,10 +591,10 @@ function showResults() {
   $("flagged").querySelector("tbody").replaceChildren(...flagged.slice(0, SHOWN).map((result) => {
     const found = result.outcome === "Error"
       ? errorText(result)
-      : listsOf(result.snapshot).map((list) => {
+      : [destinationOf(result), ...listsOf(result.snapshot).map((list) => {
         const text = foundIn(result, list.code);
         return text && !text.startsWith(SYMBOLS.NoMatch) ? `${list.name}: ${text}` : null;
-      }).filter(Boolean).join("\n");
+      })].filter(Boolean).join("\n");
     const label = result.outcome === "NoMatch" ? `${OVERALL.NoMatch} (allowed possible match)` : OVERALL[result.outcome] || result.outcome;
     return el("tr", {},
       el("td", {}, result.row),
@@ -619,7 +629,7 @@ function download() {
     for (const list of listsOf(snapshot)) if (!columns.some((column) => column.code === list.code)) columns.push(list);
   }
   const line = (fields) => fields.map((field) => csvField(field, separator)).join(separator);
-  const output = [line(["Row", "Reference", "Result", "Receiver", "Company", "Address", ...columns.map((list) => `${list.name} (${list.code})`), "Lists as of"])];
+  const output = [line(["Row", "Reference", "Result", "Receiver", "Company", "Address", "Destination", ...columns.map((list) => `${list.name} (${list.code})`), "Lists as of"])];
   for (const result of results) {
     let outcome;
     if (result.skipped) outcome = "Skipped: nothing to screen";
@@ -633,15 +643,20 @@ function download() {
       if (!searched.has(list.code)) return "";
       return foundIn(result, list.code) || "Not searched (switched off)";
     });
-    output.push(line([result.row, result.reference, outcome, result.values.receiver, result.values.company, result.values.address, ...cells,
+    output.push(line([result.row, result.reference, outcome, result.values.receiver, result.values.company, result.values.address, destinationOf(result), ...cells,
       result.snapshot >= 0 ? `snapshot ${snapshots.indexOf(result.snapshot) + 1}` : ""]));
   }
-  output.push("", line(["Lists as searched"]), line(["Snapshot", "List", "Code", "Version", "As of", "State", "Matcher version", "Allow-list version"]));
+  output.push("", line(["Lists as searched"]), line(["Snapshot", "List", "Code", "Version", "As of", "State", "Matcher version", "Allow-list version", "Destinations version"]));
   snapshots.forEach((snapshot, i) => {
     for (const list of listsOf(snapshot)) {
-      output.push(line([`snapshot ${i + 1}`, list.name, list.code, list.version, utc(list.asOf), list.state, headers[snapshot].matcherVersion, headers[snapshot].allowListVersion]));
+      output.push(line([`snapshot ${i + 1}`, list.name, list.code, list.version, utc(list.asOf), list.state, headers[snapshot].matcherVersion, headers[snapshot].allowListVersion, headers[snapshot].destinationsVersion ?? ""]));
     }
   });
+  for (const snapshot of snapshots) {
+    if (headers[snapshot].destinationsReviewOverdue) {
+      output.push(line([`snapshot ${snapshots.indexOf(snapshot) + 1}`, `Warning: the table of destinations under broad restrictions was due for review on ${headers[snapshot].destinationsReviewOverdue}.`]));
+    }
+  }
   output.push("", line(["Screening started", run.started ? run.started.toISOString() : ""]), line(["Screening ended", run.ended ? run.ended.toISOString() : ""]));
   output.push(line([headers.length ? headers[headers.length - 1].disclaimer : ""]));
   // A byte order mark, so a spreadsheet reads the file as UTF-8.

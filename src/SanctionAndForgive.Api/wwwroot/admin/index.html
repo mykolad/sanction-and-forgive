@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Admin · Sanction &amp; Forgive</title>
-  <meta name="description" content="For the demo's administrators: review list updates held for review.">
+  <meta name="description" content="For the demo's administrators: review list updates held for review, switch lists off, and keep the table of destinations under broad restrictions.">
   <link rel="stylesheet" href="/app.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23243b6b'/%3E%3Cpath d='M9 16.5l4.5 4.5L23 11' stroke='white' stroke-width='3.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 </head>
@@ -46,6 +46,16 @@
         rejected. Until then the current list keeps serving, past its allowed age too (with a warning on every result).</p>
       <div id="held" aria-live="polite"></div>
     </section>
+
+    <!-- Offered only when the API's status lists the "destinations" feature (destinations.js). -->
+    <section class="panel" id="destinations-section" aria-labelledby="destinations-title" hidden>
+      <h2 id="destinations-title">Destinations under broad restrictions</h2>
+      <p class="section-note">An address in a place in this table gets a notice, and the result is at least Review: in a
+        restricted area, or possibly (a partly restricted region, when the address names no place in it that the table knows).
+        A settlement decides for its region: one outside the restricted area clears a notice its region would raise. The
+        place counts whatever country the address names. Curated from the official sources; review each row by its date.</p>
+      <div id="destinations" aria-live="polite"></div>
+    </section>
   </main>
 
   <footer class="footer">
@@ -55,5 +65,6 @@
   </footer>
 
   <script src="/admin/admin.js"></script>
+  <script src="/admin/destinations.js"></script>
 </body>
 </html>

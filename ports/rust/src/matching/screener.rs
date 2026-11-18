@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use super::addresses::parse_address;
 use super::data::{data, MatcherData};
+use super::destinations::{DestinationNotice, Destinations};
 use super::index::{ListIndex, PreparedName, SubjectMatch};
 use super::names::NameParser;
 use super::options::{Options, Outcome};
@@ -104,6 +105,8 @@ pub struct Entry {
     pub allowed_by: Option<AllowListEntry>,
     /// The party it belongs to; None for the request's own receiver, company and address.
     pub party: Option<PartyTag>,
+    /// An address in a destination under broad restrictions (#67): it raises the outcome to at least Review.
+    pub destination: Option<DestinationNotice>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +115,7 @@ pub struct ScreeningResult {
     pub matcher_version: String,
     pub entries: Vec<Entry>,
     pub allow_list_version: String,
+    pub destinations_version: String,
 }
 
 /// One listed subject found for a name on one list.
@@ -158,23 +162,26 @@ impl Screener {
         lists: &[ScreenedList],
         allow_list: &AllowList,
     ) -> Result<ScreeningResult, NothingEntered> {
-        self.screen_parties(request, &[], lists, allow_list)
+        self.screen_parties(request, &[], lists, allow_list, &Destinations::empty())
     }
 
     /// A shipment: the request's own receiver, company and address, then each party's name and address, every
-    /// entry against every list; the outcome is the highest of them all (#65).
+    /// entry against every list, and every address against the destinations under broad restrictions (#67); the outcome
+    /// is the highest of them all (#65).
     pub fn screen_parties(
         &self,
         request: &ScreeningRequest,
         parties: &[Party],
         lists: &[ScreenedList],
         allow_list: &AllowList,
+        destinations: &Destinations,
     ) -> Result<ScreeningResult, NothingEntered> {
-        let mut entries = self.entries(&request.receiver_name, &request.company_name, &request.address, None, lists, allow_list);
+        let checks = Checks { lists, allow_list, destinations };
+        let mut entries = self.entries(&request.receiver_name, &request.company_name, &request.address, None, &checks);
         for (i, party) in parties.iter().enumerate() {
             let tag = PartyTag { number: i as u32 + 1, role: party.role };
             let (receiver, company) = if party.person { (party.name.as_str(), "") } else { ("", party.name.as_str()) };
-            entries.extend(self.entries(receiver, company, &party.address, Some(tag), lists, allow_list));
+            entries.extend(self.entries(receiver, company, &party.address, Some(tag), &checks));
         }
         if entries.is_empty() {
             return Err(NothingEntered);
@@ -184,19 +191,13 @@ impl Screener {
             matcher_version: self.matcher_version.clone(),
             entries,
             allow_list_version: allow_list.version.clone(),
+            destinations_version: destinations.version.clone(),
         })
     }
 
     /// One party's entries (or the request's own): a receiver, a company and an address, each when entered.
-    fn entries(
-        &self,
-        receiver: &str,
-        company: &str,
-        address: &str,
-        party: Option<PartyTag>,
-        lists: &[ScreenedList],
-        allow_list: &AllowList,
-    ) -> Vec<Entry> {
+    fn entries(&self, receiver: &str, company: &str, address: &str, party: Option<PartyTag>, checks: &Checks) -> Vec<Entry> {
+        let (lists, allow_list) = (checks.lists, checks.allow_list);
         let (receiver, company, address) = (clean(receiver), clean(company), clean(address));
         let mut tokenizer = Tokenizer::new(self.data);
         let parser = NameParser { data: self.data };
@@ -223,10 +224,11 @@ impl Screener {
                     cell
                 })
                 .collect();
-            entries.push(Entry { kind, input: name.to_string(), compared, cells, allowed_by, party });
+            entries.push(Entry { kind, input: name.to_string(), compared, cells, allowed_by, party, destination: None });
         }
         if let Some(form) = &address_form {
             let cells = lists.iter().map(|list| self.to_cell(list, |index| index.search_address(form, &self.options))).collect();
+            let destination = checks.destinations.find(self.data, &mut tokenizer, address);
             entries.push(Entry {
                 kind: EntryKind::Address,
                 input: address.to_string(),
@@ -234,6 +236,7 @@ impl Screener {
                 cells,
                 allowed_by: None,
                 party,
+                destination,
             });
         }
         entries
@@ -284,11 +287,19 @@ impl Screener {
     }
 }
 
+/// What one screening is checked against.
+struct Checks<'a> {
+    lists: &'a [ScreenedList],
+    allow_list: &'a AllowList,
+    destinations: &'a Destinations,
+}
+
+/// Match > Review > Incomplete > NoMatch. A destination notice is at least Review, and the allow-list never clears it.
 fn overall(entries: &[Entry]) -> OverallOutcome {
     let cells: Vec<&Cell> = entries.iter().flat_map(|e| e.cells.iter()).collect();
     if cells.iter().any(|c| c.outcome == Some(Outcome::Match)) {
         OverallOutcome::Match
-    } else if cells.iter().any(|c| c.outcome == Some(Outcome::Review) && !c.allowed) {
+    } else if cells.iter().any(|c| c.outcome == Some(Outcome::Review) && !c.allowed) || entries.iter().any(|e| e.destination.is_some()) {
         OverallOutcome::Review
     } else if cells.is_empty() || cells.iter().any(|c| !c.checked) {
         OverallOutcome::Incomplete

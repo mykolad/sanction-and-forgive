@@ -61,7 +61,9 @@ check stays green (owner's suggestion):
 Version 1 changes only when a shared dictionary change moves the .NET implementation's answers (regenerate it from
 .NET: `run.ps1 -Build -UpdateGolden -Version 1` with the .NET image), so a regression in .NET or Go still fails its
 job. When .NET or Go catch up with Rust, their CI job moves to version 2. A test of what only version 2 asks (a new
-field or endpoint) is a `[SinceVersionFact(2)]`, skipped below it: `PartiesTests` (several parties per screening, #65).
+field or endpoint) is a `[SinceVersionFact(2)]`, skipped below it: `PartiesTests` (several parties per screening, #65)
+and `DestinationsTests` (the table of destinations under broad restrictions, #67: each test empties the table first
+and leaves it empty, so the golden files see no destination).
 
 ## What an implementation must provide
 

@@ -1,0 +1,142 @@
+{
+  "about": "The starting rows of the table of destinations under broad restrictions (#67), approved by the owner on 2026-11-18: comprehensive restrictions only. Russia, Belarus and Syria are not on it. An administrator loads them once from the admin page, into an empty table, and edits them there afterwards. A settlement without its own restrictedBy and legalSource takes its region's. Check each legal source against the official text when reviewing.",
+  "asOf": "2026-11-18",
+  "reviewBy": "2027-11-18",
+  "rows": [
+    {
+      "code": "ir", "kind": "Country", "name": "Iran", "country": "IR", "status": "Restricted",
+      "otherNames": ["Islamic Republic of Iran", "Иран", "Іран", "ایران"],
+      "restrictedBy": "US, EU, UK",
+      "legalSource": "US: Iranian Transactions and Sanctions Regulations, 31 CFR part 560. EU: Council Regulation (EU) No 267/2012. UK: The Iran (Sanctions) Regulations 2023."
+    },
+    {
+      "code": "kp", "kind": "Country", "name": "North Korea", "country": "KP", "status": "Restricted",
+      "otherNames": ["Democratic People's Republic of Korea", "DPRK", "Северная Корея", "КНДР", "Північна Корея", "조선민주주의인민공화국"],
+      "restrictedBy": "UN, US, EU, UK",
+      "legalSource": "UN: Security Council resolution 1718 (2006) and later resolutions. US: North Korea Sanctions Regulations, 31 CFR part 510. EU: Council Regulation (EU) 2017/1509. UK: The Democratic People's Republic of Korea (Sanctions) (EU Exit) Regulations 2019."
+    },
+    {
+      "code": "cu", "kind": "Country", "name": "Cuba", "country": "CU", "status": "Restricted",
+      "otherNames": ["Republic of Cuba", "Куба"],
+      "restrictedBy": "US",
+      "legalSource": "US: Cuban Assets Control Regulations, 31 CFR part 515."
+    },
+
+    {
+      "code": "ua-crimea", "kind": "Region", "name": "Crimea", "country": "UA", "status": "Restricted",
+      "otherNames": ["Krym", "Qirim", "Crimean Peninsula", "Autonomous Republic of Crimea", "Republic of Crimea", "AR Crimea", "Крим", "Крым", "Автономна Республіка Крим", "Республіка Крим", "Республика Крым", "АР Крим", "Кримський півострів", "Крымский полуостров"],
+      "restrictedBy": "EU, UK, US",
+      "legalSource": "EU: Council Regulation (EU) No 692/2014. UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (Crimea). US: Executive Order 13685; Ukraine-/Russia-Related Sanctions Regulations, 31 CFR part 589."
+    },
+    {
+      "code": "ua-sevastopol", "kind": "Region", "name": "Sevastopol", "country": "UA", "status": "Restricted",
+      "otherNames": ["Sebastopol", "City of Sevastopol", "Севастополь"],
+      "restrictedBy": "EU, UK, US",
+      "legalSource": "EU: Council Regulation (EU) No 692/2014. UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (Crimea). US: Executive Order 13685; Ukraine-/Russia-Related Sanctions Regulations, 31 CFR part 589."
+    },
+    { "code": "ua-simferopol", "kind": "Settlement", "name": "Simferopol", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Aqmescit", "Akmescit", "Сімферополь", "Симферополь"] },
+    { "code": "ua-kerch", "kind": "Settlement", "name": "Kerch", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Керч", "Керчь"] },
+    { "code": "ua-yalta", "kind": "Settlement", "name": "Yalta", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Ялта"] },
+    { "code": "ua-yevpatoriia", "kind": "Settlement", "name": "Yevpatoriia", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Yevpatoria", "Evpatoria", "Eupatoria", "Євпаторія", "Евпатория"] },
+    { "code": "ua-feodosiia", "kind": "Settlement", "name": "Feodosiia", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Feodosia", "Theodosia", "Феодосія", "Феодосия"] },
+    { "code": "ua-dzhankoi", "kind": "Settlement", "name": "Dzhankoi", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Dzhankoy", "Джанкой"] },
+    { "code": "ua-alushta", "kind": "Settlement", "name": "Alushta", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Алушта"] },
+    { "code": "ua-bakhchysarai", "kind": "Settlement", "name": "Bakhchysarai", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Bakhchisaray", "Бахчисарай"] },
+    { "code": "ua-armiansk", "kind": "Settlement", "name": "Armiansk", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Armyansk", "Армянськ", "Армянск"] },
+    { "code": "ua-krasnoperekopsk", "kind": "Settlement", "name": "Krasnoperekopsk", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Yany Kapu", "Красноперекопськ", "Красноперекопск", "Яни Капу"] },
+    { "code": "ua-saky", "kind": "Settlement", "name": "Saky", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Саки"] },
+    { "code": "ua-sudak", "kind": "Settlement", "name": "Sudak", "country": "UA", "parent": "ua-crimea", "status": "Restricted", "otherNames": ["Судак"] },
+    { "code": "ua-balaklava", "kind": "Settlement", "name": "Balaklava", "country": "UA", "parent": "ua-sevastopol", "status": "Restricted", "otherNames": ["Balaclava", "Балаклава"] },
+    { "code": "ua-inkerman", "kind": "Settlement", "name": "Inkerman", "country": "UA", "parent": "ua-sevastopol", "status": "Restricted", "otherNames": ["Інкерман", "Инкерман"] },
+
+    {
+      "code": "ua-donetsk-oblast", "kind": "Region", "name": "Donetsk Oblast", "country": "UA", "status": "Partly",
+      "otherNames": ["Donetsk region", "Donetsk province", "Donetska oblast", "Donetskaya oblast", "Донецька область", "Донецкая область", "Донецька обл", "Донецкая обл"],
+      "restrictedBy": "EU, UK, US",
+      "legalSource": "EU: Council Regulation (EU) 2022/263 (the non-government-controlled areas of the Donetsk, Kherson, Luhansk and Zaporizhzhia oblasts). UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (non-government controlled Ukrainian territory). US: Executive Order 14065 (the so-called Donetsk People's Republic)."
+    },
+    {
+      "code": "ua-dnr", "kind": "Region", "name": "so-called Donetsk People's Republic", "country": "UA", "status": "Restricted",
+      "otherNames": ["Donetsk People's Republic", "DNR", "ДНР", "Донецкая Народная Республика", "Донецька Народна Республіка"],
+      "restrictedBy": "EU, UK, US",
+      "legalSource": "EU: Council Regulation (EU) 2022/263. UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (non-government controlled Ukrainian territory). US: Executive Order 14065."
+    },
+    { "code": "ua-donetsk", "kind": "Settlement", "name": "Donetsk", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Донецьк", "Донецк"] },
+    { "code": "ua-makiivka", "kind": "Settlement", "name": "Makiivka", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Makeevka", "Makiyivka", "Макіївка", "Макеевка"] },
+    { "code": "ua-horlivka", "kind": "Settlement", "name": "Horlivka", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Gorlovka", "Горлівка", "Горловка"] },
+    { "code": "ua-mariupol", "kind": "Settlement", "name": "Mariupol", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Маріуполь", "Мариуполь"] },
+    { "code": "ua-yenakiieve", "kind": "Settlement", "name": "Yenakiieve", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Yenakiyeve", "Enakievo", "Yenakiyevo", "Єнакієве", "Енакиево"] },
+    { "code": "ua-khartsyzk", "kind": "Settlement", "name": "Khartsyzk", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Khartsyzsk", "Харцизьк", "Харцызск"] },
+    { "code": "ua-debaltseve", "kind": "Settlement", "name": "Debaltseve", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Debaltsevo", "Дебальцеве", "Дебальцево"] },
+    { "code": "ua-volnovakha", "kind": "Settlement", "name": "Volnovakha", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Волноваха"] },
+    { "code": "ua-bakhmut", "kind": "Settlement", "name": "Bakhmut", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Artemivsk", "Artemovsk", "Бахмут", "Артемівськ", "Артемовск"] },
+    { "code": "ua-avdiivka", "kind": "Settlement", "name": "Avdiivka", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Avdeevka", "Авдіївка", "Авдеевка"] },
+    { "code": "ua-shakhtarsk", "kind": "Settlement", "name": "Shakhtarsk", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Shakhtyorsk", "Шахтарськ", "Шахтерск"] },
+    { "code": "ua-chystiakove", "kind": "Settlement", "name": "Chystiakove", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Torez", "Чистякове", "Торез"] },
+    { "code": "ua-snizhne", "kind": "Settlement", "name": "Snizhne", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Snezhnoye", "Сніжне", "Снежное"] },
+    { "code": "ua-ilovaisk", "kind": "Settlement", "name": "Ilovaisk", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Іловайськ", "Иловайск"] },
+    { "code": "ua-yasynuvata", "kind": "Settlement", "name": "Yasynuvata", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Yasinovataya", "Ясинувата", "Ясиноватая"] },
+    { "code": "ua-novoazovsk", "kind": "Settlement", "name": "Novoazovsk", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Новоазовськ", "Новоазовск"] },
+    { "code": "ua-dokuchaievsk", "kind": "Settlement", "name": "Dokuchaievsk", "country": "UA", "parent": "ua-donetsk-oblast", "status": "Restricted", "otherNames": ["Dokuchayevsk", "Докучаєвськ", "Докучаевск"] },
+
+    {
+      "code": "ua-luhansk-oblast", "kind": "Region", "name": "Luhansk Oblast", "country": "UA", "status": "Partly",
+      "otherNames": ["Luhansk region", "Luhansk province", "Lugansk Oblast", "Lugansk region", "Luhanska oblast", "Luganskaya oblast", "Луганська область", "Луганская область", "Луганська обл", "Луганская обл"],
+      "restrictedBy": "EU, UK, US",
+      "legalSource": "EU: Council Regulation (EU) 2022/263 (the non-government-controlled areas of the Donetsk, Kherson, Luhansk and Zaporizhzhia oblasts). UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (non-government controlled Ukrainian territory). US: Executive Order 14065 (the so-called Luhansk People's Republic)."
+    },
+    {
+      "code": "ua-lnr", "kind": "Region", "name": "so-called Luhansk People's Republic", "country": "UA", "status": "Restricted",
+      "otherNames": ["Luhansk People's Republic", "Lugansk People's Republic", "LNR", "ЛНР", "Луганская Народная Республика", "Луганська Народна Республіка"],
+      "restrictedBy": "EU, UK, US",
+      "legalSource": "EU: Council Regulation (EU) 2022/263. UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (non-government controlled Ukrainian territory). US: Executive Order 14065."
+    },
+    { "code": "ua-luhansk", "kind": "Settlement", "name": "Luhansk", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Lugansk", "Луганськ", "Луганск"] },
+    { "code": "ua-alchevsk", "kind": "Settlement", "name": "Alchevsk", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Алчевськ", "Алчевск"] },
+    { "code": "ua-kadiivka", "kind": "Settlement", "name": "Kadiivka", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Stakhanov", "Кадіївка", "Стаханов"] },
+    { "code": "ua-sievierodonetsk", "kind": "Settlement", "name": "Sievierodonetsk", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Severodonetsk", "Сєвєродонецьк", "Северодонецк"] },
+    { "code": "ua-lysychansk", "kind": "Settlement", "name": "Lysychansk", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Lisichansk", "Лисичанськ", "Лисичанск"] },
+    { "code": "ua-rubizhne", "kind": "Settlement", "name": "Rubizhne", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Rubezhnoye", "Рубіжне", "Рубежное"] },
+    { "code": "ua-khrustalnyi", "kind": "Settlement", "name": "Khrustalnyi", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Krasnyi Luch", "Krasny Luch", "Хрустальний", "Красний Луч", "Красный Луч"] },
+    { "code": "ua-rovenky", "kind": "Settlement", "name": "Rovenky", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Rovenki", "Ровеньки"] },
+    { "code": "ua-dovzhansk", "kind": "Settlement", "name": "Dovzhansk", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Довжанськ"] },
+    { "code": "ua-antratsyt", "kind": "Settlement", "name": "Antratsyt", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Antratsit", "Антрацит"] },
+    { "code": "ua-brianka", "kind": "Settlement", "name": "Brianka", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Bryanka", "Брянка"] },
+    { "code": "ua-starobilsk", "kind": "Settlement", "name": "Starobilsk", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Starobelsk", "Старобільськ", "Старобельск"] },
+    { "code": "ua-sorokyne", "kind": "Settlement", "name": "Sorokyne", "country": "UA", "parent": "ua-luhansk-oblast", "status": "Restricted", "otherNames": ["Krasnodon", "Сорокине", "Краснодон"] },
+
+    {
+      "code": "ua-zaporizhzhia-oblast", "kind": "Region", "name": "Zaporizhzhia Oblast", "country": "UA", "status": "Partly",
+      "otherNames": ["Zaporizhzhia region", "Zaporizhzhia province", "Zaporizhia Oblast", "Zaporizhia region", "Zaporozhye Oblast", "Zaporozhye region", "Zaporizka oblast", "Zaporozhskaya oblast", "Запорізька область", "Запорожская область", "Запорізька обл", "Запорожская обл"],
+      "restrictedBy": "EU, UK",
+      "legalSource": "EU: Council Regulation (EU) 2022/263 (the non-government-controlled areas of the Donetsk, Kherson, Luhansk and Zaporizhzhia oblasts). UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (non-government controlled Ukrainian territory)."
+    },
+    { "code": "ua-zaporizhzhia", "kind": "Settlement", "name": "Zaporizhzhia", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Outside", "otherNames": ["Zaporizhia", "Zaporozhye", "Zaporozhe", "Запоріжжя", "Запорожье"] },
+    { "code": "ua-melitopol", "kind": "Settlement", "name": "Melitopol", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "otherNames": ["Мелітополь", "Мелитополь"] },
+    { "code": "ua-berdiansk", "kind": "Settlement", "name": "Berdiansk", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "otherNames": ["Berdyansk", "Бердянськ", "Бердянск"] },
+    { "code": "ua-enerhodar", "kind": "Settlement", "name": "Enerhodar", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "otherNames": ["Energodar", "Енергодар", "Энергодар"] },
+    { "code": "ua-tokmak", "kind": "Settlement", "name": "Tokmak", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "needsRegion": true, "otherNames": ["Токмак"] },
+    { "code": "ua-vasylivka", "kind": "Settlement", "name": "Vasylivka", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "needsRegion": true, "otherNames": ["Vasilyevka", "Василівка", "Васильевка"] },
+    { "code": "ua-polohy", "kind": "Settlement", "name": "Polohy", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "otherNames": ["Pologi", "Пологи"] },
+    { "code": "ua-dniprorudne", "kind": "Settlement", "name": "Dniprorudne", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "otherNames": ["Dneprorudnoye", "Дніпрорудне", "Днепрорудное"] },
+    { "code": "ua-molochansk", "kind": "Settlement", "name": "Molochansk", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "otherNames": ["Молочанськ", "Молочанск"] },
+    { "code": "ua-prymorsk", "kind": "Settlement", "name": "Prymorsk", "country": "UA", "parent": "ua-zaporizhzhia-oblast", "status": "Restricted", "needsRegion": true, "otherNames": ["Primorsk", "Приморськ", "Приморск"] },
+
+    {
+      "code": "ua-kherson-oblast", "kind": "Region", "name": "Kherson Oblast", "country": "UA", "status": "Partly",
+      "otherNames": ["Kherson region", "Kherson province", "Khersonska oblast", "Khersonskaya oblast", "Херсонська область", "Херсонская область", "Херсонська обл", "Херсонская обл"],
+      "restrictedBy": "EU, UK",
+      "legalSource": "EU: Council Regulation (EU) 2022/263 (the non-government-controlled areas of the Donetsk, Kherson, Luhansk and Zaporizhzhia oblasts). UK: The Russia (Sanctions) (EU Exit) Regulations 2019 (non-government controlled Ukrainian territory)."
+    },
+    { "code": "ua-kherson", "kind": "Settlement", "name": "Kherson", "country": "UA", "parent": "ua-kherson-oblast", "status": "Outside", "otherNames": ["Херсон"] },
+    { "code": "ua-nova-kakhovka", "kind": "Settlement", "name": "Nova Kakhovka", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Novaya Kakhovka", "Нова Каховка", "Новая Каховка"] },
+    { "code": "ua-kakhovka", "kind": "Settlement", "name": "Kakhovka", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Каховка"] },
+    { "code": "ua-henichesk", "kind": "Settlement", "name": "Henichesk", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Genichesk", "Генічеськ", "Геническ"] },
+    { "code": "ua-skadovsk", "kind": "Settlement", "name": "Skadovsk", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Скадовськ", "Скадовск"] },
+    { "code": "ua-oleshky", "kind": "Settlement", "name": "Oleshky", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Aleshki", "Олешки", "Алешки"] },
+    { "code": "ua-hola-prystan", "kind": "Settlement", "name": "Hola Prystan", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Gola Pristan", "Гола Пристань", "Голая Пристань"] },
+    { "code": "ua-chaplynka", "kind": "Settlement", "name": "Chaplynka", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Chaplinka", "Чаплинка"] },
+    { "code": "ua-kalanchak", "kind": "Settlement", "name": "Kalanchak", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Каланчак"] },
+    { "code": "ua-tavriisk", "kind": "Settlement", "name": "Tavriisk", "country": "UA", "parent": "ua-kherson-oblast", "status": "Restricted", "otherNames": ["Tavriysk", "Таврійськ", "Таврийск"] }
+  ]
+}

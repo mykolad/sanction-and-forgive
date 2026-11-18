@@ -12,6 +12,7 @@ pub type HashSet<T> = std::collections::HashSet<T, rustc_hash::FxBuildHasher>;
 pub mod addresses;
 pub mod compare;
 pub mod data;
+pub mod destinations;
 pub mod index;
 pub mod korean;
 pub mod names;
@@ -21,6 +22,7 @@ pub mod screener;
 pub mod text;
 
 pub use addresses::AddressState;
+pub use destinations::{Destination, DestinationKind, DestinationNotice, DestinationState, DestinationStatus, Destinations};
 pub use index::{ListIndex, ListedAddress, ListedName, ListedSubject, SubjectKind, SubjectMatch};
 pub use options::{Options, Outcome};
 pub use scorer::WordAlignment;
@@ -530,7 +532,9 @@ mod tests {
             Party { role: "shipper", name: "Pinecrest Exports GmbH".to_string(), person: false, address: "Hamburg, Germany".to_string() },
             Party { role: "consignee", name: "Northwind Trading LLC".to_string(), person: false, address: String::new() },
         ];
-        let result = Screener::new(Options::default()).screen_parties(&request, &parties, &[list], &AllowList::empty()).unwrap();
+        let result = Screener::new(Options::default())
+            .screen_parties(&request, &parties, &[list], &AllowList::empty(), &Destinations::empty())
+            .unwrap();
         let tags: Vec<(Option<u32>, &str)> = result.entries.iter().map(|e| (e.party.map(|p| p.number), e.kind.as_str())).collect();
         assert_eq!(tags, [(None, "Company"), (Some(1), "Company"), (Some(1), "Address"), (Some(2), "Company")]);
         assert_eq!(result.entries[3].party.unwrap().role, "consignee");
@@ -539,9 +543,11 @@ mod tests {
         let empty = ScreeningRequest::default();
         let list = ScreenedList { code: "eu".to_string(), name: "EU".to_string(), index: None };
         assert!(Screener::new(Options::default())
-            .screen_parties(&empty, &parties[..1], std::slice::from_ref(&list), &AllowList::empty())
+            .screen_parties(&empty, &parties[..1], std::slice::from_ref(&list), &AllowList::empty(), &Destinations::empty())
             .is_ok());
-        assert!(Screener::new(Options::default()).screen_parties(&empty, &[], &[list], &AllowList::empty()).is_err());
+        assert!(Screener::new(Options::default())
+            .screen_parties(&empty, &[], &[list], &AllowList::empty(), &Destinations::empty())
+            .is_err());
     }
 
     /// The same normalisation never makes different names match.

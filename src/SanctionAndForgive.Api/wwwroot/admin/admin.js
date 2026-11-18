@@ -50,6 +50,7 @@ async function loadAccount() {
   }
 
   loadHeld();
+  if (typeof loadDestinations === "function") loadDestinations();
 }
 
 async function loadHeld() {

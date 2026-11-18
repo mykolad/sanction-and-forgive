@@ -189,3 +189,55 @@ public sealed class AllowListItem
 
     public DateTimeOffset? RemovedAt { get; set; }
 }
+
+/// <summary>A destination under broad restrictions (owner's decisions on #67, 2026-11-18; read by the Rust port only so
+/// far): a country, a region or a settlement, with every name it is recognised by in an address, and whether it is in a
+/// restricted area, partly (a region whose occupied part an address can't tell), or outside one (a settlement inside a
+/// partly restricted region). Curated by administrators from the official sources; never deleted: a removal sets
+/// <see cref="RemovedAt"/>, and a change is a new row with the same <see cref="Code"/> that removes the old one. It holds
+/// no screening input.</summary>
+public sealed class RestrictedDestination
+{
+    public int Id { get; set; }
+
+    /// <summary>Stable across changes ("ua-crimea"): a settlement names its region by it.</summary>
+    public required string Code { get; set; }
+
+    /// <summary><c>Country</c>, <c>Region</c> or <c>Settlement</c>.</summary>
+    public required string Kind { get; set; }
+
+    public required string Name { get; set; }
+
+    /// <summary>Every other name it is recognised by, one per line.</summary>
+    public required string OtherNames { get; set; }
+
+    /// <summary>ISO 3166-1 alpha-2: the country itself for a <c>Country</c>, the one it lies in otherwise.</summary>
+    public string? CountryCode { get; set; }
+
+    /// <summary>A settlement's region (its <see cref="Code"/>).</summary>
+    public string? ParentCode { get; set; }
+
+    /// <summary>Recognised only when the address names its region or no other one (a name that repeats).</summary>
+    public bool NeedsRegion { get; set; }
+
+    /// <summary><c>Restricted</c>, <c>Partly</c> or <c>Outside</c>.</summary>
+    public required string Status { get; set; }
+
+    /// <summary>Who restricts it ("EU, UK, US").</summary>
+    public required string RestrictedBy { get; set; }
+
+    /// <summary>The legal acts it comes from.</summary>
+    public required string LegalSource { get; set; }
+
+    public DateOnly AsOf { get; set; }
+
+    public DateOnly ReviewBy { get; set; }
+
+    public required string AddedBy { get; set; }
+
+    public DateTimeOffset AddedAt { get; set; }
+
+    public string? RemovedBy { get; set; }
+
+    public DateTimeOffset? RemovedAt { get; set; }
+}
