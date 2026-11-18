@@ -268,6 +268,79 @@ union isfuzzy=true
   }
 }
 
+// The operations view (#81): a workbook over the audit lines each screening writes (reference, outcome, versions and
+// what each list answered; never what was entered) and the platform's request metrics for refusals. Its queries are in
+// operations-workbook.json; the app's name, its id and the workspace's go in here.
+resource operationsWorkbook 'Microsoft.Insights/workbooks@2023-06-01' = {
+  name: guid(resourceGroup().id, 'operations-workbook')
+  location: location
+  kind: 'shared'
+  properties: {
+    displayName: 'Sanction & Forgive: operations'
+    category: 'workbook'
+    sourceId: logs.id
+    serializedData: replace(
+      replace(
+        replace(loadTextContent('operations-workbook.json'), '__APP_NAME__', name),
+        '__APP_ID__',
+        resourceId('Microsoft.App/containerApps', name)
+      ),
+      '__WORKSPACE_ID__',
+      logs.id
+    )
+  }
+}
+
+// More than 5% of an hour's screenings Incomplete (a list couldn't be checked: the failure a client must hear about),
+// smoke and load tests aside, once there are at least 3. Checked every 15 minutes; resolves itself when it passes.
+resource incompleteResults 'Microsoft.Insights/scheduledQueryRules@2023-12-01' = {
+  name: '${name}-incomplete-results'
+  location: location
+  properties: {
+    description: 'More than 5% of the last hour\'s screenings were Incomplete: a list could not be checked.'
+    severity: 2
+    enabled: true
+    scopes: [
+      logs.id
+    ]
+    evaluationFrequency: 'PT15M'
+    windowSize: 'PT1H'
+    criteria: {
+      allOf: [
+        {
+          // A multi-line string isn't interpolated: the app's name goes in with replace().
+          query: replace('''
+union isfuzzy=true
+  (datatable(Log_s: string, ContainerAppName_s: string) []),
+  (ContainerAppConsoleLogs_CL)
+| where tostring(column_ifexists("ContainerAppName_s", "")) == "__APP__"
+| extend Entry = parse_json(tostring(column_ifexists("Log_s", "")))
+| extend Message = tostring(Entry.Message), Reference = tostring(Entry.Reference)
+| where Message startswith "Screening " and not(Reference startswith "smoke-") and not(Reference startswith "load-")
+| summarize Screenings = count(), Incomplete = countif(Message has ": Incomplete; matcher ")
+| where Screenings >= 3
+| extend IncompletePercent = 100.0 * Incomplete / Screenings
+''', '__APP__', name)
+          timeAggregation: 'Maximum'
+          metricMeasureColumn: 'IncompletePercent'
+          operator: 'GreaterThan'
+          threshold: 5
+          failingPeriods: {
+            numberOfEvaluationPeriods: 1
+            minFailingPeriodsToAlert: 1
+          }
+        }
+      ]
+    }
+    autoMitigate: true
+    actions: {
+      actionGroups: [
+        alerts.id
+      ]
+    }
+  }
+}
+
 output environmentId string = environment.id
 output appIdentityId string = appIdentity.id
 output appIdentityClientId string = appIdentity.properties.clientId

@@ -383,8 +383,9 @@ be public).
   workflow's input `implementation` deploys `rust` (the default, and always after a push), `dotnet` or `go`: a port's image is the same
   package's tag `<implementation>-<sha>`, and `app.bicep` gives the import job the CLI's command for each.
 - **Alerts** (all to the subscription's Owner role through the action group): database storage above 80%, an import
-  that failed, was rejected or was held for review (a log query on the job's console and system logs), and a $20
-  monthly budget.
+  that failed, was rejected or was held for review (a log query on the job's console and system logs), more than 5% of
+  an hour's screenings Incomplete (the audit lines), and a $20 monthly budget. The operations workbook (#81,
+  `infra/operations-workbook.json`) reads the audit lines and the platform's request metrics only.
 
 - **Deploy identity** `sanction-and-forgive-github-cd`: Contributor on the resource group only, trusted from the
   GitHub `production` environment only (master). The workflows log in with OIDC using the repository variables

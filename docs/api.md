@@ -249,6 +249,17 @@ ContainerAppConsoleLogs_CL
 
 Logs are kept 30 days.
 
+### The operations view
+
+The workbook "Sanction & Forgive: operations" (Azure portal, Monitor, Workbooks; `infra/operations-workbook.json`,
+#81) reads only the audit lines and the platform's request metrics: screenings by outcome, the outcome mix by caller
+(told apart by the reference's prefix: `web-` the website, `manifest-` the manifest page, `smoke-` and `load-` tests,
+anything else the API), the share of Incomplete results, the lists that weren't checked, were searched while overdue
+or were switched off, possible matches by list, destination notices by the table's row, the versions screened
+against, and requests by status code (503 busy or warming up, 429 rate limited). Latency isn't there: no line records
+it, and none is added (no new logging of requests). An alert tells the subscription's Owner role when more than 5% of
+an hour's screenings are Incomplete (smoke and load tests aside, at least 3 screenings).
+
 ## List status: `GET /api/v1/sources` and `/status`
 
 Every list a screening searches, then every known feed that isn't imported, with the reason. The website's
