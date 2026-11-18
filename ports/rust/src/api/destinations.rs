@@ -16,7 +16,7 @@ use serde_json::{json, Map, Value};
 
 use super::admin::{field, path_id, refuse, server_error};
 use super::screening::{utf16_len, Errors, JsonTime};
-use super::server::{bad_request, json_response, not_found, one_error, Shared};
+use super::server::{bad_request, json_response, not_found, one_error, warming_up, Shared};
 use crate::matching::data::data;
 use crate::matching::{Destination, DestinationKind, DestinationStatus, Destinations};
 use crate::store::queries::{self, DestinationAddition, DestinationRecord, DestinationRemoval};
@@ -88,6 +88,10 @@ struct HistoryRow {
 
 /// The table in force, as the screenings use it: never who edited it.
 async fn public_table(State(s): State<Shared>) -> Response {
+    // Before the first load the table in memory is empty, not the one in the database: say so, as screenings do.
+    if !s.catalog.is_ready() {
+        return warming_up("warmingUp");
+    }
     let table = s.catalog.destinations();
     let today = s.screenings.now().date_naive();
     json_response(
@@ -247,8 +251,10 @@ fn parse_row(object: &Map<String, Value>) -> Result<(Destination, bool), Errors>
     let review_text = text_or("reviewBy", &mut fail);
     let review_by =
         if review_text.is_empty() { as_of.and_then(|d| d.checked_add_months(Months::new(12))) } else { parse_date(&review_text) };
-    if review_by.is_none() || matches!((as_of, review_by), (Some(a), Some(r)) if r < a) {
-        fail("ReviewBy", "When to check it again, YYYY-MM-DD, not before AsOf (12 months after it when left out).");
+    // At most 12 months after AsOf (owner's decision on #67): a row may be reviewed sooner, never later.
+    let latest = as_of.and_then(|d| d.checked_add_months(Months::new(12)));
+    if review_by.is_none() || matches!((as_of, review_by, latest), (Some(a), Some(r), Some(l)) if r < a || r > l) {
+        fail("ReviewBy", "When to check it again, YYYY-MM-DD: from AsOf to 12 months after it (12 months when left out).");
     }
     let confirmed = matches!(field(object, "confirmed"), Some(Value::Bool(true)));
     if !errors.is_empty() {

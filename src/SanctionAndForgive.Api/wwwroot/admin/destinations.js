@@ -23,13 +23,23 @@ async function loadDestinations() {
 
   const box = $("destinations");
   try {
-    const table = await (await fetch("/api/v1/destinations", { headers: { Accept: "application/json" } })).json();
+    const response = await fetch("/api/v1/destinations", { headers: { Accept: "application/json" } });
+    if (response.status === 503) {
+      box.textContent = "The lists are loading…";
+      setTimeout(loadDestinations, 3000);
+      return;
+    }
+    const table = await response.json();
     destinationsShown = { rows: table.destinations, history: [], canStart: false, startingCount: 0, version: table.version, reviewOverdue: table.reviewOverdue };
     if (me?.isAdmin) {
-      const response = await fetch("/api/v1/admin/destinations", { headers: { Accept: "application/json" } });
-      if (response.ok) {
-        const admin = await response.json();
-        Object.assign(destinationsShown, { history: admin.rows, canStart: admin.canStart, startingCount: admin.startingCount });
+      const answer = await fetch("/api/v1/admin/destinations", { headers: { Accept: "application/json" } });
+      if (answer.ok) {
+        const admin = await answer.json();
+        // The rows in force from the database itself: another replica may not have read a change just made yet.
+        Object.assign(destinationsShown, {
+          rows: admin.rows.filter((r) => !r.removedAt).sort((a, b) => a.id - b.id),
+          history: admin.rows, canStart: admin.canStart, startingCount: admin.startingCount,
+        });
       }
     }
   } catch {
@@ -221,7 +231,7 @@ function showForm(row) {
       el("label", { class: "field" }, el("span", { class: "field-label" }, "Only with its region"), el("span", {}, inputs.needsRegion, " a name that repeats elsewhere: recognised only when the address names this region or none")),
       field("Restricted by", inputs.restrictedBy),
       field("As of", inputs.asOf, "when the sources were checked"),
-      field("Review by", inputs.reviewBy, "12 months after As of when empty"),
+      field("Review by", inputs.reviewBy, "at most 12 months after As of; 12 months when empty"),
       el("label", { class: "field field-wide" }, el("span", { class: "field-label" }, "Other names ", el("span", { class: "hint" }, "one per line, every script and spelling")), inputs.otherNames),
       el("label", { class: "field field-wide" }, el("span", { class: "field-label" }, "Legal source"), inputs.legalSource)),
     el("div", { class: "actions" },

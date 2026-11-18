@@ -76,7 +76,8 @@ whatever country the address names ("Simferopol, Russia" is in Crimea), and for 
   city, Zaporizhzhia city) clears its region's notice. Places named apart from each other: the most severe.
 - A name that repeats elsewhere ("Vasylivka") can be marked to count only when the address names its region, or
   names no region at all (neither one of the table's nor another, such as "Vinnytsia Oblast").
-- A name that names a street ("Crimea Road", "rue de Cuba") is the street's, as for countries.
+- A name that names a street ("Crimea Road", "5 Kherson Rd", "vul. Simferopol", "rue de Cuba") is the street's, as for
+  countries, and so is a place's name that names one: "12 Tehran Road" isn't in Iran.
 
 `destination` is `{state, code, kind, name, restrictedBy, legalSource, asOf}`: the row that decided it. Either state
 makes the outcome at least **`Review`**, and the allow-list never clears it (it covers names only); a `Match` stays a
@@ -90,8 +91,8 @@ only a destination raised starts "Review needed for the destination." and then s
   `(destination restricted ua-simferopol)`: the table's own code, never the address.
 - `GET /api/v1/destinations`: the table in force (anyone): `{version, reviewOverdue, destinations: [{id, code, kind,
   name, otherNames, country, parent, needsRegion, status, restrictedBy, legalSource, asOf, reviewBy}]}`. Never who
-  edited it.
-- Each row has a review date (12 months after `asOf` unless given). Once one has passed (`reviewOverdue`, the earliest),
+  edited it. 503 `{"state":"warmingUp"}` before the first load.
+- Each row has a review date: 12 months after `asOf` unless given, and never later than that. Once one has passed (`reviewOverdue`, the earliest),
   every summary warns: "the table of destinations under broad restrictions was due for review on …", as for a list
   that couldn't be updated.
 - Administrators (the `/admin` page, or the API with the `Lists.Admin` role and the site's header for changes):

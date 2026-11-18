@@ -205,7 +205,12 @@ async function loadDestinations() {
   try {
     const status = await (await fetch("/api/v1/status", { headers: { Accept: "application/json" } })).json();
     if (!(status.features || []).includes("destinations")) return;
-    const table = await (await fetch("/api/v1/destinations", { headers: { Accept: "application/json" } })).json();
+    const response = await fetch("/api/v1/destinations", { headers: { Accept: "application/json" } });
+    if (response.status === 503) {
+      setTimeout(loadDestinations, 3000);
+      return;
+    }
+    const table = await response.json();
     document.getElementById("destinations-section").hidden = false;
     const rows = table.destinations;
     const regionName = new Map(rows.map((r) => [r.code, r.name]));

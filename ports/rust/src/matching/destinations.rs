@@ -63,6 +63,23 @@ impl DestinationStatus {
     }
 }
 
+/// Street types beyond the matcher's (words.json, which the matcher version hashes): abbreviations written after a
+/// street's name ("5 Kherson Rd") and Ukrainian and Russian ones written before it ("вул. Симферопольська" is the
+/// usual form, but the name right after one is the street's either way).
+const STREET_AFTER: [&str; 9] = ["rd", "st", "str", "ave", "av", "blvd", "ln", "dr", "hwy"];
+const STREET_BEFORE: [&str; 15] =
+    ["vul", "vulytsia", "ul", "ulitsa", "prospekt", "prosp", "pr", "per", "provulok", "вул", "вулиця", "ул", "улица", "просп", "проспект"];
+
+/// Whether the name of length words at start names a street: the matcher's rule, or one of the street types above
+/// right after or right before it, in the same part of the address.
+fn names_a_street_here(data: &MatcherData, tokens: &[TokenRef], parts: &[i64], start: usize, length: usize) -> bool {
+    let end = start + length;
+    let is = |t: &TokenRef, words: &[&str]| words.contains(&t.text.as_str());
+    names_a_street(data, tokens, parts, start, length, false)
+        || (end < tokens.len() && parts[end] == parts[end - 1] && is(&tokens[end], &STREET_AFTER))
+        || (start > 0 && parts[start - 1] == parts[start] && is(&tokens[start - 1], &STREET_BEFORE))
+}
+
 /// The words that name a region of some country, as an address is read ("Vinnytsia Oblast", "Ростовская обл.").
 const REGION_WORDS: [&str; 12] =
     ["oblast", "oblasti", "region", "province", "krai", "kray", "область", "обл", "області", "край", "краю", "провінція"];
@@ -259,7 +276,7 @@ impl Destinations {
             match lookup(&tokens, i, self.max_words, &self.by_key) {
                 Some((found, length)) => {
                     // A name that names a street ("Crimea Road", "rue de Cuba") is the street's.
-                    if !names_a_street(data, &tokens, &parts, i, length, false) {
+                    if !names_a_street_here(data, &tokens, &parts, i, length) {
                         for &row in found {
                             add(row, &mut matched);
                         }
@@ -279,7 +296,7 @@ impl Destinations {
             let mut i = 0;
             while i < tokens.len() {
                 match lookup(&tokens, i, data.max_place_words, &data.places) {
-                    Some((place, length)) if !names_a_street(data, &tokens, &parts, i, length, false) => {
+                    Some((place, length)) if !names_a_street_here(data, &tokens, &parts, i, length) => {
                         country = place.country.as_str();
                         break;
                     }
@@ -392,7 +409,12 @@ mod tests {
         assert_eq!(find("12 Azadi Street, Tehran, Iran"), Some((DestinationState::Restricted, "ir".to_string())));
         assert_eq!(find("Tehran"), Some((DestinationState::Restricted, "ir".to_string())));
         assert_eq!(find("Dubai, United Arab Emirates"), None);
-        // A street named after a place is no evidence of its country.
+        // A street named after a place is no evidence of its country, abbreviated or not.
+        assert_eq!(
+            find("5 Kherson Rd, Kherson Oblast, Ukraine"),
+            Some((DestinationState::PossiblyRestricted, "ua-kherson-oblast".to_string()))
+        );
+        assert_eq!(find("vul. Simferopol 5, Kyiv"), None);
         assert_eq!(find("12 Tehran Road, Leeds"), None);
         assert_eq!(find("12 Tehran Road"), None);
     }
