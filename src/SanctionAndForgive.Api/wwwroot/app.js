@@ -5,7 +5,7 @@
 const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible match, allowed", NoMatch: "No match", NotChecked: "Not checked" };
 const SYMBOLS = { Match: "●", Review: "▲", Allowed: "◇", NoMatch: "✓", NotChecked: "–" };
 const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete" };
-const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address" };
+const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address", Vessel: "Vessel" };
 // An address's destination notice (the "destinations" feature).
 const DESTINATION = { restricted: "Destination under broad restrictions", possiblyRestricted: "The destination may be under broad restrictions" };
 // A shipment's other parties (the "parties" feature, when the API offers it): the API's roles, and how they read.
@@ -13,6 +13,8 @@ const ROLES = { shipper: "Shipper", consignee: "Consignee", notifyParty: "Notify
 const MAX_PARTIES = 10;
 // Identifiers and dates of birth (the "identifiers" feature, when the API offers it).
 let identifiersOffered = false;
+// A vessel's name and IMO number (the "vessels" feature, when the API offers it).
+let vesselsOffered = false;
 
 // The identifiers typed in one field: commas or semicolons between them.
 function identifiersIn(text) {
@@ -43,6 +45,12 @@ function el(tag, attributes = {}, ...children) {
     node.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
   return node;
+}
+
+// A name or address from a list or the user inside a sentence, isolated so a right-to-left one (Arabic, Persian,
+// Hebrew) neither reorders the words around it nor is reordered by them (#92). Where one stands alone, dir="auto".
+function isolate(text) {
+  return `\u2068${text}\u2069`;
 }
 
 function percentText(percent) {
@@ -76,6 +84,8 @@ async function loadStatus() {
     $("parties").hidden = !(status.features || []).includes("parties");
     identifiersOffered = (status.features || []).includes("identifiers");
     document.querySelectorAll(".particulars").forEach((field) => { field.hidden = !identifiersOffered; });
+    vesselsOffered = (status.features || []).includes("vessels");
+    document.querySelectorAll(".vessel").forEach((field) => { field.hidden = !vesselsOffered; });
     $("version").textContent = `Version ${status.version}, matcher ${status.matcherVersion}.`;
     $("sources").textContent = lists.length
       ? lists.map((list) => `${list.name} (${listAsOf(list)})`).join("; ") + "."
@@ -108,7 +118,7 @@ async function loadExamples() {
           $("companyName").value = example.companyName || "";
           $("address").value = example.address || "";
           // An example is a name alone: identifiers or a date of birth entered for another must not go with it.
-          for (const id of ["receiverIdentifiers", "receiverDateOfBirth", "companyIdentifiers"]) $(id).value = "";
+          for (const id of ["receiverIdentifiers", "receiverDateOfBirth", "companyIdentifiers", "vesselName", "vesselImoNumber"]) $(id).value = "";
           form.requestSubmit();
         },
       }, example.label));
@@ -136,14 +146,20 @@ async function screen(event) {
     if (companyIds.length) body.companyIdentifiers = companyIds;
     if (dateOfBirth) body.receiverDateOfBirth = dateOfBirth;
   }
+  if (vesselsOffered) {
+    const vesselName = $("vesselName").value.trim();
+    const imoNumber = $("vesselImoNumber").value.trim();
+    if (vesselName) body.vesselName = vesselName;
+    if (imoNumber) body.vesselImoNumber = imoNumber;
+  }
   const parties = $("parties").hidden ? [] : partiesEntered();
   if (parties.some((party) => !party.name && !party.address)) {
     showState("Enter each party's name, its address, or both (or remove it).", true);
     return;
   }
   if (parties.length) body.parties = parties;
-  if (!body.receiverName && !body.companyName && !body.address && !parties.length) {
-    showState("Enter a receiver, a company or an address.", true);
+  if (!body.receiverName && !body.companyName && !body.address && !body.vesselName && !body.vesselImoNumber && !parties.length) {
+    showState(vesselsOffered ? "Enter a receiver, a company, an address or a vessel." : "Enter a receiver, a company or an address.", true);
     return;
   }
 
@@ -189,6 +205,7 @@ async function screen(event) {
         Receiver: body.receiverName, Company: body.companyName, Address: body.address,
         "Receiver's ID numbers": (body.receiverIdentifiers || []).join(", "), "Receiver's date of birth": body.receiverDateOfBirth,
         "Company's ID numbers": (body.companyIdentifiers || []).join(", "),
+        Vessel: body.vesselName, "Vessel's IMO number": body.vesselImoNumber,
       },
       parties: body.parties || [],
       at: new Date(),
@@ -226,7 +243,7 @@ function render(result) {
   groups.sort((a, b) => a.key - b.key);
   $("result-tables").replaceChildren(...groups.map((group) => el("div", { class: "table-scroll" },
     resultTable(result, group.entries, groups.length > 1
-      ? group.key ? `Party ${group.key}: ${ROLES[group.role] || group.role}` : "The shipment's receiver, company and address"
+      ? group.key ? `Party ${group.key}: ${ROLES[group.role] || group.role}` : "The shipment's own entries"
       : null))));
 
   const notices = destinationNotices(result);
@@ -262,7 +279,7 @@ function resultTable(result, entries, caption) {
   return el("table", { class: "result-table" },
     caption ? el("caption", { class: "party-caption" }, caption) : null,
     el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "List"),
-      entries.map((entry) => el("th", { scope: "col" }, title(entry), el("span", { class: "entry-input" }, entry.input))))),
+      entries.map((entry) => el("th", { scope: "col" }, title(entry), el("span", { class: "entry-input", dir: "auto" }, entry.input))))),
     body);
 }
 
@@ -343,7 +360,7 @@ function partiesChanged() {
 function cellButton(cell, entry, list) {
   // An allowed possible match (the entry is on the allow-list) keeps its percentage but isn't counted.
   const state = cell.state === "NotChecked" ? "NotChecked" : cell.allowed ? "Allowed" : cell.outcome;
-  const who = cell.bestCandidate ? cell.bestCandidate.listedName : null;
+  const who = cell.bestCandidate ? isolate(cell.bestCandidate.listedName) : null;
   const label = cell.state === "NotChecked"
     ? `${list.name}: not checked`
     : `${list.name}, ${entryTitle(entry)}: ${percentText(cell.percent)} match likelihood, ${LABELS[state]}${who ? ", " + who : ""}`;
@@ -368,15 +385,15 @@ function showDetail(button, cell, entry, list) {
   const detail = $("detail");
   // replaceChildren would show a null as the text "null": only the parts there are.
   detail.replaceChildren(...[
-    el("h3", {}, candidate.listedName),
+    el("h3", { dir: "auto" }, candidate.listedName),
     el("p", { class: "meta" }, `${list.name} · ${entryTitle(entry)} “${entry.input}” · ${percentText(candidate.percent)} match likelihood (${LABELS[candidate.outcome]})`),
     cell.allowed && entry.allowedBy ? el("p", { class: "allowed-note" }, el("strong", {}, "Allowed by the allow-list: "),
       `“${entry.allowedBy.name}”: ${entry.allowedBy.reason}. This possible match doesn't raise the outcome; a person can still review it.`) : null,
     el("dl", {},
-      el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
+      el("dt", {}, "Name matched"), el("dd", { dir: "auto" }, candidate.alias),
       el("dt", {}, "Type"), el("dd", {}, candidate.type === "Unknown" ? "Not stated by the list" : candidate.type),
       el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
-      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses.length ? el("ul", {}, candidate.listedAddresses.map((address) => el("li", {}, address))) : "None listed"),
+      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses.length ? el("ul", {}, candidate.listedAddresses.map((address) => el("li", { dir: "auto" }, address))) : "None listed"),
       candidate.listedIdentifiers ? el("dt", {}, "Listed identifiers") : null,
       candidate.listedIdentifiers ? el("dd", {}, el("ul", {}, candidate.listedIdentifiers.map((id) => el("li", {}, identifierText(id))))) : null,
       candidate.listedBirthDates ? el("dt", {}, "Listed dates of birth") : null,
@@ -388,7 +405,7 @@ function showDetail(button, cell, entry, list) {
     el("ul", {}, candidate.alignment.map((line) => el("li", {}, line))),
     cell.otherHits.length ? el("div", { class: "others" },
       el("p", {}, el("strong", {}, `Other possible matches on ${list.name}`)),
-      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, `${hit.listedName} — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null,
+      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, el("bdi", {}, hit.listedName), ` — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null,
   ].filter(Boolean));
   detail.hidden = false;
 }
@@ -417,7 +434,7 @@ function buildRecord() {
     if (!cell) return "";
     if (cell.state === "NotChecked") return `${SYMBOLS.NotChecked} ${LABELS.NotChecked}`;
     const state = cell.allowed ? "Allowed" : cell.outcome;
-    const who = cell.bestCandidate && cell.outcome !== "NoMatch" ? `: ${cell.bestCandidate.listedName}` : "";
+    const who = cell.bestCandidate && cell.outcome !== "NoMatch" ? `: ${isolate(cell.bestCandidate.listedName)}` : "";
     return `${SYMBOLS[state]} ${LABELS[state]} ${percentText(cell.percent)}${who}`;
   };
   const listByCode = new Map(result.lists.map((list) => [list.code, list]));
@@ -427,13 +444,13 @@ function buildRecord() {
 
   // One candidate in full: the best of a cell, or another possible match on the same list.
   const candidateBlock = (entry, cell, list, candidate, percent, outcome) => el("div", { class: "print-hit" },
-    el("h3", {}, candidate.listedName),
+    el("h3", { dir: "auto" }, candidate.listedName),
     el("p", {}, `${list ? list.name : cell.list} · ${entryTitle(entry)} · ${percentText(percent)} match likelihood (${LABELS[outcome]})`),
     cell.allowed && entry.allowedBy ? el("p", {}, `Allowed by the allow-list: “${entry.allowedBy.name}”: ${entry.allowedBy.reason}.`) : null,
     el("dl", { class: "print-meta" },
-      el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
+      el("dt", {}, "Name matched"), el("dd", { dir: "auto" }, candidate.alias),
       el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
-      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses && candidate.listedAddresses.length ? candidate.listedAddresses.join("; ") : "None listed"),
+      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses && candidate.listedAddresses.length ? candidate.listedAddresses.map(isolate).join("; ") : "None listed"),
       candidate.listedIdentifiers ? el("dt", {}, "Listed identifiers") : null,
       candidate.listedIdentifiers ? el("dd", {}, candidate.listedIdentifiers.map(identifierText).join("; ")) : null,
       candidate.listedBirthDates ? el("dt", {}, "Listed dates of birth") : null,
@@ -450,7 +467,7 @@ function buildRecord() {
       el("dt", {}, "Screened"), el("dd", {}, `${when(at)} (${at.toISOString()})`),
       el("dt", {}, "Result"), el("dd", {}, el("strong", {}, OVERALL[result.outcome] || result.outcome), ". ", result.summary),
       ...["Receiver", "Company", "Address"].flatMap((kind) => [el("dt", {}, `${kind} entered`), el("dd", {}, entered[kind] || "—")]),
-      ...["Receiver's ID numbers", "Receiver's date of birth", "Company's ID numbers"].filter((label) => entered[label])
+      ...["Receiver's ID numbers", "Receiver's date of birth", "Company's ID numbers", "Vessel", "Vessel's IMO number"].filter((label) => entered[label])
         .flatMap((label) => [el("dt", {}, label), el("dd", {}, entered[label])]),
       // Each party as entered, numbered as the result numbers them.
       ...shown.parties.flatMap((party, i) => [
@@ -506,6 +523,7 @@ window.addEventListener("beforeprint", buildRecord);
 
 function addressText(state, entry) {
   if (entry.kind === "Address") return "Compared on its own (address only)";
+  if (entry.kind === "Vessel") return "Not compared: a vessel is screened by its name and IMO number";
   return { Corroborated: "Agrees with a listed address", Conflicting: "In a different country from the listed addresses", NotCompared: "Not compared" }[state] || state;
 }
 

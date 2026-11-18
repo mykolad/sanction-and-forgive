@@ -5,7 +5,8 @@
   "features": [
     "parties",
     "destinations",
-    "identifiers"
+    "identifiers",
+    "vessels"
   ],
   "lists": [
     {
@@ -23,7 +24,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 70,
+      "recordCount": 71,
       "url": "https://www.international.gc.ca/world-monde/assets/office_docs/international_relations-relations_internationales/sanctions/sema-lmes.xml"
     },
     {
@@ -32,7 +33,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 90,
+      "recordCount": 91,
       "url": "https://www.sesam.search.admin.ch/sesam-search-web/pages/downloadXmlGesamtliste.xhtml?lang=en&action=downloadXmlGesamtlisteAction"
     },
     {
@@ -59,7 +60,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 100,
+      "recordCount": 101,
       "url": "https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json"
     },
     {
@@ -86,7 +87,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 60,
+      "recordCount": 61,
       "url": "https://www.mfat.govt.nz/assets/Countries-and-Regions/Europe/Ukraine/Russia-Sanctions-Register.xlsx"
     },
     {
@@ -95,7 +96,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 60,
+      "recordCount": 61,
       "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONS_ENHANCED.XML"
     },
     {
@@ -104,7 +105,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 200,
+      "recordCount": 201,
       "url": "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN_ENHANCED.XML"
     },
     {
@@ -122,7 +123,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 140,
+      "recordCount": 141,
       "url": "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.xml"
     },
     {
@@ -140,7 +141,7 @@
       "asOf": "*",
       "state": "Current",
       "version": "*",
-      "recordCount": 120,
+      "recordCount": 121,
       "url": "https://data.trade.gov/downloadable_consolidated_screening_list/v1/consolidated.json"
     },
     {

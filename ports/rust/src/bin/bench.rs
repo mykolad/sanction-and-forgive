@@ -37,6 +37,7 @@ fn load(path: &str) -> Vec<ScreenedList> {
                 kind: match s[1].as_i64() {
                     Some(0) => SubjectKind::Individual,
                     Some(1) => SubjectKind::Entity,
+                    Some(3) => SubjectKind::Vessel,
                     _ => SubjectKind::Unknown,
                 },
                 primary_name: text(&s[2]),

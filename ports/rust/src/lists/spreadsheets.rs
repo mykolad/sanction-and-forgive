@@ -549,9 +549,75 @@ pub fn excel_date(value: Option<&str>) -> Option<chrono::NaiveDate> {
 pub const NEW_ZEALAND_SHEET: &str = "Russia Sanctions Register";
 pub const NEW_ZEALAND_PROGRAMME: &str = "Russia Sanctions Act 2022";
 
-/// New Zealand's Russia Sanctions Register (XLSX): NewZealandParser in the reference.
+pub const NEW_ZEALAND_SHIPS_SHEET: &str = "Ships";
+
+/// New Zealand's Russia Sanctions Register (XLSX): NewZealandParser in the reference, and in the Rust port its ships
+/// (#69), from the sheet of their own.
 pub fn parse_new_zealand(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
-    let rows = xlsx_rows(input, NEW_ZEALAND_SHEET)?;
+    let mut data = Vec::new();
+    input.read_to_end(&mut data)?;
+    let mut out = parse_new_zealand_register(xlsx_rows(&mut data.as_slice(), NEW_ZEALAND_SHEET)?)?;
+    out.extend(parse_new_zealand_ships(xlsx_rows(&mut data.as_slice(), NEW_ZEALAND_SHIPS_SHEET)?)?);
+    Ok(out)
+}
+
+/// The register's Ships sheet (#69): a row per ship, with its IMO number, its name when sanctioned and other names.
+/// A row whose status says it's no longer sanctioned, or that is marked deleted, is left out.
+fn parse_new_zealand_ships(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubject>, ParseError> {
+    let is_cell = |cell: &str, name: &str| cell.trim().eq_ignore_ascii_case(name);
+    let header_at = rows
+        .iter()
+        .position(|row| {
+            row.len() > 2 && is_cell(&row[0], "Type") && is_cell(&row[1], "Unique Identifier") && is_cell(&row[2], "IMO Number")
+        })
+        .ok_or_else(|| format_error("No header row (Type, Unique Identifier, IMO Number, …) in New Zealand's Ships sheet."))?;
+    let header = &rows[header_at];
+    let find = |name: &str| header.iter().position(|cell| is_cell(cell, name));
+    let required = |name: &str| find(name).ok_or_else(|| format_error(format!("New Zealand's Ships sheet has no \"{name}\" column.")));
+    let (identifier, imo, name, sanctioned, alias, status) = (
+        required("Unique Identifier")?,
+        required("IMO Number")?,
+        required("Name of Ship as of Date of Sanction")?,
+        required("Date of Sanction")?,
+        required("Alias/Alternate Names")?,
+        required("Sanction Status")?,
+    );
+    let deleted = find("Record Deleted Flag");
+    let mut out = Vec::new();
+    for row in &rows[header_at + 1..] {
+        let cell = |index: Option<usize>| index.and_then(|i| row.get(i)).and_then(|v| clean(Some(v)));
+        let gone = cell(Some(status)).is_some_and(|s| {
+            let lower = s.to_lowercase();
+            ["revoked", "delisted", "removed"].iter().any(|word| lower.contains(word))
+        }) || cell(deleted).is_some_and(|d| ["yes", "true", "y"].contains(&d.to_lowercase().as_str()));
+        if gone {
+            continue;
+        }
+        // A ship listed without its identifier is a broken file, never a ship quietly lost; an empty row is skipped.
+        let Some(id) = cell(Some(identifier)) else {
+            if cell(Some(name)).is_some() || cell(Some(imo)).is_some() {
+                return Err(format_error("A ship in New Zealand's Ships sheet has no Unique Identifier."));
+            }
+            continue;
+        };
+        let mut b = Builder::new(&id, SubjectType::Vessel);
+        b.programmes = Some(NEW_ZEALAND_PROGRAMME.to_string());
+        let date = cell(Some(sanctioned));
+        b.listed_on = excel_date(date.as_deref()).or_else(|| parse_date(date.as_deref(), "%d/%m/%Y"));
+        b.add_name(cell(Some(name)).as_deref(), false, true);
+        if let Some(aliases) = cell(Some(alias)) {
+            for other in aliases.split(';') {
+                b.add_name(Some(other), false, false);
+            }
+        }
+        b.add_imo_number(cell(Some(imo)).as_deref(), "IMO number as listed");
+        // A ship listed without a name is a broken file, never a ship quietly lost.
+        out.push(b.build().ok_or_else(|| format_error(format!("Ship {id} in New Zealand's Ships sheet has no name.")))?);
+    }
+    Ok(out)
+}
+
+fn parse_new_zealand_register(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubject>, ParseError> {
     let is_cell = |cell: &str, name: &str| cell.trim().eq_ignore_ascii_case(name);
     let header_at = rows
         .iter()
@@ -870,6 +936,42 @@ mod tests {
             r#"<text:s text:c="100"/>"#.repeat(20_000)
         );
         assert!(ods(&content).is_err());
+    }
+
+    /// New Zealand's Ships sheet (#69): a vessel per row, its IMO number, other names; revoked and deleted rows out.
+    #[test]
+    fn new_zealand_ships_are_read_from_their_sheet() {
+        let row = |cells: &[&str]| cells.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        let header = row(&[
+            "Type",
+            "Unique Identifier",
+            "IMO Number",
+            "Name of Ship as of Date of Sanction",
+            "Date of Sanction",
+            "Alias/Alternate Names",
+            "Date of Additional Sanction",
+            "Sanction Status",
+            "Record Deleted Flag",
+        ]);
+        let ships = super::parse_new_zealand_ships(vec![
+            row(&["Ships"]),
+            header.clone(),
+            row(&["Ship", "SHP-1", "9288693", "Andaman Skies", "45827", "Mirador; Ocean", "", "Sanctioned", ""]),
+            row(&["Ship", "SHP-2", "9288746", "Udaya", "45827", "", "", "Revoked", ""]),
+            row(&["Ship", "SHP-3", "9281011", "Moti", "45827", "", "", "Sanctioned", "Yes"]),
+        ])
+        .unwrap();
+        assert_eq!(ships.len(), 1);
+        let ship = &ships[0];
+        assert_eq!((ship.kind, ship.primary_name.as_str(), ship.names.len()), (super::SubjectType::Vessel, "Andaman Skies", 3));
+        assert_eq!((ship.identifiers[0].kind.as_str(), ship.identifiers[0].value.as_str()), ("IMO number", "9288693"));
+        assert!(super::parse_new_zealand_ships(vec![row(&["Ship"])]).is_err());
+        let unnamed = row(&["Ship", "", "9288693", "Andaman Skies", "45827", "", "", "Sanctioned", ""]);
+        assert!(super::parse_new_zealand_ships(vec![header.clone(), unnamed]).is_err());
+        let nameless = row(&["Ship", "SHP-9", "9288693", "", "45827", "", "", "Sanctioned", ""]);
+        assert!(super::parse_new_zealand_ships(vec![header.clone(), nameless]).is_err());
+        let blank = row(&["", "", "", "", "", "", "", "", ""]);
+        assert!(super::parse_new_zealand_ships(vec![header, blank]).unwrap().is_empty());
     }
 
     #[test]

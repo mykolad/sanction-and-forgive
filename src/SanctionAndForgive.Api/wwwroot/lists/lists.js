@@ -4,7 +4,7 @@
 "use strict";
 
 const PAGE = 50;
-const TYPES = { Individual: "Person", Entity: "Entity", Unknown: "Not stated" };
+const TYPES = { Individual: "Person", Entity: "Entity", Unknown: "Not stated", Vessel: "Vessel" };
 
 const $ = (id) => document.getElementById(id);
 const stateBox = $("state");
@@ -55,6 +55,7 @@ async function loadLists() {
       return;
     }
     const body = await response.json();
+    offerVessels();
     const loaded = body.lists.filter((list) => list.state !== "NotImported");
     $("list").replaceChildren(...loaded.map((list) => el("option", { value: list.code }, `${list.name} (${list.recordCount.toLocaleString()})`)));
     const wanted = new URLSearchParams(location.search).get("list");
@@ -63,6 +64,18 @@ async function loadLists() {
     browse(0, formFilters());
   } catch {
     showState("The service isn't answering. Try again in a moment.", true);
+  }
+}
+
+// Vessels are a kind of entry only where the API keeps them (its "vessels" feature).
+async function offerVessels() {
+  try {
+    const status = await (await fetch("/api/v1/status", { headers: { Accept: "application/json" } })).json();
+    const offered = (status.features || []).includes("vessels");
+    $("vessel-type").hidden = !offered;
+    $("vessel-type").disabled = !offered;
+  } catch {
+    // Without the status, the filter offers what every implementation has.
   }
 }
 
@@ -134,7 +147,7 @@ function entryRows(entry, id) {
       toggle.setAttribute("aria-expanded", String(open));
       detail.hidden = !open;
     },
-  }, entry.primaryName);
+  }, el("bdi", {}, entry.primaryName));
   const aliases = entry.names.length - 1;
   return [
     el("tr", {},
@@ -150,10 +163,10 @@ function details(entry) {
   return el("div", { class: "detail" },
     el("dl", {},
       el("dt", {}, "Names"),
-      el("dd", {}, el("ul", {}, entry.names.map((name) => el("li", {}, name.name, name.isWeak ? el("span", { class: "muted" }, " (the list marks this alias as low quality)") : null)))),
+      el("dd", {}, el("ul", {}, entry.names.map((name) => el("li", {}, el("bdi", {}, name.name), name.isWeak ? el("span", { class: "muted" }, " (the list marks this alias as low quality)") : null)))),
       el("dt", {}, "Addresses"),
       el("dd", {}, entry.addresses.length
-        ? el("ul", {}, entry.addresses.map((address) => el("li", {}, address.raw, address.countryCode && !address.raw.includes(address.countryCode) ? ` (${address.countryCode})` : "")))
+        ? el("ul", {}, entry.addresses.map((address) => el("li", {}, el("bdi", {}, address.raw), address.countryCode && !address.raw.includes(address.countryCode) ? ` (${address.countryCode})` : "")))
         : el("span", { class: "muted" }, "None listed")),
       el("dt", {}, "Programme"),
       el("dd", {}, entry.programme ?? el("span", { class: "muted" }, "None stated")),

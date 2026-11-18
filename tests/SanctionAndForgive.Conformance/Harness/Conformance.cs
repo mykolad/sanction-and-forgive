@@ -188,7 +188,7 @@ public static class Suite
             }
         }
 
-        var expected = FeedFiles.Feeds.Append((FeedFiles.ManualCode, ManualSubjects.Count)).ToList();
+        var expected = FeedFiles.Feeds.Select(feed => (feed.Code, FeedFiles.RecordCount(feed.Code))).Append((FeedFiles.ManualCode, ManualSubjects.Count)).ToList();
         await WaitForListsAsync(lists => expected.All(feed => lists.TryGetValue(feed.Item1, out var list)
                 && list.GetProperty("state").GetString() == "Current"
                 && list.GetProperty("version").ValueKind == JsonValueKind.Number && list.GetProperty("version").GetInt32() == active[feed.Item1]
@@ -220,7 +220,11 @@ public static class Suite
             await Task.Delay(500);
         }
 
-        throw new XunitException($"The API didn't reach the expected state within 60 s. Lists now: {string.Join(", ", lists.Select(pair => $"{pair.Key} {pair.Value.GetProperty("state")}"))}");
+        // Each list's state, version and record count, and a held update if any: what the condition reads.
+        static string Describe(JsonElement list) =>
+            $"{list.GetProperty("state")} v{(list.TryGetProperty("version", out var v) ? v.ToString() : "-")} n{(list.TryGetProperty("recordCount", out var n) ? n.ToString() : "-")}"
+            + (list.TryGetProperty("held", out var held) && held.ValueKind != JsonValueKind.Null ? " held" : "");
+        throw new XunitException($"The API didn't reach the expected state within 60 s. Lists now: {string.Join(", ", lists.Select(pair => $"{pair.Key} {Describe(pair.Value)}"))}");
     }
 
     private static async Task RemoveAllowListEntriesAsync()

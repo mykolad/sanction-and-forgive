@@ -486,7 +486,9 @@ function percentText(percent) {
 // What a row found in one list: its entries' Match and Review cells (allowed ones too, so marked), worst first; else
 // "No match" with the highest percentage, or "Not checked". Never "cleared": no match is only that, in that list as
 // of its date. Null when the list has no cells (switched off).
-function foundIn(result, code) {
+// isolated: on the page, a listed name isolated so a right-to-left one doesn't reorder the words around it (#92);
+// never in the CSV.
+function foundIn(result, code, isolated) {
   const cells = result.entries.flatMap((entry) => entry.cells.filter((cell) => cell.list === code).map((cell) => ({ entry, cell })));
   if (cells.length === 0) return null;
   const hits = cells.filter(({ cell }) => cell.state !== "NotChecked" && (cell.outcome === "Match" || cell.outcome === "Review"));
@@ -496,7 +498,8 @@ function foundIn(result, code) {
     return hits.map(({ entry, cell }) => {
       const state = cellState(cell);
       const name = cell.best ? cell.best.listedName : "";
-      return `${SYMBOLS[state]} ${LABELS[state]} ${percentText(cell.percent)}: ${KINDS[entry.kind] || entry.kind}${name ? `, ${name}` : ""}`;
+      const shown = isolated ? `\u2068${name}\u2069` : name;
+      return `${SYMBOLS[state]} ${LABELS[state]} ${percentText(cell.percent)}: ${KINDS[entry.kind] || entry.kind}${name ? `, ${shown}` : ""}`;
     }).join("; ");
   }
   if (cells.some(({ cell }) => cell.state === "NotChecked")) return `${SYMBOLS.NotChecked} ${LABELS.NotChecked}`;
@@ -592,7 +595,7 @@ function showResults() {
     const found = result.outcome === "Error"
       ? errorText(result)
       : [destinationOf(result), ...listsOf(result.snapshot).map((list) => {
-        const text = foundIn(result, list.code);
+        const text = foundIn(result, list.code, true);
         return text && !text.startsWith(SYMBOLS.NoMatch) ? `${list.name}: ${text}` : null;
       })].filter(Boolean).join("\n");
     const label = result.outcome === "NoMatch" ? `${OVERALL.NoMatch} (allowed possible match)` : OVERALL[result.outcome] || result.outcome;
@@ -641,7 +644,7 @@ function download() {
       if (result.skipped || result.outcome === null) return "";
       if (result.outcome === "Error") return errorText(result);
       if (!searched.has(list.code)) return "";
-      return foundIn(result, list.code) || "Not searched (switched off)";
+      return foundIn(result, list.code, false) || "Not searched (switched off)";
     });
     output.push(line([result.row, result.reference, outcome, result.values.receiver, result.values.company, result.values.address, destinationOf(result), ...cells,
       result.snapshot >= 0 ? `snapshot ${snapshots.indexOf(result.snapshot) + 1}` : ""]));
