@@ -17,6 +17,8 @@ pub enum AlignMethod {
     FoldKey,
     FoldKeyLatin,
     Cognate,
+    /// A Chinese word whose pinyin reading is the Latin word (#93).
+    Pinyin,
     OneEdit,
     OneEditShort,
     TwoEdits,
@@ -138,6 +140,16 @@ fn compare_once(query: &Token, listed: &Token) -> Alignment {
     }
     if overlaps(query.cognate_groups(), listed.cognate_groups()) {
         return Alignment::new(0.96, AlignMethod::Cognate);
+    }
+    // A Chinese word and a Latin one (#93): the Chinese word's pinyin against the Latin word's fold keys. Never two
+    // Chinese words: names that sound alike are other names.
+    let reads_as = |chinese: &Token, latin: &Token| {
+        latin.pinyin.is_none()
+            && latin.forms.iter().all(|f| f.is_ascii())
+            && chinese.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| latin.folds.contains(r)))
+    };
+    if reads_as(query, listed) || reads_as(listed, query) {
+        return Alignment::new(0.96, AlignMethod::Pinyin);
     }
     compare_edits(query, listed)
 }

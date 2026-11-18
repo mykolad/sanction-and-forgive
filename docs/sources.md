@@ -220,7 +220,13 @@ traditional characters read as simplified with OpenCC's character table, Apache 
 changes made are in `THIRD-PARTY-NOTICES.txt`, which every image carries). It also reads Korean names in their
 different romanisations alike (`korean.json`: Kim Jong Un, Kim Chong Un, Kim Jeong Eun; Ri, Lee, Yi; Pak, Park), but
 only in a name that reads as Korean (each word one or two romanised syllables, a Korean surname first or last), so a
-Jung in another name never meets a Chung. How such a name behaves
+Jung in another name never meets a Chung. A name in Chinese characters is also read in pinyin (`pinyin.json`, #93:
+each character's most common Mandarin reading from Unihan, a surname's own at the start of a name, 曾 Zeng, and a few
+cities and words read as a whole, 重庆 Chongqing): 张伟 matches Zhang Wei and 习近平 Xi Jinping, each way round, but two
+Chinese names that only sound alike (张伟, 章伟) never match on that. Measured on 2026-11-18, no listed party has a
+name in Chinese characters without a Latin one (OFAC 540 with Chinese names, the UK 65, SECO 89, Japan 147...), so
+the reading matters for names entered in characters; an English translation (Star China / Xinghua) is still found
+only through a list's own aliases. How such a name behaves
 in the .NET app is recorded in
 `tests/SanctionAndForgive.Tests/Matching/ScriptTests.cs`:
 the same spelling matches in every script; Arabic vowel marks, tatweel and letter variants, Greek accents, a part of a

@@ -220,7 +220,9 @@ impl ListIndex {
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
                 *document_frequency.entry(token.key().to_string()).or_default() += 1;
-                for k in lookup_keys(&token).into_iter().chain(korean_keys(&token)) {
+                // A Chinese word under its pinyin too (#93), so a Latin name finds it, as one word or two read as one.
+                let pinyin = token.pinyin.iter().flatten().map(String::as_str);
+                for k in lookup_keys(&token).into_iter().chain(korean_keys(&token)).chain(pinyin) {
                     by_fold.post(k, a);
                 }
             }
@@ -388,6 +390,11 @@ impl ListIndex {
                     }
                 }
                 vote(&extra, 3, false);
+            }
+            // A Chinese word's pinyin finds the Latin aliases that read so, as one word or as two (#93).
+            for reading in token.pinyin.iter().flatten() {
+                vote(postings(by_fold, reading), 3, false);
+                vote(postings(by_joined, reading), 3, true);
             }
             for &group in token.cognate_groups() {
                 for fold in &self.data.cognate_folds[group] {

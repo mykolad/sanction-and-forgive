@@ -5,7 +5,7 @@ use super::compare::{AlignMethod, Alignment, TokenComparer};
 use super::data::MatcherData;
 use super::names::NameForm;
 use super::options::Options;
-use super::text::{to_upper_invariant, Token, TokenRef};
+use super::text::{fold_key, to_upper_invariant, Token, TokenRef};
 use super::HashMap;
 
 /// One word of a name alignment, without the entered text.
@@ -92,7 +92,13 @@ const MAX_JOINS: usize = 6;
 /// The joins a comparison could make, in a fixed order: (on the listed side, the pair's first word), the listed name's
 /// first. A pair is eligible when the other name has a word that reads exactly as the two (NameForm::joined).
 fn eligible_joins(query: &NameForm, listed: &NameForm) -> Vec<(bool, usize)> {
-    let has = |tokens: &[TokenRef], key: &str| !key.is_empty() && tokens.iter().any(|t| t.forms.iter().any(|f| f == key));
+    // A word's own reading, or a Chinese word's pinyin (#93): 张伟 reads as Zhang Wei's two words read as one.
+    let has = |tokens: &[TokenRef], key: &str| {
+        !key.is_empty()
+            && tokens
+                .iter()
+                .any(|t| t.forms.iter().any(|f| f == key) || t.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| *r == fold_key(key))))
+    };
     let mut out: Vec<(bool, usize)> =
         listed.joined.iter().enumerate().filter(|(_, k)| has(&query.core, k)).map(|(j, _)| (true, j)).collect();
     out.extend(query.joined.iter().enumerate().filter(|(_, k)| has(&listed.core, k)).map(|(i, _)| (false, i)));
@@ -710,6 +716,7 @@ pub fn describe(query: &Token, listed: &Token, a: Alignment) -> String {
         AlignMethod::FoldKey => format!("{q} ~ {l} (romanisation)"),
         AlignMethod::FoldKeyLatin => format!("{q} ~ {l} (romanisation, both Latin)"),
         AlignMethod::Cognate => format!("{q} ~ {l} (Russian and Ukrainian forms of one name)"),
+        AlignMethod::Pinyin => format!("{q} read in pinyin = {l}"),
         AlignMethod::OneEdit | AlignMethod::OneEditShort => format!("{q} ~ {l} (one letter differs)"),
         AlignMethod::TwoEdits => format!("{q} ~ {l} (two letters differ)"),
         AlignMethod::None => format!("{q} ≠ {l}"),
@@ -723,6 +730,7 @@ pub fn how(method: AlignMethod) -> &'static str {
         AlignMethod::SpellingPair => "SpellingVariant",
         AlignMethod::FoldKey | AlignMethod::FoldKeyLatin => "Romanisation",
         AlignMethod::Cognate => "Cognate",
+        AlignMethod::Pinyin => "Pinyin",
         AlignMethod::OneEdit | AlignMethod::OneEditShort => "OneLetterDiffers",
         AlignMethod::TwoEdits => "TwoLettersDiffer",
         AlignMethod::None => "Different",

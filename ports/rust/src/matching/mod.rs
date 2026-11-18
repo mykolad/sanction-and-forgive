@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "2bbc2988bdda");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "517cb12992e5");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -318,6 +318,28 @@ mod tests {
 
     /// Chinese and Korean names (data/cjk.json, #93): spacing, traditional and simplified characters, and company forms
     /// written without a space don't keep a name from matching.
+    /// Chinese names in characters and in pinyin (data/pinyin.json, #93): each way round, a surname's own reading, a
+    /// city read as a word; never two Chinese names that only sound alike.
+    #[test]
+    fn a_chinese_name_matches_its_pinyin_but_never_another_name_that_sounds_alike() {
+        for (query, listed, kind) in [
+            ("张伟", "Zhang Wei", SubjectKind::Individual),
+            ("習近平", "Xi Jinping", SubjectKind::Individual),
+            ("Zhang Wei", "张伟", SubjectKind::Individual),
+            ("曾国藩", "Zeng Guofan", SubjectKind::Individual),
+            ("华为", "Huawei", SubjectKind::Entity),
+            ("重庆", "Chongqing", SubjectKind::Entity),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        let (outcome, percent) = screen("章伟", "张伟", SubjectKind::Individual);
+        assert_ne!(outcome, Some(Outcome::Match), "章伟 / 张伟 sound alike, and are two names: {percent:?}");
+        use crate::matching::text::{fold_key, pinyin_readings};
+        assert_eq!(pinyin_readings("曾国藩"), [fold_key("cengguofan"), fold_key("zengguofan")]);
+        assert_eq!(pinyin_readings("重庆"), [fold_key("chongqing")]);
+    }
+
     #[test]
     fn chinese_and_korean_names_match_however_spaced_or_written() {
         for (query, listed, kind) in [

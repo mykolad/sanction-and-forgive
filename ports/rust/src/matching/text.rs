@@ -24,6 +24,9 @@ pub struct Token {
     /// A word of a name read as Korean, its readings (korean.rs: the spellings of one name read alike); None for any
     /// other word, so a Jung elsewhere never meets a Chung.
     pub korean: Option<Box<[String]>>,
+    /// A Chinese word's readings in pinyin (pinyin_readings: fold keys, "zhangwei"), compared with a Latin word only,
+    /// never with another Chinese word; None for any other word.
+    pub pinyin: Option<Box<[String]>>,
 }
 
 /// The spelling-pair and cognate groups a token belongs to, looked up once when it's made.
@@ -171,6 +174,68 @@ static CJK: std::sync::LazyLock<CjkTable> = std::sync::LazyLock::new(|| {
         .collect();
     CjkTable { split_off, traditional }
 });
+
+/// Chinese characters read in pinyin (data/pinyin.json, #93; Rust only for now, .NET and Go hash the file): each
+/// character's most common reading, a surname's at the start of a name, and words read otherwise than their
+/// characters one by one, longest first.
+struct PinyinTable {
+    readings: HashMap<char, String>,
+    surnames: HashMap<char, String>,
+    words: Vec<(Vec<char>, String)>,
+}
+
+static PINYIN: std::sync::LazyLock<PinyinTable> = std::sync::LazyLock::new(|| {
+    let bytes = super::data::resource("pinyin.json").expect("pinyin.json is embedded");
+    let document: serde_json::Value = serde_json::from_slice(bytes).expect("pinyin.json is JSON");
+    let object = |key: &str| document[key].as_object().unwrap_or_else(|| panic!("pinyin.json has {key}"));
+    let text = |value: &serde_json::Value| value.as_str().expect("a reading is text").to_string();
+    let mut readings = HashMap::default();
+    for (reading, characters) in object("readings") {
+        for c in text(characters).chars() {
+            readings.insert(c, reading.clone());
+        }
+    }
+    let one = |key: &str| {
+        let mut chars = key.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => c,
+            _ => panic!("pinyin.json: surname '{key}' isn't one character."),
+        }
+    };
+    let surnames = object("surnames").iter().map(|(c, reading)| (one(c), text(reading))).collect();
+    let mut words: Vec<(Vec<char>, String)> = object("words").iter().map(|(w, reading)| (w.chars().collect(), text(reading))).collect();
+    words.sort_by_key(|(w, _)| std::cmp::Reverse(w.len()));
+    PinyinTable { readings, surnames, words }
+});
+
+/// A Chinese word's readings in pinyin, as fold keys: its characters' readings run together (a word of pinyin.json's
+/// read as a whole), and when its first character reads otherwise as a surname, that reading too (曾国藩: cengguofan
+/// and zengguofan). Empty when a character has no reading.
+pub fn pinyin_readings(word: &str) -> Vec<String> {
+    let chars: Vec<char> = simplified(word).chars().collect();
+    let table = &*PINYIN;
+    let (mut reading, mut i, mut first_alone) = (String::new(), 0, true);
+    while i < chars.len() {
+        if let Some((w, r)) = table.words.iter().find(|(w, _)| chars[i..].starts_with(w)) {
+            first_alone &= i != 0;
+            reading.push_str(r);
+            i += w.len();
+            continue;
+        }
+        let Some(r) = table.readings.get(&chars[i]) else { return Vec::new() };
+        reading.push_str(r);
+        i += 1;
+    }
+    let mut out = vec![fold_key(&reading)];
+    if let Some(surname) = table.surnames.get(&chars[0]).filter(|_| first_alone && chars.len() > 1) {
+        let rest: String = chars[1..].iter().map(|c| table.readings.get(c).map(String::as_str).unwrap_or("")).collect();
+        let other = fold_key(&format!("{surname}{rest}"));
+        if !out.contains(&other) {
+            out.push(other);
+        }
+    }
+    out
+}
 
 /// A Han character: the unified and compatibility ideographs, in the Basic Multilingual Plane and beyond it.
 pub fn is_han(c: char) -> bool {
@@ -772,7 +837,22 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         }
         folds
     };
-    Token { text: text.to_string(), forms: distinct, folds, is_cyrillic: has_cyrillic, is_number, length, groups: None, korean: None }
+    // A Chinese word's pinyin readings, for a Latin word (#93).
+    let pinyin = (!has_latin && !is_number && chars.iter().all(|&c| is_han(c)))
+        .then(|| pinyin_readings(text))
+        .filter(|readings| !readings.is_empty())
+        .map(Vec::into_boxed_slice);
+    Token {
+        text: text.to_string(),
+        forms: distinct,
+        folds,
+        is_cyrillic: has_cyrillic,
+        is_number,
+        length,
+        groups: None,
+        korean: None,
+        pinyin,
+    }
 }
 
 /// Section 5.1: normalise, replace multi-word legal forms, join runs of single letters (keeping the letters for
