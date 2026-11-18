@@ -134,6 +134,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/v1/screenings", post(screen))
         .route("/api/v1/screenings/stream", post(stream))
         .merge(admin::routes())
+        .merge(super::destinations::routes())
         .merge(signin::routes())
         .fallback(page)
         .with_state(state)
@@ -204,7 +205,7 @@ async fn status(State(s): State<Shared>) -> Response {
             state,
             version: &s.config.version,
             matcher_version: &s.screenings.screener.matcher_version,
-            features: &["parties"],
+            features: &["parties", "destinations"],
             lists,
         },
     )
@@ -476,7 +477,7 @@ async fn stream(State(s): State<Shared>, request: Request) -> Response {
     }
     let (max_records, max_seconds) = (s.config.stream_max_records, s.config.stream_max_seconds);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(max_seconds);
-    let (lists, allow_list, now) = (s.catalog.lists(), s.catalog.allow_list(), s.screenings.now());
+    let (lists, allow_list, destinations, now) = (s.catalog.lists(), s.catalog.allow_list(), s.catalog.destinations(), s.screenings.now());
     let (tx, rx) = mpsc::channel::<Bytes>(64);
     let header_line = StreamHeaderLine {
         kind: "header",
@@ -486,6 +487,7 @@ async fn stream(State(s): State<Shared>, request: Request) -> Response {
         max_records,
         max_seconds,
         allow_list_version: allow_list.version.clone(),
+        destinations_version: destinations.version.clone(),
     };
     let body = request.into_body();
     let state = s.clone();
@@ -532,9 +534,12 @@ async fn stream(State(s): State<Shared>, request: Request) -> Response {
                     line_of(&StreamErrorLine { kind: "error", line, reference, errors: problem })
                 }
                 (Some(body), None) => {
-                    let (service, lists, allow_list) = (state.screenings.clone(), lists.clone(), allow_list.clone());
+                    let (service, lists, allow_list, destinations) =
+                        (state.screenings.clone(), lists.clone(), allow_list.clone(), destinations.clone());
                     let (result, body) =
-                        tokio::task::spawn_blocking(move || (service.screen_for_stream(&body, &lists, &allow_list), body)).await.unwrap();
+                        tokio::task::spawn_blocking(move || (service.screen_for_stream(&body, &lists, &allow_list, &destinations), body))
+                            .await
+                            .unwrap();
                     screened += 1;
                     let options = state.screenings.options();
                     let entries = result.entries.iter().map(|e| stream_entry(e, options)).collect();

@@ -5,6 +5,7 @@ use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use tiberius::{Row, ToSql};
 
 use super::db::{Connection, DbResult};
+use crate::matching::{Destination, DestinationKind, DestinationStatus};
 
 pub type Time = DateTime<Utc>;
 
@@ -44,11 +45,12 @@ pub async fn simple(conn: &mut Connection, sql: &str) -> DbResult<()> {
 }
 
 /// What a refresh reads, in one small value that changes whenever any of it does: each source's row, each import's row
-/// and the allow-list's version. The same query as the reference's ListLoader.ChangesSql.
+/// the allow-list's version and the destinations' (#67): the reference's ListLoader.ChangesSql, and the destinations.
 pub const CHANGES_SQL: &str = "SELECT CONCAT(
     (SELECT COUNT_BIG(*) FROM Sources), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Sources), ':',
     (SELECT COUNT_BIG(*) FROM Imports), ':', (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM Imports), ':',
-    (SELECT COUNT_BIG(*) FROM AllowListEntries), ':', (SELECT COUNT_BIG(RemovedAt) FROM AllowListEntries)) AS [Value]";
+    (SELECT COUNT_BIG(*) FROM AllowListEntries), ':', (SELECT COUNT_BIG(RemovedAt) FROM AllowListEntries), ':',
+    (SELECT COUNT_BIG(*) FROM RestrictedDestinations), ':', (SELECT COUNT_BIG(RemovedAt) FROM RestrictedDestinations)) AS [Value]";
 
 /// Reads CHANGES_SQL.
 pub async fn changes(conn: &mut Connection) -> DbResult<String> {
@@ -359,4 +361,171 @@ pub async fn allow_list_remove(conn: &mut Connection, id: i32, removed_by: &str,
     )
     .await?
         == 1)
+}
+
+// --- Destinations under broad restrictions (#67; RestrictedDestinations, the Rust port only so far) ---
+
+/// A row as stored, with who added and removed it.
+#[derive(Debug, Clone)]
+pub struct DestinationRecord {
+    pub destination: Destination,
+    pub added_by: String,
+    pub added_at: Time,
+    pub removed_by: Option<String>,
+    pub removed_at: Option<Time>,
+}
+
+const DESTINATION_COLUMNS: &str = "Id, Code, Kind, Name, OtherNames, CountryCode, ParentCode, NeedsRegion, Status, RestrictedBy, \
+LegalSource, AsOf, ReviewBy, AddedBy, AddedAt, RemovedBy, RemovedAt";
+
+/// A row read back. A kind or status it doesn't know (written by hand in SQL) reads as a region and Restricted: never
+/// looser than the row meant.
+fn destination_record(r: &Row) -> DestinationRecord {
+    let other_names = text(r, 4).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+    DestinationRecord {
+        destination: Destination {
+            id: int(r, 0),
+            code: text(r, 1),
+            kind: DestinationKind::parse(&text(r, 2)).unwrap_or(DestinationKind::Region),
+            name: text(r, 3),
+            other_names,
+            country: text(r, 5).trim().to_string(),
+            parent: optional_text(r, 6).filter(|p| !p.is_empty()),
+            needs_region: r.get::<bool, _>(7).unwrap_or_default(),
+            status: DestinationStatus::parse(&text(r, 8)).unwrap_or(DestinationStatus::Restricted),
+            restricted_by: text(r, 9),
+            legal_source: text(r, 10),
+            as_of: r.get::<NaiveDate, _>(11).unwrap_or_default(),
+            review_by: r.get::<NaiveDate, _>(12).unwrap_or_default(),
+        },
+        added_by: text(r, 13),
+        added_at: time(r, 14).unwrap_or_default(),
+        removed_by: optional_text(r, 15),
+        removed_at: time(r, 16),
+    }
+}
+
+/// Every row ever added, newest first.
+pub async fn destinations_history(conn: &mut Connection) -> DbResult<Vec<DestinationRecord>> {
+    let sql = format!("SELECT {DESTINATION_COLUMNS} FROM RestrictedDestinations ORDER BY Id DESC");
+    Ok(rows(conn, &sql, &[]).await?.iter().map(destination_record).collect())
+}
+
+/// The rows in force (by id) and the version: additions plus removals.
+pub async fn destinations_current(conn: &mut Connection) -> DbResult<(Vec<Destination>, String)> {
+    let all = destinations_history(conn).await?;
+    let removed = all.iter().filter(|r| r.removed_at.is_some()).count();
+    let in_force = all.iter().rev().filter(|r| r.removed_at.is_none()).map(|r| r.destination.clone()).collect();
+    Ok((in_force, (all.len() + removed).to_string()))
+}
+
+/// What adding a row did: its id and the row with the same code it replaced, or why it wasn't added.
+#[derive(Debug)]
+pub enum DestinationAddition {
+    Added { id: i32, replaced: Option<i32> },
+    Refused(String),
+}
+
+async fn lock_destinations(conn: &mut Connection) -> DbResult<()> {
+    let lock = rows(
+        conn,
+        "DECLARE @result int; EXEC @result = sp_getapplock @Resource = N'restricted-destinations', @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000; SELECT @result",
+        &[],
+    )
+    .await?;
+    if int(&lock[0], 0) < 0 {
+        return Err("The table of destinations is locked: try again.".into());
+    }
+    Ok(())
+}
+
+async fn insert_destination(conn: &mut Connection, row: &Destination, added_by: &str, now: Time) -> DbResult<i32> {
+    let (kind, status, names) = (row.kind.as_str(), row.status.as_str(), row.other_names.join("\n"));
+    let country = (!row.country.is_empty()).then_some(row.country.as_str());
+    let inserted = rows(
+        conn,
+        "INSERT INTO RestrictedDestinations (Code, Kind, Name, OtherNames, CountryCode, ParentCode, NeedsRegion, Status, RestrictedBy, LegalSource, AsOf, ReviewBy, AddedBy, AddedAt)
+OUTPUT INSERTED.Id VALUES (@P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, @P11, @P12, @P13, @P14)",
+        &[
+            &row.code,
+            &kind,
+            &row.name,
+            &names,
+            &country,
+            &row.parent.as_deref(),
+            &row.needs_region,
+            &status,
+            &row.restricted_by,
+            &row.legal_source,
+            &row.as_of,
+            &row.review_by,
+            &added_by,
+            &now.fixed_offset(),
+        ],
+    )
+    .await?;
+    Ok(int(&inserted[0], 0))
+}
+
+/// Adds a row, replacing the one in force with the same code, unless check refuses it against the rows in force: checked
+/// and written in one transaction, under the table's lock.
+pub async fn destination_add(
+    conn: &mut Connection,
+    row: &Destination,
+    added_by: &str,
+    now: Time,
+    check: impl FnOnce(&[Destination]) -> Option<String>,
+) -> DbResult<DestinationAddition> {
+    simple(conn, "BEGIN TRANSACTION").await?;
+    let result = async {
+        lock_destinations(conn).await?;
+        let (in_force, _) = destinations_current(conn).await?;
+        if let Some(reason) = check(&in_force) {
+            return Ok(DestinationAddition::Refused(reason));
+        }
+        let replaced = in_force.iter().find(|d| d.code == row.code).map(|d| d.id);
+        if let Some(old) = replaced {
+            execute(
+                conn,
+                "UPDATE RestrictedDestinations SET RemovedBy = @P1, RemovedAt = @P2 WHERE Id = @P3 AND RemovedAt IS NULL",
+                &[&added_by, &now.fixed_offset(), &old],
+            )
+            .await?;
+        }
+        let id = insert_destination(conn, row, added_by, now).await?;
+        Ok(DestinationAddition::Added { id, replaced })
+    }
+    .await;
+    simple(conn, if matches!(result, Ok(DestinationAddition::Added { .. })) { "COMMIT" } else { "IF @@TRANCOUNT > 0 ROLLBACK" }).await?;
+    result
+}
+
+/// Marks a row removed (rows are never deleted): its code, or None if there's no such row in force.
+pub async fn destination_remove(conn: &mut Connection, id: i32, removed_by: &str, now: Time) -> DbResult<Option<String>> {
+    let removed = rows(
+        conn,
+        "UPDATE RestrictedDestinations SET RemovedBy = @P1, RemovedAt = @P2 OUTPUT INSERTED.Code WHERE Id = @P3 AND RemovedAt IS NULL",
+        &[&removed_by, &now.fixed_offset(), &id],
+    )
+    .await?;
+    Ok(removed.first().map(|r| text(r, 0)))
+}
+
+/// Adds the starting rows, only to a table that has never had a row: true if it did.
+pub async fn destinations_start(conn: &mut Connection, starting: &[Destination], added_by: &str, now: Time) -> DbResult<bool> {
+    simple(conn, "BEGIN TRANSACTION").await?;
+    let result = async {
+        lock_destinations(conn).await?;
+        let count = rows(conn, "SELECT COUNT(*) FROM RestrictedDestinations", &[]).await?;
+        if int(&count[0], 0) > 0 {
+            return Ok(false);
+        }
+        for row in starting {
+            insert_destination(conn, row, added_by, now).await?;
+        }
+        Ok(true)
+    }
+    .await;
+    simple(conn, if matches!(result, Ok(true)) { "COMMIT" } else { "IF @@TRANCOUNT > 0 ROLLBACK" }).await?;
+    result
 }

@@ -169,7 +169,7 @@ fn key(value: &str) -> String {
 
 /// A multi-word name's lookup keys: its normalised words joined by spaces, and for a name without Cyrillic also
 /// without diacritics.
-fn keys(name: &str) -> Vec<String> {
+pub(super) fn keys(name: &str) -> Vec<String> {
     let k = words(name).join(" ");
     let mut out = vec![k.clone()];
     if !k.chars().any(is_cyrillic) {

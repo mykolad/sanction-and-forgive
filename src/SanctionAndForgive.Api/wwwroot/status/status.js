@@ -198,4 +198,33 @@ async function load() {
   }
 }
 
+// The table of destinations under broad restrictions (#67), when the API has one.
+const DESTINATION_STATUSES = { Restricted: "Restricted", Partly: "Partly restricted", Outside: "Outside the restricted area" };
+
+async function loadDestinations() {
+  try {
+    const status = await (await fetch("/api/v1/status", { headers: { Accept: "application/json" } })).json();
+    if (!(status.features || []).includes("destinations")) return;
+    const table = await (await fetch("/api/v1/destinations", { headers: { Accept: "application/json" } })).json();
+    document.getElementById("destinations-section").hidden = false;
+    const rows = table.destinations;
+    const regionName = new Map(rows.map((r) => [r.code, r.name]));
+    document.getElementById("destinations").replaceChildren(...[
+      table.reviewOverdue ? el("p", { class: "state error" }, `The table was due for review on ${table.reviewOverdue}: every result warns about it.`) : null,
+      rows.length
+        ? el("div", { class: "table-scroll" }, el("table", { class: "sources" },
+          el("thead", {}, el("tr", {}, ["Place", "Status", "Restricted by", "Legal source", "As of"].map((h) => el("th", { scope: "col" }, h)))),
+          el("tbody", {}, rows.map((r) => el("tr", {},
+            el("td", {}, el("strong", {}, r.name), ` (${r.kind.toLowerCase()}${r.parent ? `, ${regionName.get(r.parent) || r.parent}` : r.country ? `, ${r.country}` : ""})`),
+            el("td", {}, DESTINATION_STATUSES[r.status] || r.status),
+            el("td", {}, r.restrictedBy || "—"),
+            el("td", {}, r.legalSource || "—"),
+            el("td", {}, r.asOf))))))
+        : el("p", { class: "muted" }, "The table is empty: no address raises a notice.")].filter(Boolean));
+  } catch {
+    // The lists above say whether the service answers.
+  }
+}
+
 load();
+loadDestinations();

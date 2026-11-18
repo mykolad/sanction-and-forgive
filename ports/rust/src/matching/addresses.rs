@@ -131,7 +131,7 @@ pub fn parse_address(data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, s
 /// countries); or right before a street type written after the name, in the same part ("Almanya Caddesi 12", "Jordan
 /// Road"). A final ISO code (followed) follows the last word as a country name would: "Via Germania, IT" is read as "Via
 /// Germania, Italia" is.
-fn names_a_street(data: &MatcherData, tokens: &[TokenRef], parts: &[i64], start: usize, length: usize, followed: bool) -> bool {
+pub(super) fn names_a_street(data: &MatcherData, tokens: &[TokenRef], parts: &[i64], start: usize, length: usize, followed: bool) -> bool {
     let is = |token: &TokenRef, words: &HashSet<String>| words.contains(&token.text) || token.forms.iter().any(|f| words.contains(f));
     let end = start + length;
     if end < tokens.len() && parts[end] == parts[end - 1] && is(&tokens[end], &data.street_suffixes) {
@@ -148,7 +148,7 @@ fn names_a_street(data: &MatcherData, tokens: &[TokenRef], parts: &[i64], start:
 /// The parts of an address that commas, semicolons and line breaks separate, as each word's part in order. Should the
 /// parts' words ever differ from the whole's, every word is a part of its own, so a country name never names a street
 /// for want of a comma.
-fn address_parts(raw: &str, count: usize) -> Vec<i64> {
+pub(super) fn address_parts(raw: &str, count: usize) -> Vec<i64> {
     let separators = [',', ';', '\n', '\r', '\u{FF0C}', '\u{FF1B}', '\u{3001}'];
     let parts: Vec<i64> = raw
         .split(|c| separators.contains(&c))
@@ -162,7 +162,7 @@ fn address_parts(raw: &str, count: usize) -> Vec<i64> {
     }
 }
 
-fn lookup<'m, T>(tokens: &[TokenRef], start: usize, max_words: usize, names: &'m HashMap<String, T>) -> Option<(&'m T, usize)> {
+pub(super) fn lookup<'m, T>(tokens: &[TokenRef], start: usize, max_words: usize, names: &'m HashMap<String, T>) -> Option<(&'m T, usize)> {
     for length in (1..=max_words.min(tokens.len() - start)).rev() {
         let span = &tokens[start..start + length];
         let max_forms = span.iter().map(|t| t.forms.len()).max().unwrap_or(0);

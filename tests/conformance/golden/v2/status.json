@@ -3,7 +3,8 @@
   "version": "*",
   "matcherVersion": "*",
   "features": [
-    "parties"
+    "parties",
+    "destinations"
   ],
   "lists": [
     {

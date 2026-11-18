@@ -53,6 +53,16 @@
       <div id="history"></div>
     </section>
 
+    <!-- Shown only when the API's status lists the "destinations" feature (status.js). -->
+    <section class="panel" id="destinations-section" aria-labelledby="destinations-title" hidden>
+      <h2 id="destinations-title">Destinations under broad restrictions</h2>
+      <p class="section-note">Of embargoes, screening covers only these. An address in one of these places gets a notice, and the
+        result is at least Review: in a restricted area, or possibly, when it names a partly restricted region but no place in it
+        that the table knows. The place counts whatever country the address names. Administrators keep the table from the official
+        sources; it doesn't say which goods are restricted.</p>
+      <div id="destinations"></div>
+    </section>
+
     <section class="panel" aria-labelledby="not-imported-title">
       <h2 id="not-imported-title">Lists not imported</h2>
       <p class="section-note">Known public lists the demo doesn't search. A screening never reports a match on these, or the absence of one.</p>

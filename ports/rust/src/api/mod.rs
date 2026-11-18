@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod catalog;
+pub mod destinations;
 pub mod handlers;
 pub mod screening;
 pub mod server;

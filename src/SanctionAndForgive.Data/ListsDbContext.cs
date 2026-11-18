@@ -18,6 +18,8 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
 
     public DbSet<AllowListItem> AllowList => Set<AllowListItem>();
 
+    public DbSet<RestrictedDestination> RestrictedDestinations => Set<RestrictedDestination>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Source>(source =>
@@ -73,6 +75,22 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
             item.Property(i => i.Reason).HasMaxLength(500);
             item.Property(i => i.AddedBy).HasMaxLength(256);
             item.Property(i => i.RemovedBy).HasMaxLength(256);
+        });
+
+        modelBuilder.Entity<RestrictedDestination>(destination =>
+        {
+            destination.Property(d => d.Code).HasMaxLength(64).IsUnicode(false);
+            destination.Property(d => d.Kind).HasMaxLength(16).IsUnicode(false);
+            destination.Property(d => d.Name).HasMaxLength(200);
+            destination.Property(d => d.OtherNames).HasMaxLength(4000);
+            destination.Property(d => d.CountryCode).HasMaxLength(2).IsUnicode(false).IsFixedLength();
+            destination.Property(d => d.ParentCode).HasMaxLength(64).IsUnicode(false);
+            destination.Property(d => d.Status).HasMaxLength(16).IsUnicode(false);
+            destination.Property(d => d.RestrictedBy).HasMaxLength(200);
+            destination.Property(d => d.LegalSource).HasMaxLength(1000);
+            destination.Property(d => d.AddedBy).HasMaxLength(256);
+            destination.Property(d => d.RemovedBy).HasMaxLength(256);
+            destination.HasIndex(d => d.Code);
         });
     }
 }

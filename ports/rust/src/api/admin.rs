@@ -52,7 +52,7 @@ async fn me(State(s): State<Shared>, headers: HeaderMap) -> Response {
 /// Why a request may not go on: sign-in off (404), not signed in (401), without the role (403), or a change without
 /// the site's own header (400). Otherwise the user.
 #[allow(clippy::result_large_err)] // a response, made at most once a request
-async fn refuse(s: &Shared, headers: &HeaderMap, change: bool) -> Result<AdminUser, Response> {
+pub(super) async fn refuse(s: &Shared, headers: &HeaderMap, change: bool) -> Result<AdminUser, Response> {
     let user = s.sign_in.current(headers).await;
     if !s.sign_in.enabled() {
         return Err(not_found());
@@ -67,7 +67,7 @@ async fn refuse(s: &Shared, headers: &HeaderMap, change: bool) -> Result<AdminUs
     Ok(user)
 }
 
-fn server_error() -> Response {
+pub(super) fn server_error() -> Response {
     StatusCode::INTERNAL_SERVER_ERROR.into_response()
 }
 
@@ -108,7 +108,7 @@ async fn allow_list(State(s): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 /// The {id} route value as an int (the reference's {id:int} constraint): otherwise 404.
-fn path_id(id: &str) -> Option<i32> {
+pub(super) fn path_id(id: &str) -> Option<i32> {
     id.parse().ok()
 }
 
@@ -140,7 +140,7 @@ async fn review(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<Stri
 }
 
 /// A field of a JSON object, matched ignoring case (the last of duplicates wins).
-fn field<'v>(object: &'v serde_json::Map<String, Value>, name: &str) -> Option<&'v Value> {
+pub(super) fn field<'v>(object: &'v serde_json::Map<String, Value>, name: &str) -> Option<&'v Value> {
     object.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v).next_back()
 }
 

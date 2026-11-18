@@ -8,7 +8,7 @@ use chrono::Duration;
 use tokio::sync::Mutex;
 
 use crate::log::Logger;
-use crate::matching::{AllowList, AllowListEntry, ListIndex, ListedAddress, ListedName, ListedSubject, SubjectKind};
+use crate::matching::{AllowList, AllowListEntry, Destinations, ListIndex, ListedAddress, ListedName, ListedSubject, SubjectKind};
 use crate::store::db::{Database, DbResult};
 use crate::store::queries::{self, HistoryEntry, Subject, Time};
 
@@ -74,6 +74,7 @@ pub struct Catalog {
     history: RwLock<Arc<HashMap<String, Vec<HistoryEntry>>>>,
     held: RwLock<Arc<HashMap<String, HistoryEntry>>>,
     allow_list: RwLock<Arc<AllowList>>,
+    destinations: RwLock<Arc<Destinations>>,
 }
 
 impl Default for Catalog {
@@ -83,6 +84,7 @@ impl Default for Catalog {
             history: RwLock::new(Arc::new(HashMap::new())),
             held: RwLock::new(Arc::new(HashMap::new())),
             allow_list: RwLock::new(Arc::new(AllowList::empty())),
+            destinations: RwLock::new(Arc::new(Destinations::empty())),
         }
     }
 }
@@ -114,6 +116,15 @@ impl Catalog {
 
     pub fn replace_allow_list(&self, list: AllowList) {
         *self.allow_list.write().unwrap() = Arc::new(list);
+    }
+
+    /// The destinations under broad restrictions in force (#67).
+    pub fn destinations(&self) -> Arc<Destinations> {
+        self.destinations.read().unwrap().clone()
+    }
+
+    pub fn replace_destinations(&self, table: Destinations) {
+        *self.destinations.write().unwrap() = Arc::new(table);
     }
 
     /// The loaded list with this code (ignoring case).
@@ -252,6 +263,32 @@ impl Loader {
         }
     }
 
+    /// Reloads the destinations under broad restrictions only (after an edit), under the refresh gate. With without_code
+    /// (a removal), that row stops applying first.
+    pub async fn reload_destinations(&self, without_code: Option<&str>) -> bool {
+        let _gate = self.gate.lock().await;
+        if let Some(code) = without_code {
+            self.catalog.replace_destinations(self.catalog.destinations().without(code));
+        }
+        match self.load_destinations().await {
+            Ok(()) => true,
+            Err(e) => {
+                self.logger.warn(
+                    "Reloading the destinations under broad restrictions after an edit failed; the next refresh retries",
+                    &[("error", e.to_string().into())],
+                );
+                false
+            }
+        }
+    }
+
+    async fn load_destinations(&self) -> DbResult<()> {
+        let mut conn = self.db.connect().await?;
+        let (rows, version) = queries::destinations_current(&mut conn).await?;
+        self.catalog.replace_destinations(Destinations::build(rows, &version));
+        Ok(())
+    }
+
     async fn load_allow_list(&self) -> DbResult<()> {
         let mut conn = self.db.connect().await?;
         let (entries, version) = queries::allow_list_current(&mut conn).await?;
@@ -266,6 +303,8 @@ impl Loader {
         let (entries, version) = queries::allow_list_current(&mut conn).await?;
         let allow: Vec<AllowListEntry> = entries.into_iter().map(|e| AllowListEntry { id: e.id, name: e.name, reason: e.reason }).collect();
         self.catalog.replace_allow_list(AllowList::build(&allow, &version));
+        let (destinations, version) = queries::destinations_current(&mut conn).await?;
+        self.catalog.replace_destinations(Destinations::build(destinations, &version));
         let history = queries::history(&mut conn, "").await?;
         let held_entries = queries::held(&mut conn).await?;
         let mut held: HashMap<String, HistoryEntry> = HashMap::new();

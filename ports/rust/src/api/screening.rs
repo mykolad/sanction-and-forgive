@@ -12,16 +12,17 @@ use super::catalog::{Catalog, LoadedList};
 use crate::lists::catalogue::find_source;
 use crate::log::Logger;
 use crate::matching::{
-    AllowList, Cell, Entry, Options, Outcome, OverallOutcome, Party, ScreenedList, Screener, ScreeningRequest, ScreeningResult,
-    SubjectMatch, WordAlignment, ROLES,
+    AllowList, Cell, DestinationNotice, DestinationState, Destinations, Entry, Options, Outcome, OverallOutcome, Party, ScreenedList,
+    Screener, ScreeningRequest, ScreeningResult, SubjectMatch, WordAlignment, ROLES,
 };
 use crate::store::queries::Time;
 
-/// On every result.
+/// On every result. Of embargoes, only the destinations the table lists (#67).
 pub const DISCLAIMER: &str =
-    "This is a demo list check, not a legal determination. It doesn't cover ownership or control by listed parties, \
-or embargoes. A person must review possible matches. The percentage is an estimate that this entry is the \
-listed party, based on the data entered; it isn't the chance that a shipment is lawful.";
+    "This is a demo list check, not a legal determination. It doesn't cover ownership or control by listed parties. Of \
+embargoes, it only flags an address in a destination its table lists as under broad restrictions, and never checks the \
+rules for the goods. A person must review possible matches. The percentage is an estimate that this entry is the listed \
+party, based on the data entered; it isn't the chance that a shipment is lawful.";
 
 const MAX_FIELD_LENGTH: usize = 300;
 
@@ -328,6 +329,32 @@ pub struct AllowedByResponse {
     pub reason: String,
 }
 
+/// An address in a destination under broad restrictions (#67): the row that decided it, as the table has it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DestinationResponse {
+    pub state: &'static str,
+    pub code: String,
+    pub kind: &'static str,
+    pub name: String,
+    pub restricted_by: String,
+    pub legal_source: String,
+    pub as_of: String,
+}
+
+pub fn destination_response(notice: &DestinationNotice) -> DestinationResponse {
+    let d = &notice.destination;
+    DestinationResponse {
+        state: notice.state.as_str(),
+        code: d.code.clone(),
+        kind: d.kind.as_str(),
+        name: d.name.clone(),
+        restricted_by: d.restricted_by.clone(),
+        legal_source: d.legal_source.clone(),
+        as_of: d.as_of.format("%Y-%m-%d").to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryResponse {
@@ -341,6 +368,9 @@ pub struct EntryResponse {
     pub compared: &'static str,
     pub cells: Vec<CellResponse>,
     pub allowed_by: Option<AllowedByResponse>,
+    /// An address's destination notice (#67); absent when there is none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<DestinationResponse>,
 }
 
 fn entry_response(entry: &Entry, o: &Options) -> EntryResponse {
@@ -352,6 +382,7 @@ fn entry_response(entry: &Entry, o: &Options) -> EntryResponse {
         compared: entry.compared,
         cells: entry.cells.iter().map(|c| cell_response(c, o)).collect(),
         allowed_by: entry.allowed_by.as_ref().map(|a| AllowedByResponse { id: a.id, name: a.name.clone(), reason: a.reason.clone() }),
+        destination: entry.destination.as_ref().map(destination_response),
     }
 }
 
@@ -366,6 +397,7 @@ pub struct ScreeningResponse {
     pub lists: Vec<ListResponse>,
     pub entries: Vec<EntryResponse>,
     pub allow_list_version: String,
+    pub destinations_version: String,
 }
 
 // --- Stream lines (StreamResponses.cs) ---
@@ -381,6 +413,7 @@ pub struct StreamHeaderLine {
     pub max_records: usize,
     pub max_seconds: u64,
     pub allow_list_version: String,
+    pub destinations_version: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -416,6 +449,8 @@ pub struct StreamEntry {
     pub kind: &'static str,
     pub cells: Vec<StreamCell>,
     pub allow_list_entry_id: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<DestinationResponse>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -475,6 +510,7 @@ pub fn stream_entry(entry: &Entry, o: &Options) -> StreamEntry {
             })
             .collect(),
         allow_list_entry_id: entry.allowed_by.as_ref().map(|a| a.id),
+        destination: entry.destination.as_ref().map(destination_response),
     }
 }
 
@@ -499,6 +535,7 @@ impl ScreeningService {
         body: &ScreeningRequestBody,
         lists: &[Arc<LoadedList>],
         allow_list: &AllowList,
+        destinations: &Destinations,
         now: Time,
     ) -> (ScreeningResult, Vec<ListResponse>) {
         let screened: Vec<ScreenedList> = lists
@@ -521,7 +558,8 @@ impl ScreeningService {
                 address: p.address.clone().unwrap_or_default(),
             })
             .collect();
-        let result = self.screener.screen_parties(&request, &parties, &screened, allow_list).expect("validated: at least one field");
+        let result =
+            self.screener.screen_parties(&request, &parties, &screened, allow_list, destinations).expect("validated: at least one field");
 
         let mut best: HashMap<&str, i32> = HashMap::new();
         for entry in &result.entries {
@@ -541,23 +579,31 @@ impl ScreeningService {
 
     /// The single endpoint's answer.
     pub fn screen(&self, body: &ScreeningRequestBody) -> ScreeningResponse {
-        let (lists, allow_list, now) = (self.catalog.lists(), self.catalog.allow_list(), self.now());
-        let (result, rows) = self.run(body, &lists, &allow_list, now);
+        let (lists, allow_list, destinations, now) =
+            (self.catalog.lists(), self.catalog.allow_list(), self.catalog.destinations(), self.now());
+        let (result, rows) = self.run(body, &lists, &allow_list, &destinations, now);
         ScreeningResponse {
             reference: body.reference().to_string(),
             outcome: result.outcome.as_str(),
-            summary: self.summary(&result, &lists, now),
+            summary: self.summary(&result, &lists, &destinations, now),
             disclaimer: DISCLAIMER,
             matcher_version: result.matcher_version.clone(),
             lists: rows,
             entries: result.entries.iter().map(|e| entry_response(e, self.options())).collect(),
             allow_list_version: result.allow_list_version.clone(),
+            destinations_version: result.destinations_version.clone(),
         }
     }
 
     /// One stream record against the stream's snapshot.
-    pub fn screen_for_stream(&self, body: &ScreeningRequestBody, lists: &[Arc<LoadedList>], allow_list: &AllowList) -> ScreeningResult {
-        self.run(body, lists, allow_list, self.now()).0
+    pub fn screen_for_stream(
+        &self,
+        body: &ScreeningRequestBody,
+        lists: &[Arc<LoadedList>],
+        allow_list: &AllowList,
+        destinations: &Destinations,
+    ) -> ScreeningResult {
+        self.run(body, lists, allow_list, destinations, self.now()).0
     }
 
     fn audit(&self, reference: &str, result: &ScreeningResult, rows: &[ListResponse]) {
@@ -580,6 +626,10 @@ impl ScreeningService {
                 results.push_str(&format!("party {} {} ", p.number, p.role));
             }
             results.push_str(entry.kind.as_str());
+            // The table's own code for the row: never what was entered.
+            if let Some(d) = &entry.destination {
+                results.push_str(&format!(" (destination {} {})", d.state.as_str(), d.destination.code));
+            }
             if let Some(a) = &entry.allowed_by {
                 results.push_str(&format!(" (allow-list entry {})", a.id));
             }
@@ -608,18 +658,19 @@ impl ScreeningService {
             results.push_str(" | ");
         }
         let message = format!(
-            "Screening {reference}: {}; matcher {}; lists {}; allow-list {}; {}",
+            "Screening {reference}: {}; matcher {}; lists {}; allow-list {}; destinations {}; {}",
             result.outcome.as_str(),
             result.matcher_version,
             versions.join(", "),
             result.allow_list_version,
+            result.destinations_version,
             results.trim_end_matches([' ', '|'])
         );
         self.logger.info(&message, &[("Reference", reference.into())]);
     }
 
     /// The summary line, worded precisely: never "not sanctioned" or "cleared", always which lists, as of when.
-    pub fn summary(&self, result: &ScreeningResult, lists: &[Arc<LoadedList>], now: Time) -> String {
+    pub fn summary(&self, result: &ScreeningResult, lists: &[Arc<LoadedList>], destinations: &Destinations, now: Time) -> String {
         let as_of = |t: Option<Time>| t.map(|t| t.format("%-d %b %Y %H:%M UTC").to_string()).unwrap_or_else(|| "unknown".into());
         let mut checked = Vec::new();
         let mut not_checked = Vec::new();
@@ -659,6 +710,11 @@ impl ScreeningService {
             gap +=
                 &format!(" Warning: couldn't be updated within {age} hours, so searched as last downloaded: {}.", overdue[age].join("; "));
         }
+        if let Some(due) = destinations.review_overdue(now.date_naive()) {
+            gap +=
+                &format!(" Warning: the table of destinations under broad restrictions was due for review on {}.", due.format("%-d %b %Y"));
+        }
+        let destination = destination_sentences(result);
 
         let mut hits: Vec<String> = Vec::new();
         let mut allowed_on: Vec<String> = Vec::new();
@@ -690,10 +746,22 @@ impl ScreeningService {
         }
 
         match result.outcome {
-            OverallOutcome::Match => {
-                format!("Possible match on {}. A person must review it before anything else happens.{gap}{allowed}", hits.join(", "))
+            OverallOutcome::Match => format!(
+                "Possible match on {}. A person must review it before anything else happens.{destination}{gap}{allowed}",
+                hits.join(", ")
+            ),
+            // Raised by a destination alone (#67): what the lists answered follows.
+            OverallOutcome::Review if hits.is_empty() => {
+                let searched = match (checked.is_empty(), allowed.is_empty()) {
+                    (true, _) => String::new(),
+                    (false, true) => format!(" No match found in: {}.", checked.join("; ")),
+                    (false, false) => format!(" No match found in: {}, apart from what the allow-list allows.", checked.join("; ")),
+                };
+                format!("Review needed for the destination.{destination}{searched}{gap}{allowed}")
             }
-            OverallOutcome::Review => format!("Review needed: a similar listed party on {}.{gap}{allowed}", hits.join(", ")),
+            OverallOutcome::Review => {
+                format!("Review needed: a similar listed party on {}.{destination}{gap}{allowed}", hits.join(", "))
+            }
             OverallOutcome::Incomplete if checked.is_empty() => format!("Incomplete: no list could be checked.{gap}"),
             OverallOutcome::Incomplete => format!("Incomplete. No match found in: {}.{gap}{allowed}", checked.join("; ")),
             OverallOutcome::NoMatch if !allowed.is_empty() => {
@@ -702,4 +770,29 @@ impl ScreeningService {
             OverallOutcome::NoMatch => format!("No match found in: {}.{gap}", checked.join("; ")),
         }
     }
+}
+
+/// One sentence per destination notice (#67), each place once, in the order the addresses were entered.
+fn destination_sentences(result: &ScreeningResult) -> String {
+    let mut seen: Vec<(&str, DestinationState)> = Vec::new();
+    let mut out = String::new();
+    for notice in result.entries.iter().filter_map(|e| e.destination.as_ref()) {
+        let d = &notice.destination;
+        if seen.contains(&(d.code.as_str(), notice.state)) {
+            continue;
+        }
+        seen.push((d.code.as_str(), notice.state));
+        let as_of = d.as_of.format("%-d %b %Y");
+        out += &match notice.state {
+            DestinationState::Restricted => format!(
+                " Destination under broad restrictions by {}: {} (as of {as_of}). Check the rules for the goods.",
+                d.restricted_by, d.name
+            ),
+            DestinationState::PossiblyRestricted => format!(
+                " The destination may be in an area under broad restrictions by {}: {}, and the address doesn't tell which side of the line (as of {as_of}).",
+                d.restricted_by, d.name
+            ),
+        };
+    }
+    out
 }

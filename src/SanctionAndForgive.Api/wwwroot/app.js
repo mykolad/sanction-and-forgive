@@ -6,6 +6,8 @@ const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible ma
 const SYMBOLS = { Match: "●", Review: "▲", Allowed: "◇", NoMatch: "✓", NotChecked: "–" };
 const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete" };
 const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address" };
+// An address's destination notice (the "destinations" feature).
+const DESTINATION = { restricted: "Destination under broad restrictions", possiblyRestricted: "The destination may be under broad restrictions" };
 // A shipment's other parties (the "parties" feature, when the API offers it): the API's roles, and how they read.
 const ROLES = { shipper: "Shipper", consignee: "Consignee", notifyParty: "Notify party", forwarder: "Forwarder", carrier: "Carrier", endUser: "End user", other: "Other party" };
 const MAX_PARTIES = 10;
@@ -199,6 +201,12 @@ function render(result) {
       ? group.key ? `Party ${group.key}: ${ROLES[group.role] || group.role}` : "The shipment's receiver, company and address"
       : null))));
 
+  const notices = destinationNotices(result);
+  $("destination-notices").hidden = !notices.length;
+  $("destination-notices").replaceChildren(...notices.map(({ where, destination }) => el("p", { class: `destination ${destination.state}` },
+    el("strong", {}, `⚠ ${DESTINATION[destination.state] || destination.state}`), ` ${where}: ${destination.name}. `,
+    destinationText(destination))));
+
   $("disclaimer").textContent = result.disclaimer;
   $("result").scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -228,6 +236,20 @@ function resultTable(result, entries, caption) {
     el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "List"),
       entries.map((entry) => el("th", { scope: "col" }, title(entry), el("span", { class: "entry-input" }, entry.input))))),
     body);
+}
+
+// Each address entered in a destination under broad restrictions (#67), with which address it is.
+function destinationNotices(result) {
+  return result.entries.filter((entry) => entry.destination)
+    .map((entry) => ({ where: entry.party ? entryTitle(entry) : "Address", destination: entry.destination }));
+}
+
+// What a notice says beyond its title: who restricts it, under what, as of when, and what to do.
+function destinationText(destination) {
+  const rest = destination.state === "restricted"
+    ? "Check the rules for the goods."
+    : "The address doesn't tell which side of the line it is: a person must check where it is.";
+  return `Restricted by ${destination.restrictedBy}, as of ${destination.asOf} (${destination.legalSource.replace(/\.$/, "")}). ${rest}`;
 }
 
 // An entry's column title: its kind, and for a party its number and role ("Party 2, consignee: Company"); a party's
@@ -388,6 +410,11 @@ function buildRecord() {
         list.state === "SwitchedOff"
           ? el("td", { colspan: String(result.entries.length) }, "Not searched: switched off by an administrator")
           : result.entries.map((entry) => el("td", {}, cellText(entry.cells.find((cell) => cell.list === list.code)))))))),
+    destinationNotices(result).length
+      ? el("section", {}, el("h2", {}, "Destinations under broad restrictions"),
+        destinationNotices(result).map(({ where, destination }) => el("p", {},
+          el("strong", {}, DESTINATION[destination.state] || destination.state), `. ${where}: ${destination.name}. `, destinationText(destination))))
+      : null,
     // Only what the lists found: whether anything was searched at all is the result's summary above, never inferred.
     hits.length
       ? el("section", {}, el("h2", {}, "Possible matches, and how the names aligned"),
@@ -397,7 +424,8 @@ function buildRecord() {
         ]))
       : null,
     el("h2", {}, "Versions"),
-    el("p", {}, `Matcher ${result.matcherVersion} · allow-list ${result.allowListVersion} · lists: `,
+    el("p", {}, `Matcher ${result.matcherVersion} · allow-list ${result.allowListVersion}`,
+      result.destinationsVersion ? ` · destinations ${result.destinationsVersion}` : "", " · lists: ",
       result.lists.map((list) => `${list.code} ${list.version === null || list.version === undefined ? "–" : list.version} (${list.state})`).join(", ")),
     el("p", { class: "print-disclaimer" }, result.disclaimer),
     // The lists' licence notices (OGL, trade.gov's, the EU's…) travel with the data they cover: the page's own
