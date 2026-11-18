@@ -82,6 +82,17 @@ public class GoldenTests
         { "Шевченко", "Taras Shevchenko", Outcome.NoMatch },
     };
 
+    /// <summary>Belarusian and Russian forms of one name (cognates.json, #91): a cognate caps the match at Review, and an
+    /// initial never stands for a patronymic (no patronymic pairs).</summary>
+    public static TheoryData<string, string, Outcome> BelarusianCognates => new()
+    {
+        { "Лідзія Ярмошына", "Lidia Yermoshina", Outcome.Review },
+        { "Аляксандр Лукашэнка", "Alexander Lukashenko", Outcome.Review },
+        { "Віктар Сямашка", "Viktor Semashko", Outcome.Review },
+        { "Дзяніс Быкаў", "Denis Bykov", Outcome.Review },
+        { "Popov M.", "Aleksandr Nikolaevich Popov", Outcome.NoMatch },
+    };
+
     public static TheoryData<string, string, Outcome> Initials => new()
     {
         { "Шевченко Т.Г.", "Taras Shevchenko", Outcome.Review },
@@ -137,6 +148,11 @@ public class GoldenTests
     [Theory]
     [MemberData(nameof(TransliterationPeople))]
     public void TransliterationPeople_(string query, string listed, Outcome expected) =>
+        AssertName(query, listed, SubjectKind.Individual, expected);
+
+    [Theory]
+    [MemberData(nameof(BelarusianCognates))]
+    public void BelarusianCognates_(string query, string listed, Outcome expected) =>
         AssertName(query, listed, SubjectKind.Individual, expected);
 
     [Theory]
