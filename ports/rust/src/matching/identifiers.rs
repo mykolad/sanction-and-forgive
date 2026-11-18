@@ -61,32 +61,31 @@ pub fn listed_keys(value: &str) -> Vec<String> {
         }
     };
     add(identifier_key(value));
-    // A slash joins two numbers only between plain numbers of six digits or more (the Russian INN/KPP); otherwise it's
-    // part of the number ("ABC12345/01" is never "ABC12345").
-    let mut parts: Vec<&str> = Vec::new();
+    let has_digit = |w: &str| w.chars().any(|c| c.is_ascii_digit());
+    let label = |w: &str| {
+        let bare: String = w.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+        bare.is_empty() || LABEL_WORDS.contains(&bare.as_str())
+    };
     for part in value.split([',', ';', '(', ')', ':']) {
-        let pieces: Vec<&str> = part.split('/').map(str::trim).collect();
-        if pieces.len() > 1 && pieces.iter().all(|p| p.len() >= 6 && p.chars().all(|c| c.is_ascii_digit())) {
-            parts.extend(pieces);
-        } else {
-            parts.push(part);
-        }
-    }
-    for part in parts {
         let mut words: Vec<&str> = part.split_whitespace().collect();
-        let has_digit = |w: &str| w.chars().any(|c| c.is_ascii_digit());
-        let label = |w: &str| {
-            let bare: String = w.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
-            bare.is_empty() || LABEL_WORDS.contains(&bare.as_str())
-        };
         while words.first().is_some_and(|w| !has_digit(w) && label(w)) {
             words.remove(0);
         }
         while words.last().is_some_and(|w| !has_digit(w) && w.chars().filter(|c| c.is_alphabetic()).count() >= 4) {
             words.pop();
         }
-        if words.iter().any(|w| has_digit(w)) {
-            add(identifier_key(&words.join(" ")));
+        if !words.iter().any(|w| has_digit(w)) {
+            continue;
+        }
+        let cleaned = words.join(" ");
+        // A slash joins two numbers only between plain numbers of six digits or more (the Russian INN/KPP), checked
+        // once labels and countries are gone; otherwise it's part of the number ("ABC12345/01" is never "ABC12345").
+        let pieces: Vec<&str> = cleaned.split('/').map(str::trim).collect();
+        if pieces.len() > 1 && pieces.iter().all(|p| p.len() >= 6 && p.chars().all(|c| c.is_ascii_digit())) {
+            add(identifier_key(&cleaned));
+            pieces.into_iter().for_each(|p| add(p.to_string()));
+        } else {
+            add(identifier_key(&cleaned));
         }
     }
     keys
@@ -155,6 +154,12 @@ mod tests {
         // A series is part of the number, spaced or not; only a label is dropped.
         assert_eq!(listed_keys("AB 123456"), ["AB123456"]);
         assert_eq!(listed_keys("ABC12345/01"), ["ABC1234501"]);
+        // Labels and countries go before the slash is read.
+        assert_eq!(listed_keys("INN 7704734000/770301001"), ["INN7704734000770301001", "7704734000770301001", "7704734000", "770301001"]);
+        assert_eq!(
+            listed_keys("7704734000/770301001 Russia"),
+            ["7704734000770301001RUSSIA", "7704734000770301001", "7704734000", "770301001"]
+        );
         assert_eq!(listed_keys("AB123456"), ["AB123456"]);
         assert_eq!(listed_keys("Tax ID No. 7704734000"), ["TAXIDNO7704734000", "7704734000"]);
         assert_eq!(listed_keys("190950894 (Belarus)"), ["190950894BELARUS", "190950894"]);
