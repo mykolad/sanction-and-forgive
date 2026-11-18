@@ -141,14 +141,14 @@ public sealed class BehaviourTests
     {
         await Suite.ReadyAsync();
 
-        foreach (var (code, count) in FeedFiles.Feeds)
+        foreach (var (code, _) in FeedFiles.Feeds)
         {
             var body = await Suite.GetAsync($"api/v1/sources/{code}/history");
             var history = body.GetProperty("history").EnumerateArray().ToList();
             Assert.NotEmpty(history);
             Assert.All(history, row => Assert.True(row.TryGetProperty("added", out _) && row.TryGetProperty("removed", out _) && row.TryGetProperty("changed", out _)));
             var active = Assert.Single(history, row => row.GetProperty("result").GetString() == "Active");
-            Assert.Equal(count, active.GetProperty("recordCount").GetInt32());
+            Assert.Equal(FeedFiles.RecordCount(code), active.GetProperty("recordCount").GetInt32());
         }
 
         using var unknown = await Suite.Http.GetAsync(new Uri("api/v1/sources/no-such-list/history", UriKind.Relative));

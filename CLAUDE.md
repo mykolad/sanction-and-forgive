@@ -65,7 +65,8 @@ tools/lists.ps1           The script the owner runs to manage lists
   source doesn't say: US export records), primary name, every name with its script and weak flag, addresses as one
   free-text string plus an ISO alpha-2 code when the source gives one; in the Rust port also identifiers and dates of
   birth (#68, `SubjectIdentifiers` and `Subjects.BirthDates`, docs/sources.md). Parsers stream (`Parsers/Xml.Records`: one
-  record element at a time) and leave out vessels and aircraft. A wrong root element is a `ListFormatException`.
+  record element at a time) and leave out vessels and aircraft; the Rust port keeps vessels (#69, `SubjectType.Vessel`
+  = 3, with their IMO numbers). A wrong root element is a `ListFormatException`.
 - `FeedDownloader` identifies itself honestly (`sanction-and-forgive/<version>`). Never disguise the client as a
   browser to get past a site that refuses it: report the source as `NeedsAccess` instead. A passing fault (5xx, 408,
   429, a broken connection, a timeout) is retried with exponential backoff (`DownloadRetry.Default`: 15 s doubling,
@@ -245,7 +246,8 @@ them (`-Version 1` with the .NET image). CI tests Rust at version 2, .NET and Go
 never rewrites a version's golden files. New fields and endpoints (owner's decision on #76) are Rust only: `/api/v1/status` lists them in
 `features` (`parties`: several parties per screening, #65; `destinations`: the table of destinations under broad
 restrictions, #67, kept on the admin page in `RestrictedDestinations`, whose migration comes from .NET like every
-table; `identifiers`: identifiers and dates of birth entered with a name, #68; docs/api.md), the shared website
+table; `identifiers`: identifiers and dates of birth entered with a name, #68; `vessels`: a vessel's name and IMO
+number, searched in each list's ships, #69; docs/api.md), the shared website
 offers them only when listed,
 and their conformance tests are `[SinceVersionFact(2)]`. A dictionary change still reaches all three (the files are shared).
 The dictionaries and `wwwroot` are copied into the ports at build time; never edit copies. The dictionaries are LF

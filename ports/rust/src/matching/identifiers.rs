@@ -16,8 +16,29 @@ pub fn comparable(key: &str) -> bool {
     key.chars().count() >= 5 && key.chars().filter(char::is_ascii_digit).count() >= 4
 }
 
+/// The keys an entered identifier is looked up by: its key, and an IMO number's seven digits alone ("IMO 9187629"
+/// is found where a list writes "9187629").
+pub fn entered_keys(value: &str) -> Vec<String> {
+    let key = identifier_key(value);
+    let mut keys = vec![key.clone()];
+    keys.extend(imo_digits(&key));
+    keys
+}
+
+/// The seven digits of a key that is "IMO" and an IMO number ("IMO9187629"), or None.
+fn imo_digits(key: &str) -> Option<String> {
+    key.strip_prefix("IMO").filter(|d| d.len() == 7 && d.bytes().all(|b| b.is_ascii_digit())).map(str::to_string)
+}
+
+/// Whether an IMO number's last digit is its check digit: the first six weighted 7 to 2, summed, modulo 10 (SOLAS
+/// regulation XI/1-3). A number entered with a slip of a digit fails it.
+pub fn imo_check_digit_ok(digits: &str) -> bool {
+    let d: Vec<u32> = digits.chars().filter_map(|c| c.to_digit(10)).collect();
+    d.len() == 7 && d[..6].iter().zip((2..=7).rev()).map(|(digit, weight)| digit * weight).sum::<u32>() % 10 == d[6]
+}
+
 /// Words that only say what an identifier is, never part of it: dropped before a number ("OGRN 1027700132195").
-const LABEL_WORDS: [&str; 30] = [
+const LABEL_WORDS: [&str; 31] = [
     "ogrn",
     "ogrnip",
     "inn",
@@ -45,6 +66,7 @@ const LABEL_WORDS: [&str; 30] = [
     "identification",
     "identity",
     "card",
+    "imo",
     "огрн",
     "инн",
     "кпп",
@@ -58,8 +80,11 @@ const LABEL_WORDS: [&str; 30] = [
 pub fn listed_keys(value: &str) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
     let mut add = |key: String| {
-        if comparable(&key) && !keys.contains(&key) {
-            keys.push(key);
+        // "IMO9187629" as one word is found by its seven digits too (#69).
+        for key in std::iter::once(key.clone()).chain(imo_digits(&key)) {
+            if comparable(&key) && !keys.contains(&key) {
+                keys.push(key);
+            }
         }
     };
     add(identifier_key(value));
@@ -179,6 +204,12 @@ mod tests {
         assert_eq!(listed_keys("Tax ID No. 7704734000"), ["TAXIDNO7704734000", "7704734000"]);
         assert_eq!(listed_keys("190950894 (Belarus)"), ["190950894BELARUS", "190950894"]);
         assert!(listed_keys("123").is_empty());
+        // IMO numbers (#69), written either way, are found by their digits; entered either way too.
+        assert_eq!(listed_keys("IMO 9187629"), ["IMO9187629", "9187629"]);
+        assert_eq!(listed_keys("IMO9187629"), ["IMO9187629", "9187629"]);
+        assert_eq!(entered_keys("imo 9187629"), ["IMO9187629", "9187629"]);
+        assert_eq!(entered_keys("P04581926"), ["P04581926"]);
+        assert!(imo_check_digit_ok("9187629") && imo_check_digit_ok("8405270") && !imo_check_digit_ok("9187628"));
     }
 
     #[test]

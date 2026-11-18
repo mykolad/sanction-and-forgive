@@ -148,6 +148,90 @@ mod tests {
         }
     }
 
+    /// Vessels (#69): in an index of their own, found only by a vessel entry, by name or by IMO number.
+    #[test]
+    fn a_vessel_is_found_by_its_name_or_its_imo_number_and_only_by_a_vessel_entry() {
+        let subject = |id: &str, name: &str, kind: SubjectKind, imo: Option<&str>| ListedSubject {
+            external_id: id.to_string(),
+            kind,
+            primary_name: name.to_string(),
+            names: vec![ListedName { full_name: name.to_string(), is_weak: false }],
+            addresses: Vec::new(),
+            programme: None,
+            source_url: None,
+            identifiers: imo
+                .map(|v| ListedIdentifier { kind: "IMO number".to_string(), value: v.to_string(), country: None })
+                .into_iter()
+                .collect(),
+            birth_dates: Vec::new(),
+        };
+        let index = ListIndex::build(vec![
+            subject("P", "Kelly Grace", SubjectKind::Individual, None),
+            subject("V", "M/V Ocean Faye", SubjectKind::Vessel, Some("9321689")),
+        ]);
+        assert_eq!((index.subjects().len(), index.vessels().map(|v| v.subjects().len()), index.all_subjects().count()), (1, Some(1), 2));
+        let list = ScreenedList { code: "nz".to_string(), name: "NZ".to_string(), index: Some(std::sync::Arc::new(index)) };
+        let empty = ScreenedList {
+            code: "un".to_string(),
+            name: "UN".to_string(),
+            index: Some(std::sync::Arc::new(ListIndex::build(vec![subject("U", "Kelly Grace", SubjectKind::Individual, None)]))),
+        };
+        let screener = Screener::new(Options::default());
+        let lists = [list, empty];
+        let screen = |request: ScreeningRequest| screener.screen(&request, &lists, &AllowList::empty()).unwrap();
+
+        // By name, the prefix aside; a list without vessels is searched and finds none.
+        let named = screen(ScreeningRequest { vessel_name: "MT Ocean Faye".to_string(), ..Default::default() });
+        let entry = &named.entries[0];
+        assert_eq!((entry.kind, entry.input.as_str()), (EntryKind::Vessel, "MT Ocean Faye"));
+        assert_eq!(entry.cells[0].outcome, Some(Outcome::Match));
+        assert_eq!(entry.cells[0].best.as_ref().unwrap().subject.external_id, "V");
+        assert_eq!((entry.cells[1].checked, entry.cells[1].outcome), (true, Some(Outcome::NoMatch)));
+
+        // By IMO number alone, written however: a Match whatever the name.
+        let numbered = screen(ScreeningRequest { vessel_imo_number: Some("9321689".to_string()), ..Default::default() });
+        let entry = &numbered.entries[0];
+        assert_eq!((entry.input.as_str(), entry.cells[0].percent), ("IMO 9321689", Some(100)));
+        assert!(entry.cells[0].best.as_ref().unwrap().alignment[0].starts_with("Identifier: equals the listed IMO number 9321689"));
+        let renamed = screen(ScreeningRequest {
+            vessel_name: "Glacia".to_string(),
+            vessel_imo_number: Some("9321689".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(renamed.outcome, OverallOutcome::Match);
+
+        // An IMO number is compared with listed IMO numbers alone: another number of the ship's that's equal is no match.
+        let other = ListIndex::build(vec![ListedSubject {
+            identifiers: vec![
+                ListedIdentifier { kind: "IMO number".to_string(), value: "9321689".to_string(), country: None },
+                ListedIdentifier { kind: "Registration Number".to_string(), value: "1234567".to_string(), country: None },
+            ],
+            ..subject("W", "Glacia", SubjectKind::Vessel, None)
+        }]);
+        let other = [ScreenedList { code: "xx".to_string(), name: "XX".to_string(), index: Some(std::sync::Arc::new(other)) }];
+        let by_registration = screener
+            .screen(&ScreeningRequest { vessel_imo_number: Some("1234567".to_string()), ..Default::default() }, &other, &AllowList::empty())
+            .unwrap();
+        assert_eq!(by_registration.entries[0].cells[0].outcome, Some(Outcome::NoMatch));
+
+        // A list that lists ships but was imported before they were kept: its vessel cell is Not checked.
+        let old = [ScreenedList {
+            code: "uk".to_string(),
+            name: "UK".to_string(),
+            index: Some(std::sync::Arc::new(ListIndex::build(vec![subject("U", "Kelly Grace", SubjectKind::Individual, None)]))),
+        }];
+        let before = screener
+            .screen(&ScreeningRequest { vessel_name: "Ocean Faye".to_string(), ..Default::default() }, &old, &AllowList::empty())
+            .unwrap();
+        assert_eq!((before.entries[0].cells[0].checked, before.outcome), (false, OverallOutcome::Incomplete));
+
+        // A person's or a company's name never finds a ship, and a ship's name never finds a person.
+        let person = screen(ScreeningRequest { receiver_name: "Ocean Faye".to_string(), ..Default::default() });
+        assert!(person.entries[0].cells[0].best.as_ref().is_none_or(|b| b.subject.external_id != "V"));
+        let ship = screen(ScreeningRequest { vessel_name: "Kelly Grace".to_string(), ..Default::default() });
+        assert_eq!(ship.outcome, OverallOutcome::NoMatch);
+    }
+
     #[test]
     fn matcher_version_is_the_references() {
         assert_eq!(Screener::new(Options::default()).matcher_version, "688b7434be57");
