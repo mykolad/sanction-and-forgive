@@ -76,7 +76,7 @@ pub fn listed_keys(value: &str) -> Vec<String> {
         // A country after the number ("190950894 Belarus", "… Russian Federation") is no part of it; any other word
         // after it may be (a letter suffix), so it stays.
         'countries: while !words.is_empty() {
-            for n in (1..=words.len().min(3)).rev() {
+            for n in (1..=words.len().min(data().max_country_words)).rev() {
                 let tail = words[words.len() - n..].join(" ");
                 if !has_digit(&tail) && name_keys(&tail).iter().any(|k| data().countries.contains_key(k)) {
                     words.truncate(words.len() - n);
@@ -168,6 +168,7 @@ mod tests {
         // A letter suffix stays; only a country goes.
         assert_eq!(listed_keys("1234567 KZTV"), ["1234567KZTV"]);
         assert_eq!(listed_keys("1234567 Russian Federation"), ["1234567RUSSIANFEDERATION", "1234567"]);
+        assert_eq!(listed_keys("1234567 United States of America"), ["1234567UNITEDSTATESOFAMERICA", "1234567"]);
         // Labels and countries go before the slash is read.
         assert_eq!(listed_keys("INN 7704734000/770301001"), ["INN7704734000770301001", "7704734000770301001", "7704734000", "770301001"]);
         assert_eq!(
