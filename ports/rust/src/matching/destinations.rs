@@ -67,8 +67,41 @@ impl DestinationStatus {
 /// street's name ("5 Kherson Rd") and Ukrainian and Russian ones written before it ("вул. Симферопольська" is the
 /// usual form, but the name right after one is the street's either way).
 const STREET_AFTER: [&str; 9] = ["rd", "st", "str", "ave", "av", "blvd", "ln", "dr", "hwy"];
-const STREET_BEFORE: [&str; 15] =
-    ["vul", "vulytsia", "ul", "ulitsa", "prospekt", "prosp", "pr", "per", "provulok", "вул", "вулиця", "ул", "улица", "просп", "проспект"];
+const STREET_BEFORE: [&str; 33] = [
+    "vul",
+    "vulytsia",
+    "ul",
+    "ulitsa",
+    "prospekt",
+    "prosp",
+    "pr",
+    "per",
+    "pereulok",
+    "prov",
+    "provulok",
+    "bulv",
+    "bulvar",
+    "pl",
+    "ploshcha",
+    "ploshchad",
+    "nab",
+    "вул",
+    "вулиця",
+    "ул",
+    "улица",
+    "просп",
+    "проспект",
+    "пр",
+    "пер",
+    "переулок",
+    "пров",
+    "провулок",
+    "бул",
+    "бульв",
+    "бульвар",
+    "пл",
+    "наб",
+];
 
 /// Whether the name of length words at start names a street: the matcher's rule, or one of the street types above
 /// right after or right before it, in the same part of the address.
@@ -437,6 +470,10 @@ mod tests {
         );
         assert_eq!(find("vul. Simferopol 5, Kyiv"), None);
         assert_eq!(find("5 Iran St, Leeds"), None);
+        assert_eq!(
+            find("пер. Херсон 5, Херсонська область"),
+            Some((DestinationState::PossiblyRestricted, "ua-kherson-oblast".to_string()))
+        );
         assert_eq!(find("5 Iran St, Leeds, IR"), Some((DestinationState::Restricted, "ir".to_string())));
         assert_eq!(find("12 Tehran Road, Leeds"), None);
         assert_eq!(find("12 Tehran Road"), None);
