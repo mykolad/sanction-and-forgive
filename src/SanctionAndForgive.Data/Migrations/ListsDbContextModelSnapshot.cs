@@ -276,6 +276,10 @@ namespace SanctionAndForgive.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("BirthDates")
+                        .HasMaxLength(400)
+                        .HasColumnType("nvarchar(400)");
+
                     b.Property<string>("ExternalId")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -343,6 +347,38 @@ namespace SanctionAndForgive.Data.Migrations
                     b.HasIndex("SubjectId");
 
                     b.ToTable("SubjectAddresses");
+                });
+
+            modelBuilder.Entity("SanctionAndForgive.Data.SubjectIdentifier", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Country")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("SubjectId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SubjectId");
+
+                    b.ToTable("SubjectIdentifiers");
                 });
 
             modelBuilder.Entity("SanctionAndForgive.Data.SubjectName", b =>
@@ -413,6 +449,15 @@ namespace SanctionAndForgive.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("SanctionAndForgive.Data.SubjectIdentifier", b =>
+                {
+                    b.HasOne("SanctionAndForgive.Data.Subject", null)
+                        .WithMany("Identifiers")
+                        .HasForeignKey("SubjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("SanctionAndForgive.Data.SubjectName", b =>
                 {
                     b.HasOne("SanctionAndForgive.Data.Subject", null)
@@ -430,6 +475,8 @@ namespace SanctionAndForgive.Data.Migrations
             modelBuilder.Entity("SanctionAndForgive.Data.Subject", b =>
                 {
                     b.Navigation("Addresses");
+
+                    b.Navigation("Identifiers");
 
                     b.Navigation("Names");
                 });

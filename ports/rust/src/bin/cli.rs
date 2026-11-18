@@ -12,7 +12,7 @@ use sanction_and_forgive::lists::parse::{FormatError, NameScript, ParseError, Pa
 use sanction_and_forgive::lists::parsers::parser_for;
 use sanction_and_forgive::store::db::{Database, DbError};
 use sanction_and_forgive::store::imports::{ImportOutcome, ImportResult, Imports, ReviewResult, SourceRecord};
-use sanction_and_forgive::store::queries::{Subject, SubjectAddress, SubjectName, Time};
+use sanction_and_forgive::store::queries::{Subject, SubjectAddress, SubjectIdentifier, SubjectName, Time};
 
 const USAGE: &str = "Usage (tools/lists.ps1 wraps these):
   probe        [--source <code>|all] [--file <path>] [--keep <directory>]
@@ -148,6 +148,12 @@ fn to_stored(parsed: Vec<ParsedSubject>) -> Vec<Subject> {
                 .map(|n| SubjectName { full_name: n.full_name, is_weak: n.is_weak, script: n.script as u8 })
                 .collect(),
             addresses: p.addresses.into_iter().map(|a| SubjectAddress { raw: a.raw, country_code: a.country_code }).collect(),
+            identifiers: p
+                .identifiers
+                .into_iter()
+                .map(|i| SubjectIdentifier { kind: i.kind, value: i.value, country: i.country })
+                .collect(),
+            birth_dates: p.birth_dates,
         })
         .collect()
 }

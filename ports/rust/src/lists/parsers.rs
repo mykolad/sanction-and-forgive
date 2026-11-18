@@ -7,7 +7,8 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::parse::{
-    eq, format_error, join, parse_date, records, Builder, Element, OptionalElement, ParseError, ParsedSubject, SubjectType,
+    birth_date, birth_date_text, eq, format_error, identifier_values, join, parse_date, records, Builder, Element, OptionalElement,
+    ParseError, ParsedSubject, SubjectType,
 };
 
 pub type Parser = fn(&mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError>;
@@ -86,6 +87,24 @@ fn parse_eu(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
             );
             b.add_address(raw.as_deref(), a.attr("countryIso2Code").as_deref());
         }
+        // Identifiers and dates of birth (#68). "00" is the EU's code for an unknown country.
+        for i in entity.els("identification") {
+            let country =
+                i.attr("countryIso2Code").filter(|c| c != "00").or_else(|| i.attr("countryDescription").filter(|d| d != "UNKNOWN"));
+            let kind = i.attr("identificationTypeDescription").or_else(|| i.attr("identificationTypeCode"));
+            b.add_identifier(kind.as_deref(), i.attr("number").as_deref(), country.as_deref());
+        }
+        for d in entity.els("birthdate") {
+            let date = match d.attr("birthdate") {
+                Some(full) => birth_date_text(&full),
+                None => match (d.attr("year"), d.attr("monthOfYear")) {
+                    (Some(y), Some(m)) => birth_date_text(&format!("{m}/{y}")),
+                    (Some(y), None) => birth_date_text(&y),
+                    _ => None,
+                },
+            };
+            b.add_birth_date(date);
+        }
         out.extend(b.build());
         Ok(())
     })?;
@@ -144,6 +163,20 @@ fn parse_ofac(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError
                 b.add_address(join(", ", &parts).as_deref(), None);
             }
         }
+        // Identifiers and dates of birth (#68): each identity document, and each Birthdate feature's range of days.
+        for d in entity.el("identityDocuments").els("identityDocument") {
+            b.add_identifier(d.val("type").as_deref(), d.val("documentNumber").as_deref(), d.val("issuingCountry").as_deref());
+        }
+        for f in entity.el("features").els("feature") {
+            if eq(&f.val("type"), "Birthdate") {
+                let v = f.el("valueDate");
+                let first = parse_date(v.val("fromDateBegin").as_deref(), "%Y-%m-%d");
+                let last = parse_date(v.val("toDateEnd").as_deref(), "%Y-%m-%d");
+                if let (Some(first), Some(last)) = (first, last) {
+                    b.add_birth_date(birth_date(first, last));
+                }
+            }
+        }
         out.extend(b.build());
         Ok(())
     })?;
@@ -180,6 +213,24 @@ fn parse_un(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
         for a in record.els(&address_name) {
             let raw = join(", ", &[a.val("STREET"), a.val("ZIP_CODE"), a.val("CITY"), a.val("STATE_PROVINCE"), a.val("COUNTRY")]);
             b.add_address(raw.as_deref(), None);
+        }
+        // Identifiers and dates of birth (#68).
+        for d in record.els(&format!("{prefix}_DOCUMENT")) {
+            let kind = join(": ", &[d.val("TYPE_OF_DOCUMENT"), d.val("TYPE_OF_DOCUMENT2")]);
+            b.add_identifier(kind.as_deref(), d.val("NUMBER").as_deref(), d.val("ISSUING_COUNTRY").as_deref());
+        }
+        for d in record.els(&format!("{prefix}_DATE_OF_BIRTH")) {
+            let date = match (d.val("DATE"), d.val("YEAR"), d.val("FROM_YEAR"), d.val("TO_YEAR")) {
+                (Some(date), _, _, _) => birth_date_text(date.get(..10).unwrap_or(&date)),
+                (None, Some(year), _, _) => birth_date_text(&year),
+                (None, None, Some(from), Some(to)) => match (from.trim().parse::<i32>(), to.trim().parse::<i32>()) {
+                    (Ok(from), Ok(to)) if from < to => Some(format!("{from}..{to}")),
+                    (Ok(from), Ok(_)) => Some(from.to_string()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            b.add_birth_date(date);
         }
         out.extend(b.build());
         Ok(())
@@ -232,6 +283,23 @@ fn parse_uk(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> 
                 ],
             );
             b.add_address(raw.as_deref(), None);
+        }
+        // Identifiers and dates of birth (#68). A business registration number is free text, often several numbers
+        // with their kinds and countries in words: each identifier found in it, whole.
+        let individual = d.el("IndividualDetails").el("Individual");
+        for p in individual.el("PassportDetails").els("Passport") {
+            b.add_identifier(Some("Passport"), p.val("PassportNumber").as_deref(), None);
+        }
+        for n in individual.el("NationalIdentifierDetails").els("NationalIdentifier") {
+            b.add_identifier(Some("National identifier"), n.val("NationalIdentifierNumber").as_deref(), None);
+        }
+        for dob in individual.el("DOBs").els("DOB") {
+            b.add_birth_date(birth_date_text(dob.value()));
+        }
+        for r in d.el("EntityDetails").el("Entity").el("BusinessRegistrationNumbers").els("BusinessRegistrationNumber") {
+            for number in identifier_values(r.value()) {
+                b.add_identifier(Some("Business registration number"), Some(&number), None);
+            }
         }
         out.extend(b.build());
         Ok(())
@@ -664,7 +732,86 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
 
 #[cfg(test)]
 mod tests {
-    use super::parse_france;
+    use super::{parse_eu, parse_france, parse_ofac, parse_uk, parse_un};
+    use crate::lists::parse::ParsedIdentifier;
+
+    fn id(kind: &str, value: &str, country: Option<&str>) -> ParsedIdentifier {
+        ParsedIdentifier { kind: kind.to_string(), value: value.to_string(), country: country.map(str::to_string) }
+    }
+
+    /// Identifiers and dates of birth (#68), as each format gives them.
+    #[test]
+    fn ofac_reads_identity_documents_and_birthdates() {
+        let subjects = parse_ofac(
+            &mut r#"<sanctionsData><entities><entity id="7"><generalInfo><entityType>Individual</entityType></generalInfo>
+            <names><name><isPrimary>true</isPrimary><translations><translation><isPrimary>true</isPrimary><formattedFirstName>Ivan</formattedFirstName><formattedLastName>Petrov</formattedLastName></translation></translations></name></names>
+            <features>
+              <feature><type featureTypeId="8">Birthdate</type><valueDate><fromDateBegin>1948-12-10</fromDateBegin><toDateEnd>1948-12-10</toDateEnd></valueDate></feature>
+              <feature><type featureTypeId="8">Birthdate</type><valueDate><fromDateBegin>1955-01-01</fromDateBegin><toDateEnd>1957-12-31</toDateEnd></valueDate></feature>
+              <feature><type featureTypeId="14">Website</type><value>example.invalid</value></feature>
+            </features>
+            <identityDocuments><identityDocument id="1"><type refId="1">Passport</type><documentNumber>AB 123456</documentNumber><issuingCountry>Russia</issuingCountry></identityDocument>
+            <identityDocument id="2"><type refId="2">Tax ID No.</type><documentNumber>7704734000</documentNumber></identityDocument></identityDocuments>
+            </entity></entities></sanctionsData>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(subjects[0].identifiers, [id("Passport", "AB 123456", Some("Russia")), id("Tax ID No.", "7704734000", None)]);
+        assert_eq!(subjects[0].birth_dates, ["1948-12-10", "1955..1957"]);
+    }
+
+    #[test]
+    fn uk_reads_passports_national_identifiers_registration_numbers_and_dates_of_birth() {
+        let subjects = parse_uk(
+            &mut r#"<Designations>
+            <Designation><UniqueID>RUS1</UniqueID><IndividualEntityShip>Individual</IndividualEntityShip><Names><Name><Name1>Ivan</Name1><Name6>Petrov</Name6><NameType>Primary Name</NameType></Name></Names>
+              <IndividualDetails><Individual><DOBs><DOB>dd/mm/1963</DOB><DOB>12/03/1960</DOB></DOBs>
+              <PassportDetails><Passport><PassportNumber>P04581926</PassportNumber></Passport></PassportDetails>
+              <NationalIdentifierDetails><NationalIdentifier><NationalIdentifierNumber>2132370</NationalIdentifierNumber></NationalIdentifier></NationalIdentifierDetails></Individual></IndividualDetails></Designation>
+            <Designation><UniqueID>BEL1</UniqueID><IndividualEntityShip>Entity</IndividualEntityShip><Names><Name><Name6>MZKT</Name6><NameType>Primary Name</NameType></Name></Names>
+              <EntityDetails><Entity><BusinessRegistrationNumbers><BusinessRegistrationNumber>(УНН/ИНН): 190950894 (Belarus), 7704734000/770301001 (Russia)</BusinessRegistrationNumber></BusinessRegistrationNumbers></Entity></EntityDetails></Designation>
+            </Designations>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(subjects[0].identifiers, [id("Passport", "P04581926", None), id("National identifier", "2132370", None)]);
+        assert_eq!(subjects[0].birth_dates, ["1963", "1960-03-12"]);
+        let numbers: Vec<&str> = subjects[1].identifiers.iter().map(|i| i.value.as_str()).collect();
+        assert_eq!(numbers, ["190950894", "7704734000", "770301001"]);
+    }
+
+    #[test]
+    fn eu_reads_identifications_and_birthdates() {
+        let subjects = parse_eu(
+            &mut r#"<export><sanctionEntity logicalId="9"><subjectType code="person"/><nameAlias wholeName="Ivan Petrov" strong="true"/>
+            <identification number="4510 123456" identificationTypeCode="passport" identificationTypeDescription="National passport" countryIso2Code="RU" countryDescription="RUSSIA"/>
+            <identification number="34409/129" identificationTypeCode="other" identificationTypeDescription="Other identification number" countryIso2Code="00" countryDescription="UNKNOWN"/>
+            <birthdate birthdate="1937-04-28"/><birthdate year="1960"/><birthdate year="1961" monthOfYear="5"/>
+            </sanctionEntity></export>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(
+            subjects[0].identifiers,
+            [id("National passport", "4510 123456", Some("RU")), id("Other identification number", "34409/129", None)]
+        );
+        assert_eq!(subjects[0].birth_dates, ["1937-04-28", "1960", "1961-05"]);
+    }
+
+    #[test]
+    fn un_reads_documents_and_dates_of_birth() {
+        let subjects = parse_un(
+            &mut r#"<CONSOLIDATED_LIST><INDIVIDUALS><INDIVIDUAL><DATAID>1</DATAID><REFERENCE_NUMBER>CDi.002</REFERENCE_NUMBER><FIRST_NAME>FRANK</FIRST_NAME><SECOND_NAME>BWAMBALE</SECOND_NAME>
+            <INDIVIDUAL_DATE_OF_BIRTH><TYPE_OF_DATE>EXACT</TYPE_OF_DATE><DATE>1971-05-12</DATE></INDIVIDUAL_DATE_OF_BIRTH>
+            <INDIVIDUAL_DATE_OF_BIRTH><TYPE_OF_DATE>BETWEEN</TYPE_OF_DATE><FROM_YEAR>1973</FROM_YEAR><TO_YEAR>1974</TO_YEAR></INDIVIDUAL_DATE_OF_BIRTH>
+            <INDIVIDUAL_DOCUMENT><TYPE_OF_DOCUMENT>National Identification Number</TYPE_OF_DOCUMENT><TYPE_OF_DOCUMENT2>FARDC ID</TYPE_OF_DOCUMENT2><NUMBER>1-78-09-44621-80</NUMBER></INDIVIDUAL_DOCUMENT>
+            <INDIVIDUAL_DOCUMENT/></INDIVIDUAL></INDIVIDUALS></CONSOLIDATED_LIST>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(subjects[0].identifiers, [id("National Identification Number: FARDC ID", "1-78-09-44621-80", None)]);
+        assert_eq!(subjects[0].birth_dates, ["1971-05-12", "1973..1974"]);
+    }
 
     /// The French register's malformed documents are format errors, never a shorter list (FranceParser's tests in the
     /// reference): a field or value that isn't the shape expected, as well as a broken document.

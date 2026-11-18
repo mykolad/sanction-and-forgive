@@ -83,6 +83,8 @@ pub fn read_manual_csv(text: &str) -> Result<Vec<ParsedSubject>, ParseError> {
             listed_on,
             remarks: field("remarks"),
             source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
         });
     }
     Ok(subjects)

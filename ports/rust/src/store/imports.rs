@@ -8,7 +8,8 @@ use tiberius::ToSql;
 
 use super::db::{Connection, Database, DbResult};
 use super::queries::{
-    self, execute, int, optional_int, optional_text, rows, simple, text, time, HistoryEntry, Subject, SubjectAddress, SubjectName, Time,
+    self, execute, int, optional_int, optional_text, rows, simple, text, time, HistoryEntry, Subject, SubjectAddress, SubjectIdentifier,
+    SubjectName, Time, BIRTH_DATE_SEPARATOR,
 };
 
 const MAX_EXTERNAL_ID: usize = 200;
@@ -584,6 +585,7 @@ async fn delete_import_data(conn: &mut Connection, import_id: i32) -> DbResult<(
     for statement in [
         "DELETE TOP (20000) n FROM SubjectNames n JOIN Subjects s ON s.Id = n.SubjectId WHERE s.ImportId = @P1",
         "DELETE TOP (20000) a FROM SubjectAddresses a JOIN Subjects s ON s.Id = a.SubjectId WHERE s.ImportId = @P1",
+        "DELETE TOP (20000) i FROM SubjectIdentifiers i JOIN Subjects s ON s.Id = i.SubjectId WHERE s.ImportId = @P1",
         "DELETE TOP (20000) FROM Subjects WHERE ImportId = @P1",
     ] {
         while execute(conn, statement, &[&import_id]).await? > 0 {}
@@ -659,13 +661,14 @@ async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, r
                 Box::new(r.listed_on),
                 Box::new(r.remarks.clone()),
                 Box::new(r.source_url.as_deref().map(|u| truncate(u, 1000))),
+                Box::new(birth_dates_column(&r.birth_dates)),
             ]
         })
         .collect();
     insert_rows(
         conn,
         "Subjects",
-        &["ImportId", "SourceId", "ExternalId", "Type", "PrimaryName", "Programmes", "ListedOn", "Remarks", "SourceUrl"],
+        &["ImportId", "SourceId", "ExternalId", "Type", "PrimaryName", "Programmes", "ListedOn", "Remarks", "SourceUrl", "BirthDates"],
         &subject_rows,
     )
     .await?;
@@ -676,6 +679,7 @@ async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, r
         .collect();
     let mut names: Vec<Vec<Box<dyn ToSql>>> = Vec::new();
     let mut addresses: Vec<Vec<Box<dyn ToSql>>> = Vec::new();
+    let mut identifiers: Vec<Vec<Box<dyn ToSql>>> = Vec::new();
     for r in records {
         let id = ids.get(&r.external_id).copied().unwrap_or_default();
         for n in &r.names {
@@ -684,12 +688,38 @@ async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, r
         for a in &r.addresses {
             addresses.push(vec![Box::new(id), Box::new(truncate(&a.raw, 1000)), Box::new(a.country_code.clone())]);
         }
+        for i in &r.identifiers {
+            identifiers.push(vec![
+                Box::new(id),
+                Box::new(truncate(&i.kind, 100)),
+                Box::new(truncate(&i.value, 200)),
+                Box::new(i.country.as_deref().map(|c| truncate(c, 100))),
+            ]);
+        }
     }
     insert_rows(conn, "SubjectNames", &["SubjectId", "FullName", "IsWeak", "Script"], &names).await?;
-    insert_rows(conn, "SubjectAddresses", &["SubjectId", "Raw", "CountryCode"], &addresses).await
+    insert_rows(conn, "SubjectAddresses", &["SubjectId", "Raw", "CountryCode"], &addresses).await?;
+    insert_rows(conn, "SubjectIdentifiers", &["SubjectId", "Kind", "Value", "Country"], &identifiers).await
 }
 
-/// The reference's statement, verbatim (ImportStore.ChangeCountSql), its parameters numbered.
+/// Subjects.BirthDates: the dates sorted (as the content hash takes them, so a list that only reorders them changes
+/// neither) and joined, cut to the column's 400 characters at a whole date; null when none.
+fn birth_dates_column(dates: &[String]) -> Option<String> {
+    let mut sorted: Vec<&String> = dates.iter().collect();
+    sorted.sort();
+    let mut joined = String::new();
+    for date in sorted {
+        let next = if joined.is_empty() { date.clone() } else { format!("{joined}{BIRTH_DATE_SEPARATOR}{date}") };
+        if next.len() > 400 {
+            break;
+        }
+        joined = next;
+    }
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// The reference's statement (ImportStore.ChangeCountSql), its parameters numbered, with the dates of birth and the
+/// identifiers (#68; the Rust port first) after the addresses: a record whose identifiers changed counts as changed.
 const CHANGE_COUNT_SQL: &str = "
         WITH Signatures AS (
             SELECT s.ImportId, s.ExternalId,
@@ -705,7 +735,11 @@ const CHANGE_COUNT_SQL: &str = "
                      FROM SubjectNames n WHERE n.SubjectId = s.Id), NCHAR(29),
                     (SELECT STRING_AGG(CONVERT(nvarchar(max), CONCAT(a.Raw, NCHAR(31), ISNULL(N'+' + a.CountryCode, N'-'))), NCHAR(29))
                         WITHIN GROUP (ORDER BY a.Raw COLLATE Latin1_General_BIN2, a.CountryCode COLLATE Latin1_General_BIN2)
-                     FROM SubjectAddresses a WHERE a.SubjectId = s.Id))) AS Signature
+                     FROM SubjectAddresses a WHERE a.SubjectId = s.Id), NCHAR(28),
+                    ISNULL(N'+' + s.BirthDates, N'-'), NCHAR(28),
+                    (SELECT STRING_AGG(CONVERT(nvarchar(max), CONCAT(i.Kind, NCHAR(31), i.Value, NCHAR(31), ISNULL(N'+' + i.Country, N'-'))), NCHAR(28))
+                        WITHIN GROUP (ORDER BY i.Kind COLLATE Latin1_General_BIN2, i.Value COLLATE Latin1_General_BIN2, i.Country COLLATE Latin1_General_BIN2)
+                     FROM SubjectIdentifiers i WHERE i.SubjectId = s.Id))) AS Signature
             FROM Subjects s
             WHERE s.ImportId = @P1 OR s.ImportId = @P2),
         Counted AS (
@@ -767,6 +801,18 @@ pub fn canonical_hash(subjects: &[Subject]) -> String {
         for a in addresses {
             line += &format!("\u{1d}{}\u{1f}{}", a.raw, s(&a.country_code));
         }
+        // Dates of birth and identifiers (#68; the Rust port first) only when there are any, so a record without them
+        // hashes as the reference's does.
+        let mut dates: Vec<&String> = subject.birth_dates.iter().collect();
+        dates.sort();
+        for d in dates {
+            line += &format!("\u{1c}{d}");
+        }
+        let mut identifiers: Vec<&SubjectIdentifier> = subject.identifiers.iter().collect();
+        identifiers.sort_by(|a, b| (&a.kind, &a.value, &a.country).cmp(&(&b.kind, &b.value, &b.country)));
+        for i in identifiers {
+            line += &format!("\u{1c}{}\u{1f}{}\u{1f}{}", i.kind, i.value, s(&i.country));
+        }
         line.push('\n');
         hash.update(line.as_bytes());
     }
@@ -809,6 +855,16 @@ pub fn deduplicate(subjects: Vec<Subject>) -> Vec<Subject> {
             for address in other.addresses {
                 if !first.addresses.iter().any(|a| a.raw == address.raw && a.country_code == address.country_code) {
                     first.addresses.push(address);
+                }
+            }
+            for identifier in other.identifiers {
+                if !first.identifiers.contains(&identifier) {
+                    first.identifiers.push(identifier);
+                }
+            }
+            for date in other.birth_dates {
+                if !first.birth_dates.contains(&date) {
+                    first.birth_dates.push(date);
                 }
             }
         }

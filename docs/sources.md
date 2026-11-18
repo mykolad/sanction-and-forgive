@@ -121,6 +121,23 @@ largest list, so the total is likely to land inside that range once it's added.
   parties are people (a row without a given name, an entity should one be listed, would be read both ways). The national register number (`Rijkregisternummer`) isn't kept; the date of birth goes in the
   remarks. A named row without its number or surname fails the import.
 
+## Identifiers and dates of birth (#68; the Rust port first)
+
+The Rust port's parsers keep each party's identifiers (kind as the source names it, the value as written, the issuing
+country as given) and dates of birth, in `SubjectIdentifiers` and `Subjects.BirthDates`. A date of birth is read in one
+form: a day `1948-12-10`, a month `1960-03`, a year `1963`, or a range of years `1955..1957`. So far:
+
+| Source | Identifiers from | Dates of birth from | 2026-11-18: parties with identifiers (identifiers) | with dates of birth |
+|---|---|---|---|---|
+| OFAC SDN, consolidated | `identityDocument` (type, `documentNumber`, `issuingCountry`) | `Birthdate` features (the range of days) | 12,464 (20,692); 348 (739) | 7,470; 113 |
+| UK | `PassportNumber`, `NationalIdentifierNumber`, each identifier in the free-text `BusinessRegistrationNumber` (kept whole) | `DOB` (`dd/mm/1963` is a year) | 1,462 (2,138) | 3,362 |
+| EU | `identification` (`number`, type description, country unless `00`) | `birthdate` (date, or year and month) | 2,011 (3,038) | 3,774 |
+| UN | `INDIVIDUAL_DOCUMENT` (type, number, issuing country) | `DATE_OF_BIRTH` (date, year, or from and to years) | 296 (502) | 680 |
+
+The other formats follow. A record's identifiers and dates of birth join its content hash and its change count only
+when it has any, so a list without them hashes as before; the first import of a list that has them after this change
+is a new version, every record with them counted as changed.
+
 ## Scripts of the listed names
 
 Measured on 2026-11-16 with `probe --source all --scripts` (#90): every name of every fetched list (primary names and
