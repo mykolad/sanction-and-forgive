@@ -16,6 +16,8 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
 
     public DbSet<SubjectAddress> SubjectAddresses => Set<SubjectAddress>();
 
+    public DbSet<SubjectIdentifier> SubjectIdentifiers => Set<SubjectIdentifier>();
+
     public DbSet<AllowListItem> AllowList => Set<AllowListItem>();
 
     public DbSet<RestrictedDestination> RestrictedDestinations => Set<RestrictedDestination>();
@@ -50,9 +52,19 @@ public sealed class ListsDbContext(DbContextOptions<ListsDbContext> options) : D
             subject.Property(s => s.PrimaryName).HasMaxLength(500);
             subject.Property(s => s.Programmes).HasMaxLength(1000);
             subject.Property(s => s.SourceUrl).HasMaxLength(1000);
+            subject.Property(s => s.BirthDates).HasMaxLength(400);
             subject.HasIndex(s => new { s.ImportId, s.ExternalId });
             subject.HasMany(s => s.Names).WithOne().HasForeignKey(n => n.SubjectId).OnDelete(DeleteBehavior.Cascade);
             subject.HasMany(s => s.Addresses).WithOne().HasForeignKey(a => a.SubjectId).OnDelete(DeleteBehavior.Cascade);
+            subject.HasMany(s => s.Identifiers).WithOne().HasForeignKey(i => i.SubjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SubjectIdentifier>(identifier =>
+        {
+            identifier.Property(i => i.Kind).HasMaxLength(100);
+            identifier.Property(i => i.Value).HasMaxLength(200);
+            identifier.Property(i => i.Country).HasMaxLength(100);
+            identifier.HasIndex(i => i.SubjectId);
         });
 
         modelBuilder.Entity<SubjectName>(name =>

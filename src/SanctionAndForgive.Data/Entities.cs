@@ -141,9 +141,30 @@ public sealed class Subject
 
     public string? SourceUrl { get; set; }
 
+    /// <summary>Dates of birth (#68; written by the Rust port only so far), "1948-12-10", "1960-03", "1963" or
+    /// "1955..1957", joined by "; ".</summary>
+    public string? BirthDates { get; set; }
+
     public List<SubjectName> Names { get; } = [];
 
     public List<SubjectAddress> Addresses { get; } = [];
+
+    public List<SubjectIdentifier> Identifiers { get; } = [];
+}
+
+/// <summary>An identifier a list gives for a subject (#68; written by the Rust port only so far): its kind as the source
+/// names it ("Passport", "Tax ID No."), the value as written, and the issuing country as the source gives it.</summary>
+public sealed class SubjectIdentifier
+{
+    public int Id { get; set; }
+
+    public int SubjectId { get; set; }
+
+    public required string Kind { get; set; }
+
+    public required string Value { get; set; }
+
+    public string? Country { get; set; }
 }
 
 public sealed class SubjectName

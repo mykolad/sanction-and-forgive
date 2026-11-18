@@ -205,7 +205,21 @@ pub struct Subject {
     pub source_url: Option<String>,
     pub names: Vec<SubjectName>,
     pub addresses: Vec<SubjectAddress>,
+    /// Identifiers (#68): SubjectIdentifiers.
+    pub identifiers: Vec<SubjectIdentifier>,
+    /// Dates of birth (#68) in parse::birth_date's form: Subjects.BirthDates, joined by "; ".
+    pub birth_dates: Vec<String>,
 }
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SubjectIdentifier {
+    pub kind: String,
+    pub value: String,
+    pub country: Option<String>,
+}
+
+/// How Subjects.BirthDates holds a subject's dates of birth.
+pub const BIRTH_DATE_SEPARATOR: &str = "; ";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SubjectName {
@@ -240,7 +254,7 @@ pub async fn active_subjects(conn: &mut Connection, code: &str, import_id: i32) 
 pub(crate) async fn read_subjects(conn: &mut Connection, import_id: i32) -> DbResult<Vec<Subject>> {
     let subject_rows = rows(
         conn,
-        "SELECT Id, ExternalId, Type, PrimaryName, Programmes, ListedOn, Remarks, SourceUrl FROM Subjects WHERE ImportId = @P1 ORDER BY Id",
+        "SELECT Id, ExternalId, Type, PrimaryName, Programmes, ListedOn, Remarks, SourceUrl, BirthDates FROM Subjects WHERE ImportId = @P1 ORDER BY Id",
         &[&import_id],
     )
     .await?;
@@ -257,6 +271,9 @@ pub(crate) async fn read_subjects(conn: &mut Connection, import_id: i32) -> DbRe
             listed_on: r.get::<NaiveDate, _>(5),
             remarks: optional_text(r, 6),
             source_url: optional_text(r, 7),
+            birth_dates: optional_text(r, 8)
+                .map(|d| d.split(BIRTH_DATE_SEPARATOR).filter(|d| !d.is_empty()).map(str::to_string).collect())
+                .unwrap_or_default(),
             ..Default::default()
         });
     }
@@ -281,6 +298,17 @@ pub(crate) async fn read_subjects(conn: &mut Connection, import_id: i32) -> DbRe
     {
         if let Some(&i) = by_id.get(&int(&r, 0)) {
             subjects[i].addresses.push(SubjectAddress { raw: text(&r, 1), country_code: optional_text(&r, 2) });
+        }
+    }
+    for r in rows(
+        conn,
+        "SELECT i.SubjectId, i.Kind, i.Value, i.Country FROM SubjectIdentifiers i JOIN Subjects s ON s.Id = i.SubjectId WHERE s.ImportId = @P1 ORDER BY i.SubjectId, i.Id",
+        &[&import_id],
+    )
+    .await?
+    {
+        if let Some(&i) = by_id.get(&int(&r, 0)) {
+            subjects[i].identifiers.push(SubjectIdentifier { kind: text(&r, 1), value: text(&r, 2), country: optional_text(&r, 3) });
         }
     }
     Ok(subjects)

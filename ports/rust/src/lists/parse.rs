@@ -37,6 +37,15 @@ pub struct ParsedAddress {
     pub country_code: Option<String>,
 }
 
+/// An identifier a list gives for a party (#68; the Rust port first): its kind as the source names it ("Passport",
+/// "Tax ID No."), its value as written, and the issuing country as the source gives it (a name or a code), if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedIdentifier {
+    pub kind: String,
+    pub value: String,
+    pub country: Option<String>,
+}
+
 /// A listed party in the shape every source is reduced to.
 #[derive(Debug, Clone)]
 pub struct ParsedSubject {
@@ -49,6 +58,69 @@ pub struct ParsedSubject {
     pub listed_on: Option<NaiveDate>,
     pub remarks: Option<String>,
     pub source_url: Option<String>,
+    /// Identifiers (#68), in the order the source gives them, repeats dropped.
+    pub identifiers: Vec<ParsedIdentifier>,
+    /// Dates of birth (#68), each as `birth_date` reads one: "1948-12-10", "1960-03", "1963" or "1955..1957".
+    pub birth_dates: Vec<String>,
+}
+
+/// A date of birth in one form for every source: a full date "YYYY-MM-DD", a month "YYYY-MM", a year "YYYY", or a
+/// range of years "YYYY..YYYY"; from the first and last days it may fall on. None when they don't make a date.
+pub fn birth_date(first: NaiveDate, last: NaiveDate) -> Option<String> {
+    use chrono::Datelike;
+    if last < first {
+        return None;
+    }
+    if first == last {
+        return Some(first.format("%Y-%m-%d").to_string());
+    }
+    let month_end = |d: NaiveDate| d.checked_add_months(chrono::Months::new(1)).and_then(|n| n.pred_opt());
+    if first.year() == last.year() && first.month() == last.month() && first.day() == 1 && Some(last) == month_end(first) {
+        return Some(first.format("%Y-%m").to_string());
+    }
+    if first.month() == 1 && first.day() == 1 && last.month() == 12 && last.day() == 31 {
+        return Some(if first.year() == last.year() { first.year().to_string() } else { format!("{}..{}", first.year(), last.year()) });
+    }
+    Some(format!("{}..{}", first.year(), last.year()))
+}
+
+/// A date of birth as the lists write it: "1948-12-10", "1948", "12/03/1960" or "dd/mm/1963" (day and month unknown),
+/// "mm/1960"... None when it isn't one.
+pub fn birth_date_text(value: &str) -> Option<String> {
+    let value = clean(Some(value))?;
+    if let Ok(d) = NaiveDate::parse_from_str(&value, "%Y-%m-%d") {
+        return birth_date(d, d);
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(&value, "%d/%m/%Y") {
+        return birth_date(d, d);
+    }
+    let year = |y: &str| y.parse::<i32>().ok().filter(|y| (1800..=2100).contains(y));
+    let parts: Vec<&str> = value.split('/').collect();
+    match parts.as_slice() {
+        [y] => year(y).map(|y| y.to_string()),
+        [m, y] | [_, m, y] => {
+            let y = year(y)?;
+            match m.parse::<u32>().ok().filter(|m| (1..=12).contains(m)) {
+                Some(m) => Some(format!("{y}-{m:02}")),
+                None => Some(y.to_string()),
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The numbers in a free-text identifier field ("(УНН/ИНН): 190950894 (Belarus), 7704734000/770301001 (Russia)"):
+/// runs of letters, digits and hyphens with at least four digits and six characters.
+pub fn identifier_numbers(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for token in text.split(|c: char| !(c.is_alphanumeric() || c == '-')) {
+        let token = token.trim_matches('-');
+        let digits = token.chars().filter(char::is_ascii_digit).count();
+        if digits >= 4 && token.chars().count() >= 6 && !out.iter().any(|t| t == token) {
+            out.push(token.to_string());
+        }
+    }
+    out
 }
 
 /// The reference's ListFormatException: the file isn't the list it should be.
@@ -137,6 +209,8 @@ pub struct Builder {
     pub listed_on: Option<NaiveDate>,
     pub remarks: Option<String>,
     pub source_url: Option<String>,
+    identifiers: Vec<ParsedIdentifier>,
+    birth_dates: Vec<String>,
 }
 
 impl Builder {
@@ -154,6 +228,27 @@ impl Builder {
             listed_on: None,
             remarks: None,
             source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
+        }
+    }
+
+    /// An identifier (#68): its kind as the source names it, the value as written, the issuing country if given.
+    /// Empty values and repeats are dropped.
+    pub fn add_identifier(&mut self, kind: Option<&str>, value: Option<&str>, country: Option<&str>) {
+        let Some(value) = clean(value) else { return };
+        let identifier = ParsedIdentifier { kind: clean(kind).unwrap_or_else(|| "Identifier".to_string()), value, country: clean(country) };
+        if !self.identifiers.contains(&identifier) {
+            self.identifiers.push(identifier);
+        }
+    }
+
+    /// A date of birth already in birth_date's form; repeats are dropped.
+    pub fn add_birth_date(&mut self, date: Option<String>) {
+        if let Some(date) = date {
+            if !self.birth_dates.contains(&date) {
+                self.birth_dates.push(date);
+            }
         }
     }
 
@@ -203,6 +298,8 @@ impl Builder {
             listed_on: self.listed_on,
             remarks: self.remarks,
             source_url: self.source_url,
+            identifiers: self.identifiers,
+            birth_dates: self.birth_dates,
         })
     }
 }
@@ -364,6 +461,39 @@ pub fn records(
 
 #[cfg(test)]
 mod tests {
+    use super::{birth_date, birth_date_text, identifier_numbers};
+
+    #[test]
+    fn dates_of_birth_read_in_one_form() {
+        let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        assert_eq!(birth_date(d("1948-12-10"), d("1948-12-10")).as_deref(), Some("1948-12-10"));
+        assert_eq!(birth_date(d("1960-02-01"), d("1960-02-29")).as_deref(), Some("1960-02"));
+        assert_eq!(birth_date(d("1963-01-01"), d("1963-12-31")).as_deref(), Some("1963"));
+        assert_eq!(birth_date(d("1955-01-01"), d("1957-12-31")).as_deref(), Some("1955..1957"));
+        assert_eq!(birth_date(d("1957-01-01"), d("1955-12-31")), None);
+        for (text, expected) in [
+            ("1937-04-28", Some("1937-04-28")),
+            ("12/03/1960", Some("1960-03-12")),
+            ("dd/mm/1963", Some("1963")),
+            ("05/1961", Some("1961-05")),
+            ("mm/1961", Some("1961")),
+            ("1960", Some("1960")),
+            ("unknown", None),
+            ("", None),
+        ] {
+            assert_eq!(birth_date_text(text).as_deref(), expected, "{text}");
+        }
+    }
+
+    #[test]
+    fn numbers_are_found_in_a_free_text_identifier() {
+        assert_eq!(
+            identifier_numbers("(УНН/ИНН): 190950894 (Belarus), 7704734000/770301001 (Russia)"),
+            ["190950894", "7704734000", "770301001"]
+        );
+        assert_eq!(identifier_numbers("OGRN 1027700132195; reg. no. HRB-12345"), ["1027700132195", "HRB-12345"]);
+        assert!(identifier_numbers("Company no. 123 (2010)").is_empty());
+    }
     use super::*;
 
     /// A feed cut off mid-file is broken, never a shorter list (Copilot's point on #37).

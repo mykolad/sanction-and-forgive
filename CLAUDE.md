@@ -63,7 +63,8 @@ tools/lists.ps1           The script the owner runs to manage lists
   `LISTS_EU_TOKEN` (the public token by default).
 - One `IListParser` per format reduces a file to `ParsedSubject`s: external id, `SubjectType` (`Unknown` when the
   source doesn't say: US export records), primary name, every name with its script and weak flag, addresses as one
-  free-text string plus an ISO alpha-2 code when the source gives one. Parsers stream (`Parsers/Xml.Records`: one
+  free-text string plus an ISO alpha-2 code when the source gives one; in the Rust port also identifiers and dates of
+  birth (#68, `SubjectIdentifiers` and `Subjects.BirthDates`, docs/sources.md). Parsers stream (`Parsers/Xml.Records`: one
   record element at a time) and leave out vessels and aircraft. A wrong root element is a `ListFormatException`.
 - `FeedDownloader` identifies itself honestly (`sanction-and-forgive/<version>`). Never disguise the client as a
   browser to get past a site that refuses it: report the source as `NeedsAccess` instead. A passing fault (5xx, 408,
