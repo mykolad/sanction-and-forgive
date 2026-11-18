@@ -155,6 +155,9 @@ button.secondary { background: transparent; color: var(--text); border-color: va
 .summary.NoMatch { background: var(--clear-bg); color: var(--clear-ink); border-color: var(--clear-edge); }
 .summary.Incomplete { background: var(--gap-bg); color: var(--gap-ink); border-color: var(--gap-edge); }
 
+/* .field is display: flex, which would show a hidden field: the identifier fields stay hidden until offered. */
+.particulars[hidden] { display: none; }
+
 .destination-notices { margin-top: 12px; display: grid; gap: 8px; }
 .destination {
   margin: 0;

@@ -377,7 +377,7 @@ fn apply_particulars(index: &ListIndex, matches: &mut Vec<SubjectMatch>, keys: &
                     alignment: vec![line.clone(), "Name: not what matched: the identifier did".to_string()],
                     address_state: AddressState::NotCompared,
                     words: Vec::new(),
-                    notes: vec![line],
+                    notes: vec![line, "Name: not what matched: the identifier did".to_string()],
                 }),
             }
             identified.push(subject);
