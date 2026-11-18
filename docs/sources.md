@@ -154,7 +154,8 @@ built and owner in the remarks where the list gives them. Aircraft stay out. Mea
 | Switzerland (SECO) | `object` of `object-type` `vessel`; "IMO number: 8405270" in `other-information` | 708 | 708 |
 | New Zealand | the workbook's `Ships` sheet (header on row 2: `Type`, `Unique Identifier`, `IMO Number`, the name when sanctioned, `Alias/Alternate Names`, `Sanction Status`, `Record Deleted Flag`) | 210 | 210 |
 
-Every IMO number read passes its check digit. The EU's file has no ships (41 of its companies carry a company IMO
+The US export list keeps a record of `type` `Vessel` from the agencies it takes as a vessel too (none on
+2026-11-18). Every IMO number read passes its check digit. The EU's file has no ships (41 of its companies carry a company IMO
 number, an identifier like any other). The UN's file has none either. The first import of each of these lists after
 this change is a new version, its ships counted as added.
 

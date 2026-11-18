@@ -18,6 +18,16 @@ public static class FeedFiles
         ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60), ("jp-mof", 60), ("us-uflpa", 50), ("be-terrorism", 40),
     ];
 
+    /// <summary>The feeds whose files list the fictional vessel CONFORMANCE STAR (IMO 1234567): version 1 leaves it out,
+    /// version 2 keeps it (#69), one record more.</summary>
+    public static readonly IReadOnlySet<string> VesselFeeds =
+        new HashSet<string>(StringComparer.Ordinal) { "ofac-sdn", "ofac-cons", "uk", "us-export", "ch-seco", "ca-sema", "fr-tresor", "nz-mfat" };
+
+    /// <summary>How many records a feed's base file makes at the version tested: its parties, and from version 2 its
+    /// vessel.</summary>
+    public static int RecordCount(string code) =>
+        Feeds.Single(feed => feed.Code == code).Count + (Harness.Settings.Version >= 2 && VesselFeeds.Contains(code) ? 1 : 0);
+
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
     public const string ManualCode = "conformance-manual";
 
@@ -355,7 +365,8 @@ public static class FeedFiles
                 json.WriteEndObject();
             }
 
-            // Another agency's record (the app takes OFAC's from OFAC) and a vessel: both left out.
+            // Another agency's record (the app takes OFAC's from OFAC), left out, and a vessel: left out by version 1, kept
+            // by version 2 (#69).
             json.WriteStartObject();
             json.WriteString("id", "cf-sdn");
             json.WriteString("source", "Specially Designated Nationals (SDN) - Treasury Department");
