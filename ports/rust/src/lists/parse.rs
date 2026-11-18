@@ -167,9 +167,14 @@ pub fn free_text_identifiers(text: &str) -> Vec<String> {
     let date = DATE.get_or_init(|| regex::Regex::new(r"^(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}[./-]\d{1,2}[./-]\d{1,2})$").unwrap());
     // Letters of the scripts identifiers are written in (Latin, Cyrillic); any other script separates words.
     let kept = |c: char| c.is_ascii_alphanumeric() || (c.is_alphabetic() && matches!(c as u32, 0x00C0..=0x024F | 0x0400..=0x04FF));
+    // A slash with a space on either side separates two identifiers (SE 011252 / SE 011697); one within a word
+    // doesn't (1990/345751).
+    static ALTERNATIVE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let alternative = ALTERNATIVE.get_or_init(|| regex::Regex::new(r"\s+/\s*|\s*/\s+").unwrap());
     let text: String = text.nfkc().collect();
     let mut out: Vec<String> = Vec::new();
-    for segment in text.split([',', ';', '(', ')', '[', ']', '\n', '\r']) {
+    let segments = text.split([',', ';', '(', ')', '[', ']', '\n', '\r']).flat_map(|segment| alternative.split(segment));
+    for segment in segments {
         let cleaned: String = segment.chars().map(|c| if kept(c) || "-/.".contains(c) { c } else { ' ' }).collect();
         let words: Vec<&str> = cleaned
             .split_whitespace()
@@ -193,8 +198,9 @@ pub fn free_text_identifiers(text: &str) -> Vec<String> {
                 Some(n) if all_digits(word) && word.len() <= 4 && all_digits(n) && n.len() >= 5 => (format!("{word} {n}"), 2),
                 _ => (word.to_string(), 1),
             };
-            // A suffix of capitals after a number stays with it.
-            if value.ends_with(|c: char| c.is_ascii_digit()) {
+            // A suffix of capitals after a number stays with it, unless it's the series of a number that follows.
+            let starts_number = |at: usize| words.get(at).is_some_and(|w| w.starts_with(|c: char| c.is_ascii_digit()));
+            if value.ends_with(|c: char| c.is_ascii_digit()) && !starts_number(i + used + 1) {
                 if let Some(suffix) = words.get(i + used).filter(|w| capitals(w, 4)) {
                     value = format!("{value} {suffix}");
                     used += 1;
@@ -600,6 +606,9 @@ mod tests {
         // Copilot's review of #127: a Cyrillic series and a suffix stay with the number; a date is never joined.
         assert_eq!(free_text_identifiers("passport АВ1234567"), ["АВ1234567"]);
         assert_eq!(free_text_identifiers("1234567 KZTV"), ["1234567 KZTV"]);
+        assert_eq!(free_text_identifiers("SE 011252 / SE 011697"), ["SE 011252", "SE 011697"]);
+        assert_eq!(free_text_identifiers("SE 011252 SE 011697"), ["SE 011252", "SE 011697"]);
+        assert_eq!(free_text_identifiers("1990/345751"), ["1990/345751"]);
         assert_eq!(free_text_identifiers("Passport SE 011252; DOB 1966-06-21"), ["SE 011252"]);
     }
 
