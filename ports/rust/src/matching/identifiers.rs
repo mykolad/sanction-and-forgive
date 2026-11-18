@@ -61,7 +61,18 @@ pub fn listed_keys(value: &str) -> Vec<String> {
         }
     };
     add(identifier_key(value));
-    for part in value.split([',', ';', '/', '(', ')', ':']) {
+    // A slash joins two numbers only between plain numbers of six digits or more (the Russian INN/KPP); otherwise it's
+    // part of the number ("ABC12345/01" is never "ABC12345").
+    let mut parts: Vec<&str> = Vec::new();
+    for part in value.split([',', ';', '(', ')', ':']) {
+        let pieces: Vec<&str> = part.split('/').map(str::trim).collect();
+        if pieces.len() > 1 && pieces.iter().all(|p| p.len() >= 6 && p.chars().all(|c| c.is_ascii_digit())) {
+            parts.extend(pieces);
+        } else {
+            parts.push(part);
+        }
+    }
+    for part in parts {
         let mut words: Vec<&str> = part.split_whitespace().collect();
         let has_digit = |w: &str| w.chars().any(|c| c.is_ascii_digit());
         let label = |w: &str| {
@@ -143,6 +154,7 @@ mod tests {
         assert_eq!(listed_keys("4510 123456"), ["4510123456"]);
         // A series is part of the number, spaced or not; only a label is dropped.
         assert_eq!(listed_keys("AB 123456"), ["AB123456"]);
+        assert_eq!(listed_keys("ABC12345/01"), ["ABC1234501"]);
         assert_eq!(listed_keys("AB123456"), ["AB123456"]);
         assert_eq!(listed_keys("Tax ID No. 7704734000"), ["TAXIDNO7704734000", "7704734000"]);
         assert_eq!(listed_keys("190950894 (Belarus)"), ["190950894BELARUS", "190950894"]);
