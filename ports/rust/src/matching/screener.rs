@@ -365,6 +365,10 @@ fn apply_particulars(index: &ListIndex, matches: &mut Vec<SubjectMatch>, keys: &
             let line = format!("Identifier: equals the listed {} {}{country}", identifier.kind, identifier.value);
             match matches.iter_mut().find(|m| Arc::ptr_eq(&m.subject, &subject)) {
                 Some(m) => {
+                    // The name's best candidate even when it's no match: then say the identifier is what matched.
+                    if m.outcome == Outcome::NoMatch {
+                        say(m, "Name: not what matched: the identifier did".to_string(), true);
+                    }
                     m.percent = 100;
                     m.outcome = o.to_outcome(100);
                     say(m, line, true);

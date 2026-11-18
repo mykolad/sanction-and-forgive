@@ -14,19 +14,24 @@ pub fn comparable(key: &str) -> bool {
     key.chars().count() >= 5 && key.chars().filter(char::is_ascii_digit).count() >= 4
 }
 
-/// The keys a listed identifier is found by: the whole value's, and each number within it ("OGRN 1027700132195" is
-/// found by "1027700132195" too), each comparable.
+/// The keys a listed identifier is found by: the whole value's, and each alternative within it, without the words
+/// that label it: the parts between commas, semicolons, slashes, brackets and colons, each without its leading and
+/// trailing words that have no digit ("OGRN 1027700132195" is found by "1027700132195" too, "7704734000/770301001" by
+/// each number). Spaces within a number are its formatting, never a separator: "4510 123456" is one passport number,
+/// never "123456". Each key comparable.
 pub fn listed_keys(value: &str) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
-    let whole = identifier_key(value);
-    if comparable(&whole) {
-        keys.push(whole);
-    }
-    for part in value.split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '/' | '(' | ')' | ':')) {
-        let key = identifier_key(part);
+    let mut add = |key: String| {
         if comparable(&key) && !keys.contains(&key) {
             keys.push(key);
         }
+    };
+    add(identifier_key(value));
+    for part in value.split([',', ';', '/', '(', ')', ':']) {
+        let words: Vec<&str> = part.split_whitespace().collect();
+        let has_digit = |w: &&str| w.chars().any(|c| c.is_ascii_digit());
+        let (Some(first), Some(last)) = (words.iter().position(has_digit), words.iter().rposition(has_digit)) else { continue };
+        add(identifier_key(&words[first..=last].join(" ")));
     }
     keys
 }
@@ -89,6 +94,9 @@ mod tests {
         assert_eq!(listed_keys("OGRN 1027700132195"), ["OGRN1027700132195", "1027700132195"]);
         assert_eq!(listed_keys("7704734000/770301001"), ["7704734000770301001", "7704734000", "770301001"]);
         assert_eq!(listed_keys("CHE-123.456.789"), ["CHE123456789"]);
+        // A number's own spaces are formatting: its last group alone is no key.
+        assert_eq!(listed_keys("4510 123456"), ["4510123456"]);
+        assert_eq!(listed_keys("190950894 (Belarus)"), ["190950894BELARUS", "190950894"]);
         assert!(listed_keys("123").is_empty());
     }
 

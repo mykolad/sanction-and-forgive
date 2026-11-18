@@ -107,6 +107,8 @@ async function loadExamples() {
           $("receiverName").value = example.receiverName || "";
           $("companyName").value = example.companyName || "";
           $("address").value = example.address || "";
+          // An example is a name alone: identifiers or a date of birth entered for another must not go with it.
+          for (const id of ["receiverIdentifiers", "receiverDateOfBirth", "companyIdentifiers"]) $(id).value = "";
           form.requestSubmit();
         },
       }, example.label));
@@ -298,7 +300,8 @@ function partiesEntered() {
     const ids = row.querySelector(".party-ids");
     if (ids && identifiersIn(ids.value).length) party.identifiers = identifiersIn(ids.value);
     const dateOfBirth = row.querySelector(".party-dob");
-    if (dateOfBirth && dateOfBirth.value.trim() && party.kind === "person") party.dateOfBirth = dateOfBirth.value.trim();
+    // Sent whatever the kind: the API refuses a company's date of birth rather than the page dropping it unseen.
+    if (dateOfBirth && dateOfBirth.value.trim()) party.dateOfBirth = dateOfBirth.value.trim();
     return party;
   });
 }
