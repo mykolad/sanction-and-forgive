@@ -5,7 +5,7 @@
 const LABELS = { Match: "Match", Review: "Possible match", Allowed: "Possible match, allowed", NoMatch: "No match", NotChecked: "Not checked" };
 const SYMBOLS = { Match: "●", Review: "▲", Allowed: "◇", NoMatch: "✓", NotChecked: "–" };
 const OVERALL = { Match: "Possible match found", Review: "Review needed", NoMatch: "No match found", Incomplete: "Incomplete" };
-const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address" };
+const KIND = { Receiver: "Receiver", Company: "Company", Address: "Address", Vessel: "Vessel" };
 // An address's destination notice (the "destinations" feature).
 const DESTINATION = { restricted: "Destination under broad restrictions", possiblyRestricted: "The destination may be under broad restrictions" };
 // A shipment's other parties (the "parties" feature, when the API offers it): the API's roles, and how they read.
@@ -13,6 +13,8 @@ const ROLES = { shipper: "Shipper", consignee: "Consignee", notifyParty: "Notify
 const MAX_PARTIES = 10;
 // Identifiers and dates of birth (the "identifiers" feature, when the API offers it).
 let identifiersOffered = false;
+// A vessel's name and IMO number (the "vessels" feature, when the API offers it).
+let vesselsOffered = false;
 
 // The identifiers typed in one field: commas or semicolons between them.
 function identifiersIn(text) {
@@ -76,6 +78,8 @@ async function loadStatus() {
     $("parties").hidden = !(status.features || []).includes("parties");
     identifiersOffered = (status.features || []).includes("identifiers");
     document.querySelectorAll(".particulars").forEach((field) => { field.hidden = !identifiersOffered; });
+    vesselsOffered = (status.features || []).includes("vessels");
+    document.querySelectorAll(".vessel").forEach((field) => { field.hidden = !vesselsOffered; });
     $("version").textContent = `Version ${status.version}, matcher ${status.matcherVersion}.`;
     $("sources").textContent = lists.length
       ? lists.map((list) => `${list.name} (${listAsOf(list)})`).join("; ") + "."
@@ -108,7 +112,7 @@ async function loadExamples() {
           $("companyName").value = example.companyName || "";
           $("address").value = example.address || "";
           // An example is a name alone: identifiers or a date of birth entered for another must not go with it.
-          for (const id of ["receiverIdentifiers", "receiverDateOfBirth", "companyIdentifiers"]) $(id).value = "";
+          for (const id of ["receiverIdentifiers", "receiverDateOfBirth", "companyIdentifiers", "vesselName", "vesselImoNumber"]) $(id).value = "";
           form.requestSubmit();
         },
       }, example.label));
@@ -136,14 +140,20 @@ async function screen(event) {
     if (companyIds.length) body.companyIdentifiers = companyIds;
     if (dateOfBirth) body.receiverDateOfBirth = dateOfBirth;
   }
+  if (vesselsOffered) {
+    const vesselName = $("vesselName").value.trim();
+    const imoNumber = $("vesselImoNumber").value.trim();
+    if (vesselName) body.vesselName = vesselName;
+    if (imoNumber) body.vesselImoNumber = imoNumber;
+  }
   const parties = $("parties").hidden ? [] : partiesEntered();
   if (parties.some((party) => !party.name && !party.address)) {
     showState("Enter each party's name, its address, or both (or remove it).", true);
     return;
   }
   if (parties.length) body.parties = parties;
-  if (!body.receiverName && !body.companyName && !body.address && !parties.length) {
-    showState("Enter a receiver, a company or an address.", true);
+  if (!body.receiverName && !body.companyName && !body.address && !body.vesselName && !body.vesselImoNumber && !parties.length) {
+    showState(vesselsOffered ? "Enter a receiver, a company, an address or a vessel." : "Enter a receiver, a company or an address.", true);
     return;
   }
 
@@ -189,6 +199,7 @@ async function screen(event) {
         Receiver: body.receiverName, Company: body.companyName, Address: body.address,
         "Receiver's ID numbers": (body.receiverIdentifiers || []).join(", "), "Receiver's date of birth": body.receiverDateOfBirth,
         "Company's ID numbers": (body.companyIdentifiers || []).join(", "),
+        Vessel: body.vesselName, "Vessel's IMO number": body.vesselImoNumber,
       },
       parties: body.parties || [],
       at: new Date(),
@@ -226,7 +237,7 @@ function render(result) {
   groups.sort((a, b) => a.key - b.key);
   $("result-tables").replaceChildren(...groups.map((group) => el("div", { class: "table-scroll" },
     resultTable(result, group.entries, groups.length > 1
-      ? group.key ? `Party ${group.key}: ${ROLES[group.role] || group.role}` : "The shipment's receiver, company and address"
+      ? group.key ? `Party ${group.key}: ${ROLES[group.role] || group.role}` : "The shipment's own entries"
       : null))));
 
   const notices = destinationNotices(result);
@@ -450,7 +461,7 @@ function buildRecord() {
       el("dt", {}, "Screened"), el("dd", {}, `${when(at)} (${at.toISOString()})`),
       el("dt", {}, "Result"), el("dd", {}, el("strong", {}, OVERALL[result.outcome] || result.outcome), ". ", result.summary),
       ...["Receiver", "Company", "Address"].flatMap((kind) => [el("dt", {}, `${kind} entered`), el("dd", {}, entered[kind] || "—")]),
-      ...["Receiver's ID numbers", "Receiver's date of birth", "Company's ID numbers"].filter((label) => entered[label])
+      ...["Receiver's ID numbers", "Receiver's date of birth", "Company's ID numbers", "Vessel", "Vessel's IMO number"].filter((label) => entered[label])
         .flatMap((label) => [el("dt", {}, label), el("dd", {}, entered[label])]),
       // Each party as entered, numbered as the result numbers them.
       ...shown.parties.flatMap((party, i) => [
@@ -506,6 +517,7 @@ window.addEventListener("beforeprint", buildRecord);
 
 function addressText(state, entry) {
   if (entry.kind === "Address") return "Compared on its own (address only)";
+  if (entry.kind === "Vessel") return "Not compared: a vessel is screened by its name and IMO number";
   return { Corroborated: "Agrees with a listed address", Conflicting: "In a different country from the listed addresses", NotCompared: "Not compared" }[state] || state;
 }
 

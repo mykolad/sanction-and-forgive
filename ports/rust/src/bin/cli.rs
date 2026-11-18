@@ -594,7 +594,8 @@ async fn probe(downloader: &Downloader, eu_token: &str, code: &str, file: &str) 
             match p.kind {
                 SubjectType::Individual => individuals += 1,
                 SubjectType::Entity => entities += 1,
-                SubjectType::Unknown => unknown += 1,
+                // A vessel (#69) counts with the parties of no known kind: the columns are the reference's.
+                SubjectType::Unknown | SubjectType::Vessel => unknown += 1,
             }
             for n in &p.names {
                 names += 1;

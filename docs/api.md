@@ -92,6 +92,32 @@ in streams the lines are in `notes`. The audit line says how many identifiers ca
 identifiers)"), never which. Only an implementation whose status lists `"identifiers"` takes them; the website offers
 the fields only there.
 
+## Vessels (Rust only so far)
+
+A shipment's vessel (#69): `vesselName` (up to 300 characters) and `vesselImoNumber` (seven digits, "IMO" before them
+or not, the last one the check digit, so a slip of a digit is refused), either or both. It's one more entry, kind
+`Vessel`, with a cell per list like any other:
+
+```json
+{ "reference": "TX-2026-0003", "vesselName": "Ocean Faye", "vesselImoNumber": "IMO 9321689" }
+```
+
+- **The name** is compared with the lists' vessels only (each list keeps its ships in an index of their own, so they
+  never weigh on how people's and companies' names score), read as a company's name without a prefix like "M/V" or
+  "MT". A receiver's or a company's name never finds a ship, nor a vessel's name a person or a company.
+- **The IMO number** is compared with the IMO numbers the lists give for their ships, as an identifier is: an equal
+  one is a **Match** (100%) whatever the name (ships are renamed), the line "Identifier: equals the listed IMO number
+  9321689"; a ship the name found with another IMO number keeps its percentage, and a line says so. An IMO number
+  alone is screened too; the entry's `input` is then "IMO 9321689".
+- A list that lists no ships is searched and finds none: `NoMatch`, as for any name it doesn't list.
+
+The lists that give ships (docs/sources.md): OFAC, the UK, Canada, France, Switzerland and New Zealand. The EU's
+"shadow fleet" vessels are designated under Regulation 833/2014, not in the financial sanctions file, and no
+machine-readable source of them was found, so they aren't screened (the owner's rule: no list that can't be
+downloaded automatically). Candidates' `type` is `Vessel`; browsing a list takes `"type": "Vessel"`. The audit line
+names the entry `Vessel`, with "(with 1 identifiers)" when an IMO number came with it. Only an implementation whose
+status lists `"vessels"` takes them; the website offers the fields only there.
+
 ## Destinations under broad restrictions (Rust only so far)
 
 Of embargoes, screening covers only the destinations in a table that administrators keep from the official sources

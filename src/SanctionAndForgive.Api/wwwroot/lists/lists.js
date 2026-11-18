@@ -4,7 +4,7 @@
 "use strict";
 
 const PAGE = 50;
-const TYPES = { Individual: "Person", Entity: "Entity", Unknown: "Not stated" };
+const TYPES = { Individual: "Person", Entity: "Entity", Unknown: "Not stated", Vessel: "Vessel" };
 
 const $ = (id) => document.getElementById(id);
 const stateBox = $("state");
@@ -55,6 +55,7 @@ async function loadLists() {
       return;
     }
     const body = await response.json();
+    offerVessels();
     const loaded = body.lists.filter((list) => list.state !== "NotImported");
     $("list").replaceChildren(...loaded.map((list) => el("option", { value: list.code }, `${list.name} (${list.recordCount.toLocaleString()})`)));
     const wanted = new URLSearchParams(location.search).get("list");
@@ -63,6 +64,18 @@ async function loadLists() {
     browse(0, formFilters());
   } catch {
     showState("The service isn't answering. Try again in a moment.", true);
+  }
+}
+
+// Vessels are a kind of entry only where the API keeps them (its "vessels" feature).
+async function offerVessels() {
+  try {
+    const status = await (await fetch("/api/v1/status", { headers: { Accept: "application/json" } })).json();
+    const offered = (status.features || []).includes("vessels");
+    $("vessel-type").hidden = !offered;
+    $("vessel-type").disabled = !offered;
+  } catch {
+    // Without the status, the filter offers what every implementation has.
   }
 }
 

@@ -367,11 +367,11 @@ impl BrowseRequest {
         }
         let mut kind = None;
         if let Some(t) = self.kind.as_deref().filter(|t| !t.is_empty()) {
-            kind = [SubjectKind::Individual, SubjectKind::Entity, SubjectKind::Unknown]
+            kind = [SubjectKind::Individual, SubjectKind::Entity, SubjectKind::Unknown, SubjectKind::Vessel]
                 .into_iter()
                 .find(|k| kind_name(*k).eq_ignore_ascii_case(t));
             if kind.is_none() {
-                errors.insert("Type".into(), vec!["Individual, Entity or Unknown.".into()]);
+                errors.insert("Type".into(), vec!["Individual, Entity, Unknown or Vessel.".into()]);
             }
         }
         (errors, kind)
@@ -418,8 +418,7 @@ pub fn browse(list: &LoadedList, index: &ListIndex, request: &BrowseRequest, kin
 
 fn build_name_order(index: &ListIndex) -> Vec<Browsable> {
     let mut entries: Vec<(String, Browsable)> = index
-        .subjects()
-        .iter()
+        .all_subjects()
         .map(|subject| {
             (
                 sort_key(&subject.primary_name),

@@ -480,6 +480,7 @@ pub fn to_listed(s: Subject) -> ListedSubject {
     let kind = match s.kind {
         0 => SubjectKind::Individual,
         1 => SubjectKind::Entity,
+        3 => SubjectKind::Vessel,
         _ => SubjectKind::Unknown,
     };
     ListedSubject {

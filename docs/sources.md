@@ -2,7 +2,8 @@
 
 Every list the app screens against, what each feed holds, and whether its terms allow this use. The numbers come
 from `probe` (`dotnet SanctionAndForgive.Cli.dll probe --source all`), run on 2026-11-06. Vessels and aircraft are
-left out of the counts and the import, since the MVP doesn't screen them.
+left out of the counts and the import, since the MVP didn't screen them; the Rust port keeps vessels (#69, "Vessels"
+below), never aircraft.
 
 `Status` is `ListSources.All`'s `FeedStatus`: only `Active` feeds are imported automatically.
 
@@ -48,7 +49,7 @@ largest list, so the total is likely to land inside that range once it's added.
   variants (Latin and Cyrillic); each variant becomes another full name. Addresses point at `place` elements at the
   end of the file, so this parser holds its ~7k subjects until the end.
 - **Canada:** no id of its own (country / schedule / item instead), no addresses. Aliases are one comma-separated
-  string with language labels (`Belarusian: …, Russian: …`). 736 ship records are left out.
+  string with language labels (`Belarusian: …, Russian: …`). 736 ship records are left out (the Rust port keeps them, #69).
 - **SFMS:** mostly UN listings, with Ukrainian programme names. `type-entry` 1 = entity, 2 = person.
 - **Australia:** `dfat.gov.au` resets the connection for an honestly identified non-browser client (the probe's
   user agent names the app). We don't disguise the client. The file's URL and format are unverified.
@@ -59,7 +60,7 @@ largest list, so the total is likely to land inside that range once it's added.
 - **France (`fr-tresor`, 2026-11-16):** `GET https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json`
   (an XML twin, a JSON schema and a Swagger page are listed on [data.gouv.fr](https://www.data.gouv.fr/datasets/registre-national-des-gels)).
   `{"Publications": {"DatePublication", "PublicationDetail": [...]}}`: each entry an `IdRegistre`, a `Nature`
-  (`Personne physique`, `Personne morale`, `Navire`: the 39 vessels are left out), a `Nom`, and typed fields
+  (`Personne physique`, `Personne morale`, `Navire`: the 39 vessels are left out, kept by the Rust port, #69), a `Nom`, and typed fields
   (`RegistreDetail`: `PRENOM`, `ALIAS` with a comment, `alias faible` for a weak one, `ADRESSE_PM` and `ADRESSE_PP`
   with the country in French, `FONDEMENT_JURIDIQUE`, `MOTIFS`, `NATIONALITE`, `DATE_DE_NAISSANCE`, identifiers).
   Countries are French names (`RUSSIE`, `ÉMIRATS ARABES UNIS`), which countries.json reads. It implements the EU's and
@@ -76,8 +77,8 @@ largest list, so the total is likely to land inside that range once it's added.
   The file is read by `Spreadsheets.OdsRows` (zip and XML only).
 - **New Zealand (`nz-mfat`, 2026-11-16):** MFAT's `Russia-Sanctions-Register.xlsx`, linked from
   [the register page](https://www.mfat.govt.nz/en/countries-and-regions/europe/ukraine/russian-invasion-of-ukraine/sanctions/russia-sanctions-register).
-  Five sheets; only `Russia Sanctions Register` is read (the others: ships, trade measures padded to Excel's last row,
-  exemptions). A legend, then the header on row 11: `Type`, `Unique Identifier` (`IND-1`, `ENT-1`, `BAN-1`, `AST-1`),
+  Five sheets; only `Russia Sanctions Register` is read (the others: ships, which the Rust port reads too, #69, trade
+  measures padded to Excel's last row, exemptions). A legend, then the header on row 11: `Type`, `Unique Identifier` (`IND-1`, `ENT-1`, `BAN-1`, `AST-1`),
   names, `DOB`, `Title`, `Alias/Alternate Spellings` (semicolons), `Address`, citizenships, `Sanction Status`, dates as
   Excel serials, the measures (`Yes`/`No`), `General Rationale for Sanction`. `Individual` rows are people; `Entity`
   (512) and `Bank` (17) rows are entities, named in `First name`; the 7 `Asset` rows (categories of ships and aircraft)
@@ -137,6 +138,25 @@ form: a day `1948-12-10`, a month `1960-03`, a year `1963`, or a range of years 
 The other formats follow. A record's identifiers and dates of birth join its content hash and its change count only
 when it has any, so a list without them hashes as before; the first import of a list that has them after this change
 is a new version, every record with them counted as changed.
+
+## Vessels (#69; the Rust port first)
+
+The Rust port's parsers keep each list's ships as `Vessel` subjects (`Subjects.Type` 3; .NET and Go read it as
+unknown), with the IMO number under the kind `IMO number`, its seven digits alone, and the ship's flag, type, year
+built and owner in the remarks where the list gives them. Aircraft stay out. Measured on 2026-11-18:
+
+| Source | Ships from | Ships | with an IMO number |
+|---|---|---:|---:|
+| OFAC SDN | `entityType` `Vessel`; the IMO number is a `Vessel Registration Identification` document, `IMO 9187629` (an MMSI and other numbers kept as identifiers too) | 1,570 | 1,555 |
+| UK | `IndividualEntityShip` `Ship`; `ShipDetails/Ship/IMONumbers` (`IMO9562233`) | 694 | 693 |
+| Canada | a record with `ShipIMONumber-NumeroOMIDuNavire`, named in `EntityOrShip`; the type and build year in the remarks | 731 | 731 |
+| France | `Nature` `Navire`; `NUMERO_OMI` | 39 | 39 |
+| Switzerland (SECO) | `object` of `object-type` `vessel`; "IMO number: 8405270" in `other-information` | 708 | 708 |
+| New Zealand | the workbook's `Ships` sheet (header on row 2: `Type`, `Unique Identifier`, `IMO Number`, the name when sanctioned, `Alias/Alternate Names`, `Sanction Status`, `Record Deleted Flag`) | 210 | 210 |
+
+Every IMO number read passes its check digit. The EU's file has no ships (41 of its companies carry a company IMO
+number, an identifier like any other). The UN's file has none either. The first import of each of these lists after
+this change is a new version, its ships counted as added.
 
 ## Scripts of the listed names
 
