@@ -62,8 +62,9 @@ Version 1 changes only when a shared dictionary change moves the .NET implementa
 .NET: `run.ps1 -Build -UpdateGolden -Version 1` with the .NET image), so a regression in .NET or Go still fails its
 job. When .NET or Go catch up with Rust, their CI job moves to version 2. A test of what only version 2 asks (a new
 field or endpoint) is a `[SinceVersionFact(2)]`, skipped below it: `PartiesTests` (several parties per screening, #65)
-and `DestinationsTests` (the table of destinations under broad restrictions, #67: each test empties the table first
-and leaves it empty, so the golden files see no destination).
+`DestinationsTests` (the table of destinations under broad restrictions, #67: each test empties the table first
+and leaves it empty, so the golden files see no destination) and `IdentifiersTests` (identifiers and dates of birth,
+#68: a variant of the OFAC consolidated file gives two parties some, and the base files are imported again).
 
 ## What an implementation must provide
 

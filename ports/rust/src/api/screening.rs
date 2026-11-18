@@ -11,6 +11,7 @@ use serde_json::Value;
 use super::catalog::{Catalog, LoadedList};
 use crate::lists::catalogue::find_source;
 use crate::log::Logger;
+use crate::matching::identifiers::{comparable, entered_birth_date, identifier_key};
 use crate::matching::{
     AllowList, Cell, DestinationNotice, DestinationState, Destinations, Entry, Options, Outcome, OverallOutcome, Party, ScreenedList,
     Screener, ScreeningRequest, ScreeningResult, SubjectMatch, WordAlignment, ROLES,
@@ -57,6 +58,63 @@ pub struct ScreeningRequestBody {
     pub company_name: Option<String>,
     pub address: Option<String>,
     pub parties: Vec<PartyBody>,
+    /// Identifiers entered for the receiver and the company, and the receiver's date of birth (#68).
+    pub receiver_identifiers: Vec<String>,
+    pub company_identifiers: Vec<String>,
+    pub receiver_date_of_birth: Option<String>,
+}
+
+/// A list of identifiers as sent: strings, or null for none. None when it's anything else.
+fn identifier_list(value: &Value) -> Option<Vec<String>> {
+    match value {
+        Value::Null => Some(Vec::new()),
+        Value::Array(items) => items.iter().map(|i| i.as_str().map(str::to_string)).collect(),
+        _ => None,
+    }
+}
+
+/// At most this many identifiers with one name.
+pub const MAX_IDENTIFIERS: usize = 5;
+const MAX_IDENTIFIER_LENGTH: usize = 64;
+
+/// What's wrong with a name's identifiers and date of birth, by field (field names as the reference's validation
+/// writes them), into errors. Never echoes a value.
+fn validate_particulars(
+    errors: &mut Errors,
+    prefix: &str,
+    name_given: bool,
+    identifiers: &[String],
+    birth_date: &Option<String>,
+    person: bool,
+) {
+    let field = |name: &str| format!("{prefix}{name}");
+    if identifiers.len() > MAX_IDENTIFIERS {
+        errors.insert(field("Identifiers"), vec![format!("At most {MAX_IDENTIFIERS} identifiers.")]);
+    }
+    for (i, value) in identifiers.iter().enumerate().take(MAX_IDENTIFIERS) {
+        let key = identifier_key(value);
+        if utf16_len(value) > MAX_IDENTIFIER_LENGTH || !comparable(&key) {
+            errors.insert(
+                format!("{}[{i}]", field("Identifiers")),
+                vec![
+                    "Up to 64 characters, with at least 5 letters or digits, 4 of them digits: shorter ones would equal unrelated numbers."
+                        .into(),
+                ],
+            );
+        }
+    }
+    if !identifiers.is_empty() && !name_given {
+        errors.insert(field("Identifiers"), vec!["Enter the name the identifiers belong to.".into()]);
+    }
+    if let Some(date) = birth_date.as_deref().filter(|d| !d.trim().is_empty()) {
+        if !person {
+            errors.insert(field("DateOfBirth"), vec!["Only a person has a date of birth.".into()]);
+        } else if entered_birth_date(date).is_none() {
+            errors.insert(field("DateOfBirth"), vec!["YYYY-MM-DD, YYYY-MM or YYYY.".into()]);
+        } else if !name_given {
+            errors.insert(field("DateOfBirth"), vec!["Enter the name the date of birth belongs to.".into()]);
+        }
+    }
 }
 
 /// A party as sent: a role, a name with its kind (person or company), an address; each a string or null.
@@ -66,6 +124,9 @@ pub struct PartyBody {
     pub name: Option<String>,
     pub kind: Option<String>,
     pub address: Option<String>,
+    /// The name's identifiers and, for a person, date of birth (#68).
+    pub identifiers: Vec<String>,
+    pub date_of_birth: Option<String>,
 }
 
 /// At most this many parties in one request.
@@ -80,6 +141,11 @@ impl PartyBody {
                 "name" => &mut party.name,
                 "kind" => &mut party.kind,
                 "address" => &mut party.address,
+                "dateofbirth" => &mut party.date_of_birth,
+                "identifiers" => {
+                    party.identifiers = identifier_list(value)?;
+                    continue;
+                }
                 _ => continue,
             };
             *target = match value {
@@ -111,6 +177,15 @@ impl ScreeningRequestBody {
         let object = value.as_object()?;
         let mut body = ScreeningRequestBody::default();
         for (key, value) in object {
+            if key.eq_ignore_ascii_case("receiverIdentifiers") || key.eq_ignore_ascii_case("companyIdentifiers") {
+                let list = identifier_list(value)?;
+                if key.eq_ignore_ascii_case("receiverIdentifiers") {
+                    body.receiver_identifiers = list;
+                } else {
+                    body.company_identifiers = list;
+                }
+                continue;
+            }
             if key.eq_ignore_ascii_case("parties") {
                 body.parties = match value {
                     Value::Null => Vec::new(),
@@ -124,6 +199,7 @@ impl ScreeningRequestBody {
                 "receivername" => &mut body.receiver_name,
                 "companyname" => &mut body.company_name,
                 "address" => &mut body.address,
+                "receiverdateofbirth" => &mut body.receiver_date_of_birth,
                 _ => continue,
             };
             *target = match value {
@@ -199,7 +275,24 @@ pub fn validate(body: &ScreeningRequestBody) -> Errors {
         if is_blank(&party.name) && is_blank(&party.address) {
             errors.insert(field("Name"), vec!["Enter the party's name, its address, or both.".into()]);
         }
+        validate_particulars(
+            &mut errors,
+            &format!("Parties[{i}]."),
+            !is_blank(&party.name),
+            &party.identifiers,
+            &party.date_of_birth,
+            party.is_person(),
+        );
     }
+    validate_particulars(
+        &mut errors,
+        "Receiver",
+        !is_blank(&body.receiver_name),
+        &body.receiver_identifiers,
+        &body.receiver_date_of_birth,
+        true,
+    );
+    validate_particulars(&mut errors, "Company", !is_blank(&body.company_name), &body.company_identifiers, &None, false);
     if is_blank(&body.receiver_name) && is_blank(&body.company_name) && is_blank(&body.address) && body.parties.is_empty() {
         errors.insert(String::new(), vec!["Enter a receiver, a company or an address.".into()]);
     }
@@ -252,6 +345,27 @@ pub struct CandidateResponse {
     pub alignment: Vec<String>,
     pub address_state: &'static str,
     pub listed_addresses: Vec<String>,
+    /// The listed party's identifiers and dates of birth (#68), when the list gives any.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub listed_identifiers: Vec<IdentifierResponse>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub listed_birth_dates: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct IdentifierResponse {
+    pub kind: String,
+    pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+}
+
+fn identifier_responses(m: &SubjectMatch) -> Vec<IdentifierResponse> {
+    m.subject
+        .identifiers
+        .iter()
+        .map(|i| IdentifierResponse { kind: i.kind.clone(), value: i.value.clone(), country: i.country.clone() })
+        .collect()
 }
 
 pub fn kind_name(kind: crate::matching::SubjectKind) -> &'static str {
@@ -287,6 +401,8 @@ fn candidate_response(m: &SubjectMatch) -> CandidateResponse {
         alignment: m.alignment.clone(),
         address_state: m.address_state.as_str(),
         listed_addresses,
+        listed_identifiers: identifier_responses(m),
+        listed_birth_dates: m.subject.birth_dates.clone(),
     }
 }
 
@@ -551,6 +667,9 @@ impl ScreeningService {
             receiver_name: body.receiver_name.clone().unwrap_or_default(),
             company_name: body.company_name.clone().unwrap_or_default(),
             address: body.address.clone().unwrap_or_default(),
+            receiver_identifiers: body.receiver_identifiers.clone(),
+            company_identifiers: body.company_identifiers.clone(),
+            receiver_birth_date: body.receiver_date_of_birth.as_deref().and_then(entered_birth_date),
         };
         let parties: Vec<Party> = body
             .parties
@@ -560,6 +679,8 @@ impl ScreeningService {
                 name: p.name.clone().unwrap_or_default(),
                 person: p.is_person(),
                 address: p.address.clone().unwrap_or_default(),
+                identifiers: p.identifiers.clone(),
+                birth_date: p.date_of_birth.as_deref().and_then(entered_birth_date),
             })
             .collect();
         let result =
@@ -630,6 +751,9 @@ impl ScreeningService {
                 results.push_str(&format!("party {} {} ", p.number, p.role));
             }
             results.push_str(entry.kind.as_str());
+            if entry.identifiers > 0 {
+                results.push_str(&format!(" (with {} identifiers)", entry.identifiers));
+            }
             // The table's own code for the row: never what was entered.
             if let Some(d) = &entry.destination {
                 results.push_str(&format!(" (destination {} {})", d.state.as_str(), d.destination.code));

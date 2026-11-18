@@ -205,7 +205,7 @@ async fn status(State(s): State<Shared>) -> Response {
             state,
             version: &s.config.version,
             matcher_version: &s.screenings.screener.matcher_version,
-            features: &["parties", "destinations"],
+            features: &["parties", "destinations", "identifiers"],
             lists,
         },
     )

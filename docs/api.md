@@ -61,6 +61,37 @@ Only an implementation whose `GET /api/v1/status` lists `"parties"` in **`featur
 production runs, since 2026-11-17; owner's decision on #76); the website offers "Add a party" only there. Elsewhere
 `parties` is ignored, so a caller checks `features` first.
 
+## Identifiers and dates of birth (Rust only so far)
+
+A name can come with its identifiers (#68; owner's decisions, 2026-11-18): `receiverIdentifiers` and
+`companyIdentifiers` for the request's own receiver and company, `identifiers` for a party; and a person's date of
+birth: `receiverDateOfBirth`, or a party's `dateOfBirth` (a person's only). Each list is up to 5 strings of up to 64
+characters, each with at least 5 letters or digits, 4 of them digits (shorter ones would equal unrelated numbers); a
+date of birth is `YYYY-MM-DD`, `YYYY-MM` or `YYYY`. Either needs the name it belongs to.
+
+```json
+{ "reference": "TX-2026-0002", "companyName": "Northwind Trading LLC", "companyIdentifiers": ["1027700132195"],
+  "receiverName": "Ivan Sokolov", "receiverIdentifiers": ["P04581926"], "receiverDateOfBirth": "1960-03-12" }
+```
+
+Identifiers are compared on their letters and digits, case aside ("p 0458-1926" is "P04581926"), with every
+identifier the lists give (OFAC, UK, EU and UN so far; docs/sources.md), and with each number within one ("OGRN
+1027700132195" is found by "1027700132195"):
+
+- **Equal**: the listed party is a **Match** (100%) on that list, whether or not its name matches (a renamed company,
+  a renamed vessel), the identifier its own line first: "Identifier: equals the listed Tax ID No. OGRN 1027700132195
+  (Russia)". When the name didn't find it, a second line says so.
+- **Different**: a listed party the name found whose listed identifiers are none of the entered ones keeps its
+  percentage and outcome; a line says so ("Identifiers: the entered ones aren't among the listed (Passport …); a
+  person decides"). Never lower: a list may have an old or a second passport.
+- **Date of birth**: on each possible match that lists dates of birth, a line says whether the entered one is among
+  them (a year contains its days) or differs. It changes nothing.
+
+Candidates carry `listedIdentifiers` (`kind`, `value`, `country`) and `listedBirthDates` when the list gives any;
+in streams the lines are in `notes`. The audit line says how many identifiers came with a name ("Company (with 1
+identifiers)"), never which. Only an implementation whose status lists `"identifiers"` takes them; the website offers
+the fields only there.
+
 ## Destinations under broad restrictions (Rust only so far)
 
 Of embargoes, screening covers only the destinations in a table that administrators keep from the official sources

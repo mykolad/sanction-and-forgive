@@ -49,6 +49,8 @@ fn load(path: &str) -> Vec<ScreenedList> {
                 addresses: s[4].as_array().unwrap().iter().map(|a| ListedAddress { raw: text(&a[0]), country_code: text(&a[1]) }).collect(),
                 programme: s[5].as_str().map(str::to_string),
                 source_url: s[6].as_str().map(str::to_string),
+                identifiers: Vec::new(),
+                birth_dates: Vec::new(),
             })
             .collect();
         lists.push(ScreenedList {
@@ -86,6 +88,7 @@ fn read_inputs(path: &str) -> Vec<ScreeningRequest> {
                 receiver_name: fields[0].clone(),
                 company_name: fields[1].clone(),
                 address: fields[2].clone(),
+                ..Default::default()
             });
         }
     }

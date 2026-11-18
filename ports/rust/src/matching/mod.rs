@@ -13,6 +13,7 @@ pub mod addresses;
 pub mod compare;
 pub mod data;
 pub mod destinations;
+pub mod identifiers;
 pub mod index;
 pub mod korean;
 pub mod names;
@@ -23,7 +24,7 @@ pub mod text;
 
 pub use addresses::AddressState;
 pub use destinations::{Destination, DestinationKind, DestinationNotice, DestinationState, DestinationStatus, Destinations};
-pub use index::{ListIndex, ListedAddress, ListedName, ListedSubject, SubjectKind, SubjectMatch};
+pub use index::{ListIndex, ListedAddress, ListedIdentifier, ListedName, ListedSubject, SubjectKind, SubjectMatch};
 pub use options::{Options, Outcome};
 pub use scorer::WordAlignment;
 pub use screener::{
@@ -36,6 +37,101 @@ mod tests {
     use super::*;
 
     /// The reference's MatcherVersion for the shipped dictionaries and default options.
+    /// The owner's rules for identifiers and dates of birth (#68).
+    #[test]
+    fn an_equal_identifier_is_a_match_a_different_one_never_lowers_and_a_date_of_birth_is_only_said() {
+        let listed = |id: &str, name: &str, kind: SubjectKind, identifiers: &[(&str, &str)], dates: &[&str]| ListedSubject {
+            external_id: id.to_string(),
+            kind,
+            primary_name: name.to_string(),
+            names: vec![ListedName { full_name: name.to_string(), is_weak: false }],
+            addresses: Vec::new(),
+            programme: None,
+            source_url: None,
+            identifiers: identifiers
+                .iter()
+                .map(|(k, v)| ListedIdentifier { kind: k.to_string(), value: v.to_string(), country: None })
+                .collect(),
+            birth_dates: dates.iter().map(|d| d.to_string()).collect(),
+        };
+        let list = ScreenedList {
+            code: "uk".to_string(),
+            name: "UK".to_string(),
+            index: Some(std::sync::Arc::new(ListIndex::build(vec![
+                listed("A", "Orion Shipping Holdings LLC", SubjectKind::Entity, &[("Tax ID No.", "OGRN 1027700132195")], &[]),
+                listed("B", "Ivan Petrovich Sokolov", SubjectKind::Individual, &[("Passport", "P04581926")], &["1960-03-12"]),
+            ]))),
+        };
+        let screener = Screener::new(Options::default());
+        let screen = |request: ScreeningRequest| screener.screen(&request, std::slice::from_ref(&list), &AllowList::empty()).unwrap();
+
+        // An equal identifier: a Match whatever the name (a renamed company), the number found inside the listed value.
+        let renamed = screen(ScreeningRequest {
+            company_name: "Northwind Trading".to_string(),
+            company_identifiers: vec!["1027700132195".to_string()],
+            ..Default::default()
+        });
+        let cell = &renamed.entries[0].cells[0];
+        assert_eq!((cell.outcome, cell.percent), (Some(Outcome::Match), Some(100)));
+        let best = cell.best.as_ref().unwrap();
+        assert_eq!(best.subject.external_id, "A");
+        assert!(best.alignment[0].starts_with("Identifier: equals the listed Tax ID No. OGRN 1027700132195"), "{:?}", best.alignment);
+        assert_eq!(renamed.outcome, OverallOutcome::Match);
+        assert_eq!(renamed.entries[0].identifiers, 1);
+
+        // A different identifier with the name matching: never lower, only said; the date of birth said too.
+        let plain = screen(ScreeningRequest { receiver_name: "Ivan Sokolov".to_string(), ..Default::default() });
+        let different = screen(ScreeningRequest {
+            receiver_name: "Ivan Sokolov".to_string(),
+            receiver_identifiers: vec!["X9999999".to_string()],
+            receiver_birth_date: Some("1961".to_string()),
+            ..Default::default()
+        });
+        let (before, after) = (&plain.entries[0].cells[0], &different.entries[0].cells[0]);
+        assert_eq!(after.percent, before.percent);
+        assert_ne!(after.outcome, Some(Outcome::NoMatch));
+        let notes = &after.best.as_ref().unwrap().alignment;
+        assert!(
+            notes.iter().any(|n| n.starts_with("Identifiers: the entered ones aren't among the listed (Passport P04581926)")),
+            "{notes:?}"
+        );
+        assert!(notes.iter().any(|n| n == "Date of birth: differs from the listed (1960-03-12)"), "{notes:?}");
+        let same = screen(ScreeningRequest {
+            receiver_name: "Ivan Sokolov".to_string(),
+            receiver_birth_date: Some("1960-03-12".to_string()),
+            ..Default::default()
+        });
+        let notes = &same.entries[0].cells[0].best.as_ref().unwrap().alignment;
+        assert!(notes.iter().any(|n| n == "Date of birth: the entered one is among the listed (1960-03-12)"), "{notes:?}");
+        assert_eq!(same.entries[0].cells[0].percent, before.percent);
+
+        // A short identifier is never compared; a party's identifiers are its own.
+        let short = screen(ScreeningRequest {
+            company_name: "Northwind Trading".to_string(),
+            company_identifiers: vec!["1027".to_string()],
+            ..Default::default()
+        });
+        assert_eq!(short.entries[0].cells[0].outcome, Some(Outcome::NoMatch));
+        let party = Party {
+            role: "consignee",
+            name: "Somebody Else".to_string(),
+            person: true,
+            identifiers: vec!["p 0458-1926".to_string()],
+            ..Default::default()
+        };
+        let shipment = screener
+            .screen_parties(
+                &ScreeningRequest::default(),
+                &[party],
+                std::slice::from_ref(&list),
+                &AllowList::empty(),
+                &Destinations::empty(),
+            )
+            .unwrap();
+        assert_eq!(shipment.entries[0].cells[0].best.as_ref().unwrap().subject.external_id, "B");
+        assert_eq!(shipment.outcome, OverallOutcome::Match);
+    }
+
     #[test]
     fn matcher_version_is_the_references() {
         assert_eq!(Screener::new(Options::default()).matcher_version, "2bbc2988bdda");
@@ -51,13 +147,20 @@ mod tests {
             addresses: Vec::new(),
             programme: None,
             source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
         };
         let list = ScreenedList {
             code: "eu".to_string(),
             name: "EU".to_string(),
             index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
         };
-        let request = ScreeningRequest { receiver_name: String::new(), company_name: query.to_string(), address: String::new() };
+        let request = ScreeningRequest {
+            receiver_name: String::new(),
+            company_name: query.to_string(),
+            address: String::new(),
+            ..Default::default()
+        };
         let result = Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap();
         let cell = &result.entries[0].cells[0];
         (cell.outcome, cell.percent)
@@ -246,13 +349,20 @@ mod tests {
                 addresses: vec![ListedAddress { raw: address.to_string(), country_code: String::new() }],
                 programme: None,
                 source_url: None,
+                identifiers: Vec::new(),
+                birth_dates: Vec::new(),
             };
             let list = ScreenedList {
                 code: "eu".to_string(),
                 name: "EU".to_string(),
                 index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
             };
-            let request = ScreeningRequest { receiver_name: String::new(), company_name: String::new(), address: address.to_string() };
+            let request = ScreeningRequest {
+                receiver_name: String::new(),
+                company_name: String::new(),
+                address: address.to_string(),
+                ..Default::default()
+            };
             let result = Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap();
             let cell = &result.entries[0].cells[0];
             assert!(cell.best.is_some(), "{address}: {:?} {:?}", cell.outcome, cell.percent);
@@ -369,13 +479,20 @@ mod tests {
             addresses: Vec::new(),
             programme: None,
             source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
         };
         let options = Options::default();
         let mut subjects: Vec<ListedSubject> = (0..options.candidate_limit + 10).map(|i| named(i, "Lee Nam")).collect();
         subjects.push(named(usize::MAX, "Ri Chol"));
         let list =
             ScreenedList { code: "eu".to_string(), name: "EU".to_string(), index: Some(std::sync::Arc::new(ListIndex::build(subjects))) };
-        let request = ScreeningRequest { receiver_name: "Lee Cheol".to_string(), company_name: String::new(), address: String::new() };
+        let request = ScreeningRequest {
+            receiver_name: "Lee Cheol".to_string(),
+            company_name: String::new(),
+            address: String::new(),
+            ..Default::default()
+        };
         let result = Screener::new(options).screen(&request, &[list], &AllowList::empty()).unwrap();
         let cell = &result.entries[0].cells[0];
         assert_eq!(cell.outcome, Some(Outcome::Match), "{:?}", cell.percent);
@@ -442,13 +559,20 @@ mod tests {
             addresses: Vec::new(),
             programme: None,
             source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
         };
         let options = Options::default();
         let mut subjects: Vec<ListedSubject> = (0..options.candidate_limit + 10).map(|i| named(i, "Hua Huawei")).collect();
         subjects.push(named(usize::MAX, "Hua Wei"));
         let list =
             ScreenedList { code: "eu".to_string(), name: "EU".to_string(), index: Some(std::sync::Arc::new(ListIndex::build(subjects))) };
-        let request = ScreeningRequest { receiver_name: String::new(), company_name: "Hua Wei".to_string(), address: String::new() };
+        let request = ScreeningRequest {
+            receiver_name: String::new(),
+            company_name: "Hua Wei".to_string(),
+            address: String::new(),
+            ..Default::default()
+        };
         let result = Screener::new(options).screen(&request, &[list], &AllowList::empty()).unwrap();
         let cell = &result.entries[0].cells[0];
         assert_eq!(cell.outcome, Some(Outcome::Match), "{:?}", cell.percent);
@@ -494,14 +618,20 @@ mod tests {
             addresses: Vec::new(),
             programme: None,
             source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
         };
         let list = ScreenedList {
             code: "eu".to_string(),
             name: "EU".to_string(),
             index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
         };
-        let request =
-            ScreeningRequest { receiver_name: String::new(), company_name: "Zhong Xing Telecom".to_string(), address: String::new() };
+        let request = ScreeningRequest {
+            receiver_name: String::new(),
+            company_name: "Zhong Xing Telecom".to_string(),
+            address: String::new(),
+            ..Default::default()
+        };
         let result = Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap();
         let best = result.entries[0].cells[0].best.as_ref().unwrap();
         let entered: Vec<Option<i32>> = best.words.iter().map(|w| w.entered).collect();
@@ -520,17 +650,35 @@ mod tests {
             addresses: Vec::new(),
             programme: None,
             source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
         };
         let list = ScreenedList {
             code: "eu".to_string(),
             name: "EU".to_string(),
             index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
         };
-        let request =
-            ScreeningRequest { receiver_name: String::new(), company_name: "Bluefield Logistics".to_string(), address: String::new() };
+        let request = ScreeningRequest {
+            receiver_name: String::new(),
+            company_name: "Bluefield Logistics".to_string(),
+            address: String::new(),
+            ..Default::default()
+        };
         let parties = [
-            Party { role: "shipper", name: "Pinecrest Exports GmbH".to_string(), person: false, address: "Hamburg, Germany".to_string() },
-            Party { role: "consignee", name: "Northwind Trading LLC".to_string(), person: false, address: String::new() },
+            Party {
+                role: "shipper",
+                name: "Pinecrest Exports GmbH".to_string(),
+                person: false,
+                address: "Hamburg, Germany".to_string(),
+                ..Default::default()
+            },
+            Party {
+                role: "consignee",
+                name: "Northwind Trading LLC".to_string(),
+                person: false,
+                address: String::new(),
+                ..Default::default()
+            },
         ];
         let result = Screener::new(Options::default())
             .screen_parties(&request, &parties, &[list], &AllowList::empty(), &Destinations::empty())

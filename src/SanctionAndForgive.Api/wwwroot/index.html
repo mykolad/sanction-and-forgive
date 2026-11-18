@@ -39,6 +39,19 @@
             <span class="field-label">Company</span>
             <input id="companyName" name="companyName" maxlength="300" autocomplete="off" spellcheck="false" placeholder="ТОВ «Ромашка» or Romashka LLC">
           </label>
+          <!-- Offered only when the API's status lists the "identifiers" feature (app.js). -->
+          <label class="field particulars" hidden>
+            <span class="field-label">Receiver's ID numbers <span class="hint">passport, national ID; commas between</span></span>
+            <input id="receiverIdentifiers" maxlength="400" autocomplete="off" spellcheck="false" placeholder="P04581926">
+          </label>
+          <label class="field particulars" hidden>
+            <span class="field-label">Receiver's date of birth <span class="hint">YYYY-MM-DD, or just the year</span></span>
+            <input id="receiverDateOfBirth" maxlength="10" autocomplete="off" spellcheck="false" placeholder="1960-03-12">
+          </label>
+          <label class="field particulars" hidden>
+            <span class="field-label">Company's registration or tax numbers <span class="hint">commas between</span></span>
+            <input id="companyIdentifiers" maxlength="400" autocomplete="off" spellcheck="false" placeholder="1027700132195">
+          </label>
           <label class="field field-wide">
             <span class="field-label">Address <span class="hint">any format</span></span>
             <textarea id="address" name="address" maxlength="300" rows="2" spellcheck="false" placeholder="ул. Ленина 5, Москва — or just a city or a country"></textarea>
