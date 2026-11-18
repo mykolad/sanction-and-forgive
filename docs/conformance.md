@@ -64,7 +64,9 @@ job. When .NET or Go catch up with Rust, their CI job moves to version 2. A test
 field or endpoint) is a `[SinceVersionFact(2)]`, skipped below it: `PartiesTests` (several parties per screening, #65)
 `DestinationsTests` (the table of destinations under broad restrictions, #67: each test empties the table first
 and leaves it empty, so the golden files see no destination) and `IdentifiersTests` (identifiers and dates of birth,
-#68: a variant of the OFAC consolidated file gives two parties some, and the base files are imported again).
+#68: a variant of the OFAC consolidated file gives two parties some, and the base files are imported again) and
+`VesselsTests` (vessels, #69: the fictional ship CONFORMANCE STAR, IMO 1234567, that every format able to list ships
+lists; version 1 leaves it out).
 
 ## What an implementation must provide
 

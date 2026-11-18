@@ -10,11 +10,26 @@ use quick_xml::Reader;
 
 use crate::matching::text::{is_letter, upper_invariant};
 
+/// A listed party's kind, as stored (Subjects.Type). Vessel (#69) is written by the Rust port only; the reference and
+/// the Go port read it as Unknown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubjectType {
     Individual = 0,
     Entity = 1,
     Unknown = 2,
+    Vessel = 3,
+}
+
+/// The kind every parser gives a vessel's IMO number (#69), its value the seven digits alone.
+pub const IMO_NUMBER: &str = "IMO number";
+
+/// A ship's IMO number as the lists write it ("IMO 9187629", "IMO9187629", "IMO number: 9187629", "9187629"): its
+/// seven digits, or None when the text isn't one. Only a value that is an IMO number and nothing else is read.
+pub fn imo_number(text: &str) -> Option<String> {
+    let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_ascii_uppercase();
+    let rest = compact.strip_prefix("IMO").map(|r| r.trim_start_matches("NUMBER").trim_start_matches("NO.").trim_start_matches(['.', ':']));
+    let digits = rest.unwrap_or(&compact);
+    (digits.len() == 7 && digits.bytes().all(|b| b.is_ascii_digit())).then(|| digits.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -256,6 +271,15 @@ impl Builder {
         let identifier = ParsedIdentifier { kind: clean(kind).unwrap_or_else(|| "Identifier".to_string()), value, country: clean(country) };
         if !self.identifiers.contains(&identifier) {
             self.identifiers.push(identifier);
+        }
+    }
+
+    /// A vessel's IMO number (#69) as the list writes it: its seven digits under IMO_NUMBER when it is one, else as
+    /// written under the list's own kind (so nothing a list gives is lost).
+    pub fn add_imo_number(&mut self, value: Option<&str>, kind_otherwise: &str) {
+        match value.and_then(imo_number) {
+            Some(digits) => self.add_identifier(Some(IMO_NUMBER), Some(&digits), None),
+            None => self.add_identifier(Some(kind_otherwise), value, None),
         }
     }
 

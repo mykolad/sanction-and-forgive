@@ -18,6 +18,16 @@ public static class FeedFiles
         ("ch-seco", 90), ("ca-sema", 70), ("ua-sfms", 50), ("fr-tresor", 100), ("nl-terrorism", 40), ("nz-mfat", 60), ("jp-mof", 60), ("us-uflpa", 50), ("be-terrorism", 40),
     ];
 
+    /// <summary>The feeds whose files list the fictional vessel CONFORMANCE STAR (IMO 1234567): version 1 leaves it out,
+    /// version 2 keeps it (#69), one record more.</summary>
+    public static readonly IReadOnlySet<string> VesselFeeds =
+        new HashSet<string>(StringComparer.Ordinal) { "ofac-sdn", "ofac-cons", "uk", "us-export", "ch-seco", "ca-sema", "fr-tresor", "nz-mfat" };
+
+    /// <summary>How many records a feed's base file makes at the version tested: its parties, and from version 2 its
+    /// vessel.</summary>
+    public static int RecordCount(string code) =>
+        Feeds.Single(feed => feed.Code == code).Count + (Harness.Settings.Version >= 2 && VesselFeeds.Contains(code) ? 1 : 0);
+
     /// <summary>The manual list (a CSV through <c>source-add</c> and <c>add</c>), and its parties.</summary>
     public const string ManualCode = "conformance-manual";
 
@@ -190,11 +200,13 @@ public static class FeedFiles
             entities.Add(entity);
         }
 
-        // A vessel: OFAC lists ships, which the app leaves out.
+        // A vessel: OFAC lists ships, which version 1 leaves out and version 2 keeps (#69), with its IMO number.
         entities.Add(new XElement(ns + "entity", new XAttribute("id", idBase + 9999),
             new XElement(ns + "generalInfo", new XElement(ns + "entityType", "Vessel")),
             new XElement(ns + "names", new XElement(ns + "name", new XElement(ns + "isPrimary", "true"),
-                new XElement(ns + "translations", new XElement(ns + "translation", new XElement(ns + "formattedFullName", "CONFORMANCE STAR")))))));
+                new XElement(ns + "translations", new XElement(ns + "translation", new XElement(ns + "formattedFullName", "CONFORMANCE STAR"))))),
+            new XElement(ns + "identityDocuments", new XElement(ns + "identityDocument",
+                new XElement(ns + "type", "Vessel Registration Identification"), new XElement(ns + "documentNumber", "IMO 1234567")))));
         return new XDocument(new XDeclaration("1.0", "utf-8", null), new XElement(ns + "sanctionsData", entities));
     }
 
@@ -289,7 +301,8 @@ public static class FeedFiles
         }
 
         root.Add(new XElement("Designation", new XElement("UniqueID", "SHIP0001"),
-            new XElement("Names", UkName(null, "CONFORMANCE STAR", "Primary Name", strength: null)), new XElement("IndividualEntityShip", "Ship")));
+            new XElement("Names", UkName(null, "CONFORMANCE STAR", "Primary Name", strength: null)), new XElement("IndividualEntityShip", "Ship"),
+            new XElement("ShipDetails", new XElement("Ship", new XElement("IMONumbers", new XElement("IMONumber", "IMO1234567"))))));
         return new XDocument(root);
     }
 
@@ -352,7 +365,8 @@ public static class FeedFiles
                 json.WriteEndObject();
             }
 
-            // Another agency's record (the app takes OFAC's from OFAC) and a vessel: both left out.
+            // Another agency's record (the app takes OFAC's from OFAC), left out, and a vessel: left out by version 1, kept
+            // by version 2 (#69).
             json.WriteStartObject();
             json.WriteString("id", "cf-sdn");
             json.WriteString("source", "Specially Designated Nationals (SDN) - Treasury Department");
@@ -711,6 +725,19 @@ public static class FeedFiles
         }
     }
 
+    /// <summary>New Zealand's Ships sheet: its header, and the fictional vessel every format lists (version 2 reads it,
+    /// #69; version 1 reads only the register's sheet).</summary>
+    private static string ShipsSheet(string main)
+    {
+        static string Row(int r, params string[] cells) =>
+            $"<row r=\"{r}\">{string.Concat(cells.Select((cell, c) => $"<c r=\"{(char)('A' + c)}{r}\" t=\"inlineStr\"><is><t>{cell}</t></is></c>"))}</row>";
+        return $"<worksheet xmlns=\"{main}\"><sheetData>"
+            + Row(1, "Ships")
+            + Row(2, "Type", "Unique Identifier", "IMO Number", "Name of Ship as of Date of Sanction", "Date of Sanction", "Alias/Alternate Names", "Date of Additional Sanction", "Sanction Status")
+            + Row(3, "Ship", "SHP-1", "1234567", "Conformance Star", "", "Star of Conformance", "", "Sanctioned")
+            + "</sheetData></worksheet>";
+    }
+
     private static void NewZealand(IReadOnlyList<FixtureSubject> subjects, string path)
     {
         string[] header =
@@ -798,7 +825,7 @@ public static class FeedFiles
             ("xl/_rels/workbook.xml.rels", "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet2.xml\"/></Relationships>"),
             ("xl/sharedStrings.xml", strings.ToString()),
             ("xl/worksheets/sheet1.xml", sheet.ToString()),
-            ("xl/worksheets/sheet2.xml", $"<worksheet xmlns=\"{main}\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"inlineStr\"><is><t>Ship</t></is></c></row></sheetData></worksheet>"),
+            ("xl/worksheets/sheet2.xml", ShipsSheet(main)),
         };
         using var file = File.Create(path);
         using var zip = new System.IO.Compression.ZipArchive(file, System.IO.Compression.ZipArchiveMode.Create);
@@ -871,7 +898,9 @@ public static class FeedFiles
             new XElement("modification", new XAttribute("modification-type", "de-listed"), new XAttribute("effective-date", "2020-01-01")),
             new XElement("modification", new XAttribute("modification-type", "listed"))));
         root.Add(new XElement("target", new XAttribute("ssid", 99002),
-            new XElement("object", new XElement("identity", new XAttribute("main", "true"), SecoName([("CONFORMANCE STAR", null)], "primary-name", "good")))));
+            new XElement("object", new XAttribute("object-type", "vessel"),
+                new XElement("identity", new XAttribute("main", "true"), SecoName([("CONFORMANCE STAR", null)], "primary-name", "good")),
+                new XElement("other-information", "IMO number: 1234567"))));
         foreach (var city in places)
         {
             var address = Fixtures.All.Select(subject => subject.Address).OfType<FixtureAddress>().First(address => address.City == city);
@@ -932,7 +961,7 @@ public static class FeedFiles
         }
 
         root.Add(new XElement("record", new XElement("Country-Pays", "Russia / Russie"), new XElement("EntityOrShip-EntiteOuNavire", "Conformance Star"),
-            new XElement("ShipIMONumber-NumeroOMIDuNavire", "9999999"), new XElement("Item-NumeroDarticle", "9999")));
+            new XElement("ShipIMONumber-NumeroOMIDuNavire", "1234567"), new XElement("Item-NumeroDarticle", "9999")));
         return new XDocument(root);
     }
 

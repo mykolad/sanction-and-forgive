@@ -110,6 +110,9 @@ public enum SubjectType : byte
     Individual,
     Entity,
     Unknown,
+
+    /// <summary>A ship (#69): written by the Rust port only so far; this app reads it as <see cref="Unknown"/>.</summary>
+    Vessel,
 }
 
 public enum NameScript : byte

@@ -19,6 +19,22 @@ pub enum SubjectKind {
     Individual,
     Entity,
     Unknown,
+    /// A ship (#69): in the list's vessel index, searched only by a vessel entry.
+    Vessel,
+}
+
+/// A vessel's name without the prefix some write before it ("M/V Maria", "MT Ocean Faye"): what is compared.
+pub fn vessel_name(name: &str) -> &str {
+    let trimmed = name.trim_start();
+    for prefix in ["M/V ", "M/T ", "M.V. ", "M.T. ", "MV ", "MT "] {
+        if trimmed.get(..prefix.len()).is_some_and(|head| head.eq_ignore_ascii_case(prefix)) {
+            let rest = trimmed[prefix.len()..].trim_start();
+            if !rest.is_empty() {
+                return rest;
+            }
+        }
+    }
+    trimmed
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +132,9 @@ pub struct ListIndex {
     address_vocabulary: FuzzyVocabulary,
     /// By identifier key (identifiers::listed_keys, #68): the subjects that list it, each once.
     subjects_by_identifier: HashMap<String, Box<[u32]>>,
+    /// The list's vessels (#69), in an index of their own: their names never weigh on how a person's or a company's
+    /// words are weighted, and only a vessel entry searches them. None when the list has none.
+    vessels: Option<Box<ListIndex>>,
     states: Mutex<Vec<SearchState>>,
     memo: Mutex<HashMap<String, Arc<dyn Any + Send + Sync>>>,
 }
@@ -185,7 +204,17 @@ fn address_keys(address: &AddressForm) -> Vec<String> {
 }
 
 impl ListIndex {
+    /// One list's index: its people, companies and parties of unknown kind, and its vessels in an index of their own.
     pub fn build(subjects: Vec<ListedSubject>) -> ListIndex {
+        let (vessels, others): (Vec<ListedSubject>, Vec<ListedSubject>) = subjects.into_iter().partition(|s| s.kind == SubjectKind::Vessel);
+        let mut index = ListIndex::build_part(others);
+        if !vessels.is_empty() {
+            index.vessels = Some(Box::new(ListIndex::build_part(vessels)));
+        }
+        index
+    }
+
+    fn build_part(subjects: Vec<ListedSubject>) -> ListIndex {
         let data = data();
         let mut tokenizer = Tokenizer::interning(data);
         let parser = NameParser { data };
@@ -198,14 +227,16 @@ impl ListIndex {
                 if !seen.insert(name.full_name.as_str()) {
                     continue;
                 }
-                let tokens = tokenizer.tokenize(&name.full_name, true);
+                let compared = if subject.kind == SubjectKind::Vessel { vessel_name(&name.full_name) } else { &name.full_name };
+                let tokens = tokenizer.tokenize(compared, true);
                 if subject.kind != SubjectKind::Individual {
                     let form = parser.entity(&tokens);
                     if !form.is_empty() {
                         aliases.push(AliasEntry { subject: s as u32, name: name.full_name.clone(), is_weak: name.is_weak, form });
                     }
                 }
-                if subject.kind != SubjectKind::Entity {
+                // A person's reading for a person, or a party whose kind the list doesn't give; never a company's or a ship's.
+                if matches!(subject.kind, SubjectKind::Individual | SubjectKind::Unknown) {
                     let form = parser.person(&tokens);
                     if !form.is_empty() {
                         aliases.push(AliasEntry { subject: s as u32, name: name.full_name.clone(), is_weak: name.is_weak, form });
@@ -279,18 +310,34 @@ impl ListIndex {
             name_vocabulary: FuzzyVocabulary::new(&fold_keys),
             subjects_by_address_key,
             address_vocabulary: FuzzyVocabulary::new(&address_vocabulary),
+            vessels: None,
             states: Mutex::new(Vec::new()),
             memo: Mutex::new(HashMap::default()),
         }
     }
 
+    /// The people, companies and parties of unknown kind: what a name or an address entry searches.
     pub fn subjects(&self) -> &[Arc<ListedSubject>] {
         &self.subjects
     }
 
+    /// The list's vessels' index (#69), if it lists any.
+    pub fn vessels(&self) -> Option<&ListIndex> {
+        self.vessels.as_deref()
+    }
+
+    /// Every subject the list gives, vessels last: what browsing shows.
+    pub fn all_subjects(&self) -> impl Iterator<Item = &Arc<ListedSubject>> {
+        self.subjects.iter().chain(self.vessels.iter().flat_map(|v| v.subjects.iter()))
+    }
+
     /// The subjects that list an identifier equal to an entered one (its key, identifiers::identifier_key), each with
-    /// the listed identifier that matched, in list order, each subject once.
-    pub fn identified(&self, entered_keys: &[String]) -> Vec<(Arc<ListedSubject>, ListedIdentifier)> {
+    /// the listed identifier that matched, in list order, each subject once; only identifiers `compared` keeps count.
+    pub fn identified(
+        &self,
+        entered_keys: &[String],
+        compared: impl Fn(&ListedIdentifier) -> bool,
+    ) -> Vec<(Arc<ListedSubject>, ListedIdentifier)> {
         let mut found: Vec<(Arc<ListedSubject>, ListedIdentifier)> = Vec::new();
         for key in entered_keys {
             for &s in postings(&self.subjects_by_identifier, key) {
@@ -298,7 +345,7 @@ impl ListIndex {
                 if found.iter().any(|(f, _)| Arc::ptr_eq(f, subject)) {
                     continue;
                 }
-                if let Some(identifier) = subject.identifiers.iter().find(|i| listed_keys(&i.value).contains(key)) {
+                if let Some(identifier) = subject.identifiers.iter().find(|i| compared(i) && listed_keys(&i.value).contains(key)) {
                     found.push((subject.clone(), identifier.clone()));
                 }
             }
