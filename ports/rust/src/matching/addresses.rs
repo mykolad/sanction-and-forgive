@@ -183,7 +183,7 @@ pub(super) fn lookup<'m, T>(tokens: &[TokenRef], start: usize, max_words: usize,
 
 /// The reference's `\b([A-Z]{2})\W*$`: two capital ASCII letters, a word boundary before them, and nothing after them
 /// but non-word characters (\w in .NET: letters, marks, decimal digits, connector punctuation).
-fn trailing_code(raw: &str) -> Option<String> {
+pub(super) fn trailing_code(raw: &str) -> Option<String> {
     let chars: Vec<char> = raw.chars().collect();
     let mut end = chars.len();
     while end > 0 && !is_word_char(chars[end - 1]) {

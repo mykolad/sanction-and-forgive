@@ -7,7 +7,7 @@
 
 use chrono::NaiveDate;
 
-use super::addresses::{address_parts, lookup, names_a_street, AddressForm};
+use super::addresses::{address_parts, lookup, names_a_street, trailing_code};
 use super::data::{keys, MatcherData};
 use super::text::{words, TokenRef, Tokenizer};
 use super::HashMap;
@@ -78,6 +78,33 @@ fn names_a_street_here(data: &MatcherData, tokens: &[TokenRef], parts: &[i64], s
     names_a_street(data, tokens, parts, start, length, false)
         || (end < tokens.len() && parts[end] == parts[end - 1] && is(&tokens[end], &STREET_AFTER))
         || (start > 0 && parts[start - 1] == parts[start] && is(&tokens[start - 1], &STREET_BEFORE))
+}
+
+/// The first (or, with last, the last) of the names in names that the address has and that doesn't name a street.
+fn first_outside_streets<T: Clone>(
+    data: &MatcherData,
+    tokens: &[TokenRef],
+    parts: &[i64],
+    names: &HashMap<String, T>,
+    max_words: usize,
+    last: bool,
+) -> Option<T> {
+    let (mut found, mut i) = (None, 0);
+    while i < tokens.len() {
+        match lookup(tokens, i, max_words, names) {
+            Some((value, length)) => {
+                if !names_a_street_here(data, tokens, parts, i, length) {
+                    found = Some(value.clone());
+                    if !last {
+                        break;
+                    }
+                }
+                i += length;
+            }
+            None => i += 1,
+        }
+    }
+    found
 }
 
 /// The words that name a region of some country, as an address is read ("Vinnytsia Oblast", "Ростовская обл.").
@@ -257,7 +284,7 @@ impl Destinations {
     }
 
     /// The notice for an entered address, read as `form` (its country) and word by word for the table's names.
-    pub fn find(&self, data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str, form: &AddressForm) -> Option<DestinationNotice> {
+    pub fn find(&self, data: &MatcherData, tokenizer: &mut Tokenizer, raw: &str) -> Option<DestinationNotice> {
         if self.rows.is_empty() {
             return None;
         }
@@ -289,21 +316,17 @@ impl Destinations {
                 }
             }
         }
-        // The address's country: named (parse_address already leaves out a country's name that names a street), or
-        // else the country of the first place named, unless that names a street ("12 Tehran Road" isn't in Iran).
-        let mut country = form.country.as_str();
+        // The address's country, in parse_address's order but with this module's street rule (which knows "Rd" and
+        // "vul."): a final ISO code; else the last country named that doesn't name a street ("5 Iran St, Leeds" isn't
+        // in Iran); else the first place named that doesn't ("12 Tehran Road" isn't either).
+        let mut country = trailing_code(raw).filter(|c| data.country_codes.contains(c)).unwrap_or_default();
         if country.is_empty() {
-            let mut i = 0;
-            while i < tokens.len() {
-                match lookup(&tokens, i, data.max_place_words, &data.places) {
-                    Some((place, length)) if !names_a_street_here(data, &tokens, &parts, i, length) => {
-                        country = place.country.as_str();
-                        break;
-                    }
-                    Some((_, length)) => i += length,
-                    None => i += 1,
-                }
-            }
+            country = first_outside_streets(data, &tokens, &parts, &data.countries, data.max_country_words, true).unwrap_or_default();
+        }
+        if country.is_empty() {
+            country = first_outside_streets(data, &tokens, &parts, &data.places, data.max_place_words, false)
+                .map(|place| place.country)
+                .unwrap_or_default();
         }
         if !country.is_empty() {
             for (row, destination) in self.rows.iter().enumerate() {
@@ -341,7 +364,6 @@ impl Destinations {
 
 #[cfg(test)]
 mod tests {
-    use super::super::addresses::parse_address;
     use super::super::data::data;
     use super::*;
 
@@ -391,8 +413,7 @@ mod tests {
     fn find(address: &str) -> Option<(DestinationState, String)> {
         let data = data();
         let mut tokenizer = Tokenizer::new(data);
-        let form = parse_address(data, &mut tokenizer, address, "");
-        table().find(data, &mut tokenizer, address, &form).map(|n| (n.state, n.destination.code))
+        table().find(data, &mut tokenizer, address).map(|n| (n.state, n.destination.code))
     }
 
     #[test]
@@ -415,6 +436,8 @@ mod tests {
             Some((DestinationState::PossiblyRestricted, "ua-kherson-oblast".to_string()))
         );
         assert_eq!(find("vul. Simferopol 5, Kyiv"), None);
+        assert_eq!(find("5 Iran St, Leeds"), None);
+        assert_eq!(find("5 Iran St, Leeds, IR"), Some((DestinationState::Restricted, "ir".to_string())));
         assert_eq!(find("12 Tehran Road, Leeds"), None);
         assert_eq!(find("12 Tehran Road"), None);
     }
@@ -445,8 +468,7 @@ mod tests {
         assert_eq!(find("Kyiv, Ukraine"), None);
         let data = data();
         let mut tokenizer = Tokenizer::new(data);
-        let form = parse_address(data, &mut tokenizer, "Simferopol", "");
-        assert_eq!(Destinations::empty().find(data, &mut tokenizer, "Simferopol", &form), None);
+        assert_eq!(Destinations::empty().find(data, &mut tokenizer, "Simferopol"), None);
     }
 
     #[test]

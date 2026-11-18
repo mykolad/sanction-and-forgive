@@ -228,7 +228,7 @@ impl Screener {
         }
         if let Some(form) = &address_form {
             let cells = lists.iter().map(|list| self.to_cell(list, |index| index.search_address(form, &self.options))).collect();
-            let destination = checks.destinations.find(self.data, &mut tokenizer, address, form);
+            let destination = checks.destinations.find(self.data, &mut tokenizer, address);
             entries.push(Entry {
                 kind: EntryKind::Address,
                 input: address.to_string(),

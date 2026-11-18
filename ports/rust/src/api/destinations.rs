@@ -456,7 +456,6 @@ pub fn starting_rows() -> Vec<Destination> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::matching::addresses::parse_address;
     use crate::matching::text::Tokenizer;
     use crate::matching::{DestinationState, Destinations};
 
@@ -498,8 +497,7 @@ mod tests {
     fn find(address: &str) -> Option<(DestinationState, String)> {
         let data = data();
         let mut tokenizer = Tokenizer::new(data);
-        let form = parse_address(data, &mut tokenizer, address, "");
-        table().find(data, &mut tokenizer, address, &form).map(|n| (n.state, n.destination.code))
+        table().find(data, &mut tokenizer, address).map(|n| (n.state, n.destination.code))
     }
 
     #[test]
