@@ -329,15 +329,24 @@ mod tests {
             ("曾国藩", "Zeng Guofan", SubjectKind::Individual),
             ("华为", "Huawei", SubjectKind::Entity),
             ("重庆", "Chongqing", SubjectKind::Entity),
+            // The given name first, as OFAC writes it; a single character a word, never an initial.
+            ("张伟", "Wei ZHANG", SubjectKind::Individual),
+            ("张 Guofan", "Zhang Guofan", SubjectKind::Individual),
+            // A traditional character's own reading, and a word read as a whole after a surname.
+            ("乾隆", "Qianlong", SubjectKind::Individual),
+            ("曾长江", "Zeng Changjiang", SubjectKind::Individual),
         ] {
             let (outcome, percent) = screen(query, listed, kind);
             assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
         }
-        let (outcome, percent) = screen("章伟", "张伟", SubjectKind::Individual);
-        assert_ne!(outcome, Some(Outcome::Match), "章伟 / 张伟 sound alike, and are two names: {percent:?}");
-        use crate::matching::text::{fold_key, pinyin_readings};
-        assert_eq!(pinyin_readings("曾国藩"), [fold_key("cengguofan"), fold_key("zengguofan")]);
-        assert_eq!(pinyin_readings("重庆"), [fold_key("chongqing")]);
+        // Never two Chinese names that only sound alike, a transliteration, or a reading alike only after folding.
+        for (query, listed) in [("章伟", "张伟"), ("利娜", "Лина"), ("张伟", "Zang Wei"), ("Ли На", "利娜")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        use crate::matching::text::pinyin_readings;
+        assert_eq!(pinyin_readings("曾国藩"), ["cengguofan", "zengguofan", "guofanceng", "guofanzeng"]);
+        assert_eq!(pinyin_readings("重庆"), ["chongqing"]);
     }
 
     #[test]

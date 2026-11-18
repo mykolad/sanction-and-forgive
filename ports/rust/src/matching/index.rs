@@ -12,7 +12,7 @@ use super::data::{data, MatcherData};
 use super::names::{NameForm, NameParser};
 use super::options::{Options, Outcome};
 use super::scorer::{NameScorer, ScoreValue, WordAlignment};
-use super::text::{fold_key, Token, TokenRef, Tokenizer};
+use super::text::{fold_key, is_latin_word, Token, TokenRef, Tokenizer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubjectKind {
@@ -109,6 +109,8 @@ pub struct ListIndex {
     aliases_by_fold: HashMap<String, Box<[u32]>>,
     /// By the fold key of two adjacent words read as one (NameForm::joined).
     aliases_by_joined: HashMap<String, Box<[u32]>>,
+    /// Chinese words by their pinyin readings (#93), for a word or two in Latin script; kept apart from the vocabulary.
+    aliases_by_pinyin: HashMap<String, Box<[u32]>>,
     name_vocabulary: FuzzyVocabulary,
     subjects_by_address_key: HashMap<String, Box<[u32]>>,
     address_vocabulary: FuzzyVocabulary,
@@ -217,13 +219,16 @@ impl ListIndex {
         let mut document_frequency: HashMap<String, usize> = HashMap::default();
         let mut by_fold = OrderedPostings::default();
         let mut by_joined = OrderedPostings::default();
+        let mut by_pinyin = OrderedPostings::default();
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
                 *document_frequency.entry(token.key().to_string()).or_default() += 1;
-                // A Chinese word under its pinyin too (#93), so a Latin name finds it, as one word or two read as one.
-                let pinyin = token.pinyin.iter().flatten().map(String::as_str);
-                for k in lookup_keys(&token).into_iter().chain(korean_keys(&token)).chain(pinyin) {
+                for k in lookup_keys(&token).into_iter().chain(korean_keys(&token)) {
                     by_fold.post(k, a);
+                }
+                // A Chinese word under its pinyin (#93), apart from the vocabulary: a word in Latin script finds it.
+                for reading in token.pinyin.iter().flatten() {
+                    by_pinyin.post(reading, a);
                 }
             }
             // Two adjacent words read as one, by fold key (finding is loose, scoring exact), kept apart from the
@@ -246,6 +251,7 @@ impl ListIndex {
         let idf = document_frequency.into_iter().map(|(k, frequency)| (k, (alias_count / frequency.max(1) as f64).ln())).collect();
         let (fold_keys, aliases_by_fold) = by_fold.packed();
         let (_, aliases_by_joined) = by_joined.packed();
+        let (_, aliases_by_pinyin) = by_pinyin.packed();
         let (address_keys, subjects_by_address_key) = by_address.packed();
         let address_vocabulary: Vec<String> = address_keys.into_iter().filter(|k| !k.starts_with('#')).collect();
         let mut by_identifier: HashMap<String, Vec<u32>> = HashMap::default();
@@ -269,6 +275,7 @@ impl ListIndex {
             idf,
             aliases_by_fold,
             aliases_by_joined,
+            aliases_by_pinyin,
             name_vocabulary: FuzzyVocabulary::new(&fold_keys),
             subjects_by_address_key,
             address_vocabulary: FuzzyVocabulary::new(&address_vocabulary),
@@ -391,10 +398,16 @@ impl ListIndex {
                 }
                 vote(&extra, 3, false);
             }
-            // A Chinese word's pinyin finds the Latin aliases that read so, as one word or as two (#93).
+            // A Chinese word's pinyin finds the aliases in Latin script that read so, as one word or as two; a word in
+            // Latin script finds the Chinese words that read as it (#93). Loose to find, exact to score.
             for reading in token.pinyin.iter().flatten() {
-                vote(postings(by_fold, reading), 3, false);
-                vote(postings(by_joined, reading), 3, true);
+                vote(postings(by_fold, &fold_key(reading)), 3, false);
+                vote(postings(by_joined, &fold_key(reading)), 3, true);
+            }
+            if is_latin_word(token) {
+                for form in &token.forms {
+                    vote(postings(&self.aliases_by_pinyin, form), 3, false);
+                }
             }
             for &group in token.cognate_groups() {
                 for fold in &self.data.cognate_folds[group] {
@@ -436,6 +449,16 @@ impl ListIndex {
             if !joined.contains(&key) {
                 vote(postings(by_fold, &key), 3, true);
                 joined.push(key);
+            }
+        }
+        // Two words in Latin script read as one find a Chinese word that reads so (#93): Zhang Wei, 张伟.
+        let mut read: Vec<&str> = Vec::new();
+        for form in [query.entity, query.person] {
+            for (pair, k) in form.core.windows(2).zip(&form.joined) {
+                if !k.is_empty() && pair.iter().all(|t| is_latin_word(t)) && !read.contains(&k.as_str()) {
+                    vote(postings(&self.aliases_by_pinyin, k), 3, true);
+                    read.push(k);
+                }
             }
         }
         let mut ids = voted.clone();

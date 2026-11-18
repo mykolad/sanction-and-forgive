@@ -4,7 +4,7 @@ use super::HashMap;
 use std::cell::RefCell;
 use std::sync::Mutex;
 
-use super::text::Token;
+use super::text::{is_latin_word, Token};
 
 /// How two tokens aligned, most certain first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
@@ -141,12 +141,11 @@ fn compare_once(query: &Token, listed: &Token) -> Alignment {
     if overlaps(query.cognate_groups(), listed.cognate_groups()) {
         return Alignment::new(0.96, AlignMethod::Cognate);
     }
-    // A Chinese word and a Latin one (#93): the Chinese word's pinyin against the Latin word's fold keys. Never two
-    // Chinese words: names that sound alike are other names.
+    // A Chinese word and a word in Latin script (#93): a pinyin reading of the one is exactly the other. Never two
+    // Chinese words (names that sound alike are other names), nor a transliteration (Лина isn't 利娜), nor a reading
+    // only alike after folding (Zang isn't Zhang).
     let reads_as = |chinese: &Token, latin: &Token| {
-        latin.pinyin.is_none()
-            && latin.forms.iter().all(|f| f.is_ascii())
-            && chinese.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| latin.folds.contains(r)))
+        is_latin_word(latin) && chinese.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| latin.forms.contains(r)))
     };
     if reads_as(query, listed) || reads_as(listed, query) {
         return Alignment::new(0.96, AlignMethod::Pinyin);

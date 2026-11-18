@@ -24,8 +24,8 @@ pub struct Token {
     /// A word of a name read as Korean, its readings (korean.rs: the spellings of one name read alike); None for any
     /// other word, so a Jung elsewhere never meets a Chung.
     pub korean: Option<Box<[String]>>,
-    /// A Chinese word's readings in pinyin (pinyin_readings: fold keys, "zhangwei"), compared with a Latin word only,
-    /// never with another Chinese word; None for any other word.
+    /// A Chinese word's readings in pinyin (pinyin_readings: "zhangwei"), compared exactly with a word in Latin script
+    /// only, never with another Chinese word or a transliteration; None for any other word.
     pub pinyin: Option<Box<[String]>>,
 }
 
@@ -208,33 +208,54 @@ static PINYIN: std::sync::LazyLock<PinyinTable> = std::sync::LazyLock::new(|| {
     PinyinTable { readings, surnames, words }
 });
 
-/// A Chinese word's readings in pinyin, as fold keys: its characters' readings run together (a word of pinyin.json's
-/// read as a whole), and when its first character reads otherwise as a surname, that reading too (曾国藩: cengguofan
-/// and zengguofan). Empty when a character has no reading.
+/// A Chinese word's readings in pinyin, lower case without tones ("zhangwei"): its characters' readings run together
+/// (each character's own reading, else its simplified one's; a word of pinyin.json's read as a whole); when its first
+/// character reads otherwise as a surname, that reading too (曾国藩: cengguofan and zengguofan); and for a name of two
+/// or three characters, the given name before the surname, as some lists write it (张伟: weizhang, OFAC's Wei ZHANG).
+/// Empty when a character has no reading.
 pub fn pinyin_readings(word: &str) -> Vec<String> {
+    let original: Vec<char> = word.chars().collect();
     let chars: Vec<char> = simplified(word).chars().collect();
     let table = &*PINYIN;
-    let (mut reading, mut i, mut first_alone) = (String::new(), 0, true);
+    // One part per character, or per word read as a whole.
+    let mut parts: Vec<String> = Vec::new();
+    let (mut i, mut first_alone) = (0, true);
     while i < chars.len() {
         if let Some((w, r)) = table.words.iter().find(|(w, _)| chars[i..].starts_with(w)) {
             first_alone &= i != 0;
-            reading.push_str(r);
+            parts.push(r.clone());
             i += w.len();
             continue;
         }
-        let Some(r) = table.readings.get(&chars[i]) else { return Vec::new() };
-        reading.push_str(r);
+        let Some(r) = original.get(i).and_then(|c| table.readings.get(c)).or_else(|| table.readings.get(&chars[i])) else {
+            return Vec::new();
+        };
+        parts.push(r.clone());
         i += 1;
     }
-    let mut out = vec![fold_key(&reading)];
-    if let Some(surname) = table.surnames.get(&chars[0]).filter(|_| first_alone && chars.len() > 1) {
-        let rest: String = chars[1..].iter().map(|c| table.readings.get(c).map(String::as_str).unwrap_or("")).collect();
-        let other = fold_key(&format!("{surname}{rest}"));
-        if !out.contains(&other) {
-            out.push(other);
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |reading: String| {
+        if !out.contains(&reading) {
+            out.push(reading);
+        }
+    };
+    // The surname's own reading only where the first part is that one character (not a word read as a whole).
+    let surname = table.surnames.get(&chars[0]).filter(|_| first_alone && chars.len() > 1);
+    let firsts: Vec<&String> = std::iter::once(&parts[0]).chain(surname).collect();
+    for first in &firsts {
+        add(format!("{first}{}", parts[1..].concat()));
+    }
+    if first_alone && (2..=3).contains(&chars.len()) {
+        for first in &firsts {
+            add(format!("{}{first}", parts[1..].concat()));
         }
     }
     out
+}
+
+/// A word in Latin script (not a transliteration of another script's word, which reads in Latin letters too).
+pub fn is_latin_word(token: &Token) -> bool {
+    !token.is_number && !token.text.is_empty() && token.text.chars().all(is_latin)
 }
 
 /// A Han character: the unified and compatibility ideographs, in the Basic Multilingual Plane and beyond it.
@@ -981,6 +1002,10 @@ fn is_single_letter(word: &str) -> bool {
         matches!((chars.next(), chars.next()), (Some(c), None) if is_letter(c))
     };
     // An Arabic letter written with a mark or a tatweel is still one letter: its reading decides, its text stays.
+    // A Chinese or Korean character is a syllable of a name, never an initial (张 Guofan is Zhang Guofan).
+    if word.chars().any(|c| is_han(c) || is_hangul(c)) {
+        return false;
+    }
     one_letter(word) || (word.chars().all(is_arabic) && one_letter(&arabic_form(word)))
 }
 

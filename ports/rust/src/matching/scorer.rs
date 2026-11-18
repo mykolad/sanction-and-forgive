@@ -5,7 +5,7 @@ use super::compare::{AlignMethod, Alignment, TokenComparer};
 use super::data::MatcherData;
 use super::names::NameForm;
 use super::options::Options;
-use super::text::{fold_key, to_upper_invariant, Token, TokenRef};
+use super::text::{is_latin_word, to_upper_invariant, Token, TokenRef};
 use super::HashMap;
 
 /// One word of a name alignment, without the entered text.
@@ -92,16 +92,19 @@ const MAX_JOINS: usize = 6;
 /// The joins a comparison could make, in a fixed order: (on the listed side, the pair's first word), the listed name's
 /// first. A pair is eligible when the other name has a word that reads exactly as the two (NameForm::joined).
 fn eligible_joins(query: &NameForm, listed: &NameForm) -> Vec<(bool, usize)> {
-    // A word's own reading, or a Chinese word's pinyin (#93): 张伟 reads as Zhang Wei's two words read as one.
-    let has = |tokens: &[TokenRef], key: &str| {
+    // A word's own reading, or a Chinese word's pinyin (#93) where the two words are in Latin script: 张伟 reads as
+    // Zhang Wei's two words read as one, never as two transliterated words'.
+    let has = |tokens: &[TokenRef], key: &str, pair: &[TokenRef]| {
+        let latin = pair.iter().all(|t| is_latin_word(t));
         !key.is_empty()
             && tokens
                 .iter()
-                .any(|t| t.forms.iter().any(|f| f == key) || t.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| *r == fold_key(key))))
+                .any(|t| t.forms.iter().any(|f| f == key) || (latin && t.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| r == key))))
     };
+    let pair = |form: &NameForm, at: usize| form.core.get(at..at + 2).unwrap_or(&[]).to_vec();
     let mut out: Vec<(bool, usize)> =
-        listed.joined.iter().enumerate().filter(|(_, k)| has(&query.core, k)).map(|(j, _)| (true, j)).collect();
-    out.extend(query.joined.iter().enumerate().filter(|(_, k)| has(&listed.core, k)).map(|(i, _)| (false, i)));
+        listed.joined.iter().enumerate().filter(|(j, k)| has(&query.core, k, &pair(listed, *j))).map(|(j, _)| (true, j)).collect();
+    out.extend(query.joined.iter().enumerate().filter(|(i, k)| has(&listed.core, k, &pair(query, *i))).map(|(i, _)| (false, i)));
     out
 }
 
@@ -716,7 +719,9 @@ pub fn describe(query: &Token, listed: &Token, a: Alignment) -> String {
         AlignMethod::FoldKey => format!("{q} ~ {l} (romanisation)"),
         AlignMethod::FoldKeyLatin => format!("{q} ~ {l} (romanisation, both Latin)"),
         AlignMethod::Cognate => format!("{q} ~ {l} (Russian and Ukrainian forms of one name)"),
-        AlignMethod::Pinyin => format!("{q} read in pinyin = {l}"),
+        // From the Chinese word, whichever side it's on.
+        AlignMethod::Pinyin if query.pinyin.is_some() => format!("{q} read in pinyin = {l}"),
+        AlignMethod::Pinyin => format!("{l} read in pinyin = {q}"),
         AlignMethod::OneEdit | AlignMethod::OneEditShort => format!("{q} ~ {l} (one letter differs)"),
         AlignMethod::TwoEdits => format!("{q} ~ {l} (two letters differ)"),
         AlignMethod::None => format!("{q} ≠ {l}"),

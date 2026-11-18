@@ -222,8 +222,10 @@ different romanisations alike (`korean.json`: Kim Jong Un, Kim Chong Un, Kim Jeo
 only in a name that reads as Korean (each word one or two romanised syllables, a Korean surname first or last), so a
 Jung in another name never meets a Chung. A name in Chinese characters is also read in pinyin (`pinyin.json`, #93:
 each character's most common Mandarin reading from Unihan, a surname's own at the start of a name, 曾 Zeng, and a few
-cities and words read as a whole, 重庆 Chongqing): 张伟 matches Zhang Wei and 习近平 Xi Jinping, each way round, but two
-Chinese names that only sound alike (张伟, 章伟) never match on that. Measured on 2026-11-18, no listed party has a
+cities and words read as a whole, 重庆 Chongqing): 张伟 matches Zhang Wei, Wei ZHANG (OFAC's order) and Zhangwei, and
+习近平 Xi Jinping, each way round; only exactly (Zang Wei isn't Zhang Wei) and only against a word in Latin script (a
+transliterated Лина isn't 利娜), and two Chinese names that only sound alike (张伟, 章伟) never match on that. A given
+name written as two words (Zhang Wei Ming for 张伟明) isn't joined: a pair of words is. Measured on 2026-11-18, no listed party has a
 name in Chinese characters without a Latin one (OFAC 540 with Chinese names, the UK 65, SECO 89, Japan 147...), so
 the reading matters for names entered in characters; an English translation (Star China / Xinghua) is still found
 only through a list's own aliases. How such a name behaves
