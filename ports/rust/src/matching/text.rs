@@ -181,6 +181,7 @@ static CJK: std::sync::LazyLock<CjkTable> = std::sync::LazyLock::new(|| {
 struct PinyinTable {
     readings: HashMap<char, String>,
     surnames: HashMap<char, String>,
+    common_surnames: HashSet<char>,
     words: Vec<(Vec<char>, String)>,
 }
 
@@ -205,7 +206,8 @@ static PINYIN: std::sync::LazyLock<PinyinTable> = std::sync::LazyLock::new(|| {
     let surnames = object("surnames").iter().map(|(c, reading)| (one(c), text(reading))).collect();
     let mut words: Vec<(Vec<char>, String)> = object("words").iter().map(|(w, reading)| (w.chars().collect(), text(reading))).collect();
     words.sort_by_key(|(w, _)| std::cmp::Reverse(w.len()));
-    PinyinTable { readings, surnames, words }
+    let common_surnames = document["commonSurnames"].as_str().expect("pinyin.json has commonSurnames").chars().collect();
+    PinyinTable { readings, surnames, common_surnames, words }
 });
 
 /// A Chinese word's readings in pinyin, lower case without tones ("zhangwei"): its characters' readings run together
@@ -245,7 +247,8 @@ pub fn pinyin_readings(word: &str) -> Vec<String> {
     for first in &firsts {
         add(format!("{first}{}", parts[1..].concat()));
     }
-    if first_alone && (2..=3).contains(&chars.len()) {
+    // Given name first only for a person's name: two or three characters, the first a common surname.
+    if first_alone && (2..=3).contains(&chars.len()) && table.common_surnames.contains(&chars[0]) {
         for first in &firsts {
             add(format!("{}{first}", parts[1..].concat()));
         }
@@ -255,7 +258,14 @@ pub fn pinyin_readings(word: &str) -> Vec<String> {
 
 /// A word in Latin script (not a transliteration of another script's word, which reads in Latin letters too).
 pub fn is_latin_word(token: &Token) -> bool {
-    !token.is_number && !token.text.is_empty() && token.text.chars().all(is_latin)
+    // A word joined from particles (An Na: an-na) is in Latin script too.
+    !token.is_number && token.text.chars().any(is_latin) && token.text.chars().all(|c| is_latin(c) || c == '-')
+}
+
+/// A word in Latin script's letters as a pinyin reading is compared with them: its forms, and a word joined from
+/// particles as written, without its hyphens (an-na: anna), never an Arabic reading that drops a part.
+pub fn latin_reads_as(token: &Token, reading: &str) -> bool {
+    is_latin_word(token) && (token.forms.iter().any(|f| f == reading) || token.text.replace('-', "") == reading)
 }
 
 /// A Han character: the unified and compatibility ideographs, in the Basic Multilingual Plane and beyond it.

@@ -12,7 +12,7 @@ use super::data::{data, MatcherData};
 use super::names::{NameForm, NameParser};
 use super::options::{Options, Outcome};
 use super::scorer::{NameScorer, ScoreValue, WordAlignment};
-use super::text::{fold_key, is_latin_word, Token, TokenRef, Tokenizer};
+use super::text::{fold_key, is_latin_word, latin_reads_as, Token, TokenRef, Tokenizer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubjectKind {
@@ -376,6 +376,8 @@ impl ListIndex {
             }
         };
         let (by_fold, by_joined) = (&self.aliases_by_fold, &self.aliases_by_joined);
+        // The aliases a Chinese word's pinyin found by fold key: those that read exactly so are put first (below).
+        let mut by_pinyin_reading: Vec<u32> = Vec::new();
         let tokens = distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned());
         for token in &tokens {
             for k in lookup_keys(token) {
@@ -401,8 +403,10 @@ impl ListIndex {
             // A Chinese word's pinyin finds the aliases in Latin script that read so, as one word or as two; a word in
             // Latin script finds the Chinese words that read as it (#93). Loose to find, exact to score.
             for reading in token.pinyin.iter().flatten() {
-                vote(postings(by_fold, &fold_key(reading)), 3, false);
-                vote(postings(by_joined, &fold_key(reading)), 3, true);
+                for (list, joined) in [(postings(by_fold, &fold_key(reading)), false), (postings(by_joined, &fold_key(reading)), true)] {
+                    vote(list, 3, joined);
+                    by_pinyin_reading.extend_from_slice(list);
+                }
             }
             if is_latin_word(token) {
                 for form in &token.forms {
@@ -461,6 +465,20 @@ impl ListIndex {
                 }
             }
         }
+        // An alias that reads exactly as a Chinese word's pinyin (one word, or two in Latin script read as one) gets a
+        // full vote more, so aliases alike only after folding (Zang Wei for 张伟) never crowd it out of the limit.
+        let readings: Vec<&String> = tokens.iter().flat_map(|t| t.pinyin.iter().flatten()).collect();
+        by_pinyin_reading.sort_unstable();
+        by_pinyin_reading.dedup();
+        for &alias in &by_pinyin_reading {
+            let form = &self.aliases[alias as usize].form;
+            let exact = form.core.iter().any(|t| readings.iter().any(|r| latin_reads_as(t, r)))
+                || form.core.windows(2).zip(&form.joined).any(|(pair, k)| pair.iter().all(|t| is_latin_word(t)) && readings.contains(&k));
+            if exact {
+                state.votes[alias as usize] += 12;
+            }
+        }
+        let (votes, voted) = (&mut state.votes, &mut state.voted);
         let mut ids = voted.clone();
         ids.sort_by(|a, b| votes[*b as usize].cmp(&votes[*a as usize]));
         for &alias in voted.iter() {

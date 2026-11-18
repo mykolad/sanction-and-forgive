@@ -402,7 +402,8 @@ impl<'a> NameScorer<'a> {
             && query_core.len() == 1
             && listed_core.len() == 1
             && pairs.len() == 1
-            && query_core[0].is_short_core()
+            // A single Chinese character read in pinyin is as short on either side (张 / Zhang).
+            && (query_core[0].is_short_core() || (pairs[0].alignment.method == AlignMethod::Pinyin && listed_core[0].is_short_core()))
             && !intersects(&query.legal_classes, &listed.legal_classes)
         {
             let reason =

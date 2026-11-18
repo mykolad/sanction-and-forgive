@@ -431,6 +431,8 @@
     "薄": "bo",
     "种": "chong"
   },
+  "commonSurnamesNote": "The commonest surnames: a name of two or three characters that starts with one is a person's, and reads given name first too (张伟: weizhang, as OFAC writes Wei ZHANG); 北京 doesn't read jingbei.",
+  "commonSurnames": "王李张刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤欧习温单解区仇查朴盖缪召尉翟薄种",
   "wordsNote": "Words read otherwise than their characters one by one (cities, common words of company names).",
   "words": {
     "重庆": "chongqing",
