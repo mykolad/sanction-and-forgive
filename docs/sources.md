@@ -134,8 +134,21 @@ form: a day `1948-12-10`, a month `1960-03`, a year `1963`, or a range of years 
 | UK | `PassportNumber`, `NationalIdentifierNumber`, each identifier in the free-text `BusinessRegistrationNumber` (kept whole) | `DOB` (`dd/mm/1963` is a year) | 1,462 (2,138) | 3,362 |
 | EU | `identification` (`number`, type description, country unless `00`) | `birthdate` (date, or year and month) | 2,011 (3,038) | 3,774 |
 | UN | `INDIVIDUAL_DOCUMENT` (type, number, issuing country) | `DATE_OF_BIRTH` (date, year, or from and to years) | 296 (502) | 680 |
+| SECO | `identification-document` (type, number, issuer's code); numbers in `other-information` under a label naming one ("Registration number", "Tax Identification Number", "KPP", "Personal ID"…; never telephones, dates or places) | `day-month-year` (as precise as its attributes) | 3,500 (4,692) | 4,019 |
+| France | `IDENTIFICATION`, `PASSEPORT`, `AUTRE_IDENTITE`, each number's kind its comment when short ("Numéro d'enregistrement (OGRN)") | `DATE_DE_NAISSANCE` (`Jour`, `Mois`, `Annee`) | 3,785 (5,785) | 4,076 |
+| SFMS | `document-id` and `id-number-list`, in prose | `date-of-birth-list`, in prose (`19711119`, `Approximately 1971`, `Between 1960 and 1962`, `12 Jul. 1960`) | 288 (494) | 685 |
+| Japan | `旅券番号` (passport) and `身分証番号` (ID card), in Japanese prose | `生年月日` (`1941/8/20`, `1970年`) | 353 (582) | 1,807 |
+| New Zealand | `Passport Number` | `DOB` (a person's) | 2 (2) | 1,346 |
+| Canada | none (ships' IMO numbers, #69) | `DateOfBirthOrShipBuildDate` (a person's) | | 1,864 |
 
-The other formats follow. A record's identifiers and dates of birth join its content hash and its change count only
+Where a list writes its numbers in prose, each number is read whole (`lists::parse::free_text_identifiers`): a word of
+letters and digits with at least five of them, four digits, after NFKC (Japan's full-width digits); a series of up to
+three capitals before its number ("SE 011252") and a group of up to four digits before the rest ("série 1808 n°
+233282": "1808 233282") stay with it; dates are left out. The Netherlands, Belgium, the US lists and the manual list
+give no identifiers the app reads (Belgium's national register number is left out on purpose).
+
+
+A record's identifiers and dates of birth join its content hash and its change count only
 when it has any, so a list without them hashes as before; the first import of a list that has them after this change
 is a new version, every record with them counted as changed.
 

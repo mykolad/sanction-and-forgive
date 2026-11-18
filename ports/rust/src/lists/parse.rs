@@ -154,6 +154,76 @@ pub fn identifier_values(text: &str) -> Vec<String> {
     out
 }
 
+/// The numbers in prose as some lists write their documents ("Yemen number 541939", "Afghan passport number SE 011252",
+/// "série 1808 n° 233282", "アフガニスタン旅券 P04581926（…）"), read after NFKC (full-width letters and digits are plain
+/// ones): in each part between commas, semicolons and brackets, each word of letters and digits with at least five of
+/// them, four digits. One word is never cut into pieces, and two are joined where a list writes one number in two: a
+/// series of one to three capital letters before a number ("SE 011252"), and a group of up to four digits before
+/// another ("1808 233282", the words "n", "no", "nr" between them aside). Dates are left out.
+pub fn free_text_identifiers(text: &str) -> Vec<String> {
+    use unicode_normalization::UnicodeNormalization;
+    static DATE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let date = DATE.get_or_init(|| regex::Regex::new(r"^(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}[./-]\d{1,2}[./-]\d{1,2})$").unwrap());
+    let text: String = text.nfkc().collect();
+    let mut out: Vec<String> = Vec::new();
+    for segment in text.split([',', ';', '(', ')', '[', ']', '\n', '\r']) {
+        let cleaned: String = segment.chars().map(|c| if c.is_ascii_alphanumeric() || "-/.".contains(c) { c } else { ' ' }).collect();
+        let words: Vec<&str> = cleaned
+            .split_whitespace()
+            .map(|w| w.trim_matches(['-', '/', '.']))
+            .filter(|w| !w.is_empty() && !["n", "no", "nr"].contains(&w.to_ascii_lowercase().as_str()))
+            .collect();
+        let digits = |w: &str| w.chars().filter(char::is_ascii_digit).count();
+        let all_digits = |w: &str| w.chars().all(|c| c.is_ascii_digit());
+        let mut i = 0;
+        while i < words.len() {
+            let word = words[i];
+            let next = words.get(i + 1).copied();
+            // A series before its number, or a short group of digits before the rest of the number.
+            let joined = match next {
+                Some(n)
+                    if word.len() <= 3 && word.chars().all(|c| c.is_ascii_uppercase()) && n.starts_with(|c: char| c.is_ascii_digit()) =>
+                {
+                    Some(format!("{word} {n}"))
+                }
+                Some(n) if all_digits(word) && word.len() <= 4 && all_digits(n) && n.len() >= 5 => Some(format!("{word} {n}")),
+                _ => None,
+            };
+            let (value, used) = match joined {
+                Some(j) => (j, 2),
+                None => (word.to_string(), 1),
+            };
+            i += used;
+            let alphanumeric = value.chars().filter(char::is_ascii_alphanumeric).count();
+            if alphanumeric >= 5 && digits(&value) >= 4 && !date.is_match(&value) && !out.contains(&value) {
+                out.push(value);
+            }
+        }
+    }
+    out
+}
+
+/// A date of birth from its parts as written (a year, and a month and a day when known): "1960", "1960-03" or
+/// "1960-03-12". None without a year from 1800 to 2100, or when the parts don't make a date.
+pub fn birth_date_parts(year: Option<&str>, month: Option<&str>, day: Option<&str>) -> Option<String> {
+    let number = |v: Option<&str>| v.map(str::trim).filter(|v| !v.is_empty()).map(|v| v.parse::<u32>().ok());
+    let year = number(year)??;
+    if !(1800..=2100).contains(&year) {
+        return None;
+    }
+    let (month, day) = (number(month).flatten(), number(day).flatten());
+    // As precise as the parts allow: a day that isn't one leaves the month, a month that isn't one the year.
+    if let (Some(m), Some(d)) = (month, day) {
+        if let Some(date) = NaiveDate::from_ymd_opt(year as i32, m, d) {
+            return Some(date.format("%Y-%m-%d").to_string());
+        }
+    }
+    match month {
+        Some(m) if (1..=12).contains(&m) => Some(format!("{year}-{m:02}")),
+        _ => Some(year.to_string()),
+    }
+}
+
 /// The reference's ListFormatException: the file isn't the list it should be.
 #[derive(Debug)]
 pub struct FormatError(pub String);
@@ -501,7 +571,36 @@ pub fn records(
 
 #[cfg(test)]
 mod tests {
-    use super::{birth_date, birth_date_text, identifier_values};
+    use super::{birth_date, birth_date_parts, birth_date_text, free_text_identifiers, identifier_values};
+
+    /// Numbers in prose (#68): whole words, a series or a short group joined to its number, dates left out.
+    #[test]
+    fn numbers_in_prose_are_read_whole() {
+        assert_eq!(free_text_identifiers("Yemen number 541939"), ["541939"]);
+        assert_eq!(free_text_identifiers("Afghan passport number SE 011252"), ["SE 011252"]);
+        assert_eq!(free_text_identifiers(" série 1808 n° 233282"), ["1808 233282"]);
+        assert_eq!(free_text_identifiers("Tunisia number G737411, issued on 24 Oct. 1990 (expired on 20.09.1997)"), ["G737411"]);
+        assert_eq!(
+            free_text_identifiers("アフガニスタン旅券 P04581926（2024年8月7日にアフガニスタンのカンダハールで発行）"),
+            ["P04581926"]
+        );
+        assert_eq!(free_text_identifiers("ＳＥー０１１６９７"), ["SE 011697"]);
+        assert_eq!(
+            free_text_identifiers("Italian Fiscal Code: SSDSBN68B10Z352F; 1-78-09-44621-80"),
+            ["SSDSBN68B10Z352F", "1-78-09-44621-80"]
+        );
+        assert!(free_text_identifiers("born 1966-06-21 in Kabul; 1234").is_empty());
+    }
+
+    #[test]
+    fn a_date_of_birth_is_as_precise_as_its_parts() {
+        assert_eq!(birth_date_parts(Some("1980"), Some("3"), Some("23")).as_deref(), Some("1980-03-23"));
+        assert_eq!(birth_date_parts(Some("1964"), Some("10"), None).as_deref(), Some("1964-10"));
+        assert_eq!(birth_date_parts(Some("1964"), Some("2"), Some("31")).as_deref(), Some("1964-02"));
+        assert_eq!(birth_date_parts(Some("1964"), Some(""), Some("")).as_deref(), Some("1964"));
+        assert_eq!(birth_date_parts(None, Some("3"), Some("23")), None);
+        assert_eq!(birth_date_parts(Some("64"), None, None), None);
+    }
 
     #[test]
     fn dates_of_birth_read_in_one_form() {

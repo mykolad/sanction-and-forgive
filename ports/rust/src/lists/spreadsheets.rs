@@ -10,7 +10,9 @@ use quick_xml::events::Event;
 use quick_xml::name::{Namespace, ResolveResult};
 use quick_xml::NsReader;
 
-use super::parse::{clean, format_error, join, parse_date, Builder, ParseError, ParsedSubject, SubjectType};
+use super::parse::{
+    birth_date_text, clean, format_error, free_text_identifiers, join, parse_date, Builder, ParseError, ParsedSubject, SubjectType,
+};
 
 const MAX_PART_BYTES: u64 = 256 << 20;
 const MAX_COLUMNS: usize = 256;
@@ -637,6 +639,8 @@ fn parse_new_zealand_register(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubjec
         required("Date of Sanction")?,
     );
     let (middle, title, rationale) = (find("Middle name(s)"), find("Title"), find("General Rationale for Sanction"));
+    // Identifiers and dates of birth (#68), when the register has the columns.
+    let (born, passport) = (find("DOB"), find("Passport Number"));
 
     let mut out = Vec::new();
     for row in &rows[header_at + 1..] {
@@ -674,6 +678,15 @@ fn parse_new_zealand_register(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubjec
             }
         }
         b.add_address(cell(Some(address)).as_deref(), None);
+        if kind == SubjectType::Individual {
+            let date = cell(born);
+            b.add_birth_date(
+                excel_date(date.as_deref()).map(|d| d.format("%Y-%m-%d").to_string()).or_else(|| date.as_deref().and_then(birth_date_text)),
+            );
+        }
+        for number in cell(passport).map(|t| free_text_identifiers(&t)).unwrap_or_default() {
+            b.add_identifier(Some("Passport"), Some(&number), None);
+        }
         out.extend(b.build());
     }
     Ok(out)
