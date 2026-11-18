@@ -70,12 +70,12 @@ public sealed class DestinationsTests
             result.GetProperty("summary").GetString()!);
     }
 
-    private static object Row(string code, string kind, string name, string status, string? parent = null, string[]? otherNames = null, string country = "UA") => new
+    private static object Row(string code, string kind, string name, string status, string? parent, string[] otherNames, string country) => new
     {
         code,
         kind,
         name,
-        otherNames = otherNames ?? [],
+        otherNames,
         country,
         parent,
         status,
@@ -110,7 +110,7 @@ public sealed class DestinationsTests
 
         foreach (var (principal, fromThisSite, expected) in cases)
         {
-            using var add = await Suite.SendAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-a", "Region", "Atlantis", "Restricted"), principal, fromThisSite);
+            using var add = await Suite.SendAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-a", "Region", "Atlantis", "Restricted", parent: null, otherNames: [], country: "UA"), principal, fromThisSite);
             using var start = await Suite.SendAsync(HttpMethod.Post, "api/v1/admin/destinations/start", body: null, principal, fromThisSite);
             using var remove = await Suite.SendAsync(HttpMethod.Post, "api/v1/admin/destinations/1/remove", body: null, principal, fromThisSite);
             Assert.Equal((expected, expected, expected), (add.StatusCode, start.StatusCode, remove.StatusCode));
@@ -176,29 +176,29 @@ public sealed class DestinationsTests
         await FreshTableAsync();
         try
         {
-            using (var orphan = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-town", "Settlement", "Hollowmere", "Restricted", parent: "xx-region")))
+            using (var orphan = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-town", "Settlement", "Hollowmere", "Restricted", parent: "xx-region", otherNames: [], country: "UA")))
             {
                 Assert.Equal(HttpStatusCode.BadRequest, orphan.StatusCode);
             }
 
             foreach (var invalid in new[]
             {
-                Row("Not A Code", "Region", "Atlantis", "Restricted"),
-                Row("xx-a", "Planet", "Atlantis", "Restricted"),
-                Row("xx-a", "Region", "Atlantis", "Maybe"),
-                Row("xx-a", "Region", "Atlantis", "Restricted", country: "ZZ"),
+                Row("Not A Code", "Region", "Atlantis", "Restricted", parent: null, otherNames: [], country: "UA"),
+                Row("xx-a", "Planet", "Atlantis", "Restricted", parent: null, otherNames: [], country: "UA"),
+                Row("xx-a", "Region", "Atlantis", "Maybe", parent: null, otherNames: [], country: "UA"),
+                Row("xx-a", "Region", "Atlantis", "Restricted", parent: null, otherNames: [], country: "ZZ"),
             })
             {
                 using var refused = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", invalid);
                 Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
             }
 
-            using (var region = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-region", "Region", "Hollow Vale Oblast", "Partly", otherNames: ["Hollow Vale region"])))
+            using (var region = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-region", "Region", "Hollow Vale Oblast", "Partly", parent: null, otherNames: ["Hollow Vale region"], country: "UA")))
             {
                 Assert.Equal(HttpStatusCode.OK, region.StatusCode);
             }
 
-            using (var outside = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-town", "Settlement", "Hollowmere", "Outside", parent: "xx-region")))
+            using (var outside = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-town", "Settlement", "Hollowmere", "Outside", parent: "xx-region", otherNames: [], country: "UA")))
             {
                 Assert.Equal(HttpStatusCode.OK, outside.StatusCode);
             }
@@ -208,7 +208,7 @@ public sealed class DestinationsTests
             Assert.Equal((null, null), await StateAsync("Hollowmere, Hollow Vale Oblast"));
 
             // A change: the same code, now restricted; the old row stays as history, removed.
-            using (var changed = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-town", "Settlement", "Hollowmere", "Restricted", parent: "xx-region")))
+            using (var changed = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-town", "Settlement", "Hollowmere", "Restricted", parent: "xx-region", otherNames: [], country: "UA")))
             {
                 Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
                 Assert.Equal(JsonValueKind.Number, (await changed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("replaced").ValueKind);
@@ -225,13 +225,13 @@ public sealed class DestinationsTests
                 Assert.Equal("inUse", (await inUse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
             }
 
-            using (var demoted = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-region", "Country", "Hollow Vale", "Restricted", country: "UA")))
+            using (var demoted = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-region", "Country", "Hollow Vale", "Restricted", parent: null, otherNames: [], country: "UA")))
             {
                 Assert.Equal(HttpStatusCode.Conflict, demoted.StatusCode);
             }
 
             // Moscow is a place in another country: confirmed, or refused.
-            using (var conflict = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-moscow", "Settlement", "Moscow", "Restricted", parent: "xx-region")))
+            using (var conflict = await Suite.AdminAsync(HttpMethod.Post, "api/v1/admin/destinations", Row("xx-moscow", "Settlement", "Moscow", "Restricted", parent: "xx-region", otherNames: [], country: "UA")))
             {
                 Assert.Equal(HttpStatusCode.Conflict, conflict.StatusCode);
                 Assert.Equal("confirm", (await conflict.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
