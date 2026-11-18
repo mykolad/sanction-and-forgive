@@ -14,11 +14,45 @@ pub fn comparable(key: &str) -> bool {
     key.chars().count() >= 5 && key.chars().filter(char::is_ascii_digit).count() >= 4
 }
 
+/// Words that only say what an identifier is, never part of it: dropped before a number ("OGRN 1027700132195").
+const LABEL_WORDS: [&str; 30] = [
+    "ogrn",
+    "ogrnip",
+    "inn",
+    "kpp",
+    "unn",
+    "okpo",
+    "edrpou",
+    "egrpou",
+    "bin",
+    "iin",
+    "tin",
+    "tax",
+    "vat",
+    "id",
+    "no",
+    "nr",
+    "number",
+    "reg",
+    "registration",
+    "register",
+    "company",
+    "business",
+    "passport",
+    "national",
+    "identification",
+    "identity",
+    "card",
+    "огрн",
+    "инн",
+    "кпп",
+];
+
 /// The keys a listed identifier is found by: the whole value's, and each alternative within it, without the words
-/// that label it: the parts between commas, semicolons, slashes, brackets and colons, each without its leading and
-/// trailing words that have no digit ("OGRN 1027700132195" is found by "1027700132195" too, "7704734000/770301001" by
-/// each number). Spaces within a number are its formatting, never a separator: "4510 123456" is one passport number,
-/// never "123456". Each key comparable.
+/// that label it: the parts between commas, semicolons, slashes, brackets and colons, each without its leading label
+/// words (LABEL_WORDS: "OGRN 1027700132195" is found by "1027700132195" too, "7704734000/770301001" by each number)
+/// and its trailing words of four letters or more ("190950894 Belarus"). Anything else stays: a series ("AB 123456"
+/// is never "123456") and a number's own spaces ("4510 123456" is never "123456"). Each key comparable.
 pub fn listed_keys(value: &str) -> Vec<String> {
     let mut keys: Vec<String> = Vec::new();
     let mut add = |key: String| {
@@ -28,10 +62,21 @@ pub fn listed_keys(value: &str) -> Vec<String> {
     };
     add(identifier_key(value));
     for part in value.split([',', ';', '/', '(', ')', ':']) {
-        let words: Vec<&str> = part.split_whitespace().collect();
-        let has_digit = |w: &&str| w.chars().any(|c| c.is_ascii_digit());
-        let (Some(first), Some(last)) = (words.iter().position(has_digit), words.iter().rposition(has_digit)) else { continue };
-        add(identifier_key(&words[first..=last].join(" ")));
+        let mut words: Vec<&str> = part.split_whitespace().collect();
+        let has_digit = |w: &str| w.chars().any(|c| c.is_ascii_digit());
+        let label = |w: &str| {
+            let bare: String = w.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+            bare.is_empty() || LABEL_WORDS.contains(&bare.as_str())
+        };
+        while words.first().is_some_and(|w| !has_digit(w) && label(w)) {
+            words.remove(0);
+        }
+        while words.last().is_some_and(|w| !has_digit(w) && w.chars().filter(|c| c.is_alphabetic()).count() >= 4) {
+            words.pop();
+        }
+        if words.iter().any(|w| has_digit(w)) {
+            add(identifier_key(&words.join(" ")));
+        }
     }
     keys
 }
@@ -96,6 +141,10 @@ mod tests {
         assert_eq!(listed_keys("CHE-123.456.789"), ["CHE123456789"]);
         // A number's own spaces are formatting: its last group alone is no key.
         assert_eq!(listed_keys("4510 123456"), ["4510123456"]);
+        // A series is part of the number, spaced or not; only a label is dropped.
+        assert_eq!(listed_keys("AB 123456"), ["AB123456"]);
+        assert_eq!(listed_keys("AB123456"), ["AB123456"]);
+        assert_eq!(listed_keys("Tax ID No. 7704734000"), ["TAXIDNO7704734000", "7704734000"]);
         assert_eq!(listed_keys("190950894 (Belarus)"), ["190950894BELARUS", "190950894"]);
         assert!(listed_keys("123").is_empty());
     }
