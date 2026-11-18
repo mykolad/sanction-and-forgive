@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "84decffaf727");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "0d436265fc5d");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -447,6 +447,12 @@ mod tests {
         let (outcome, percent) = screen("Al Lina", "利娜", SubjectKind::Individual);
         assert_ne!(outcome, Some(Outcome::Match), "Al Lina / 利娜: {percent:?}");
         // A partial name in either script is a contained name, as in one script.
+        // 〇 and a supplementary character have readings; 々 reads as the character it repeats.
+        for (query, listed) in [("七〇八", "Qilingba"), ("王𠵾", "Wang Huo"), ("王㗲", "Wang Huo")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        assert_eq!(crate::matching::text::pinyin_readings("丽々"), ["lili"]);
         let (outcome, percent) = screen("张 Wei", "Zhang Wei Ming", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Review), "张 Wei / Zhang Wei Ming: {percent:?}");
         // Never two Chinese names that only sound alike, a transliteration, or a reading alike only after folding; a
@@ -489,7 +495,11 @@ mod tests {
             .unwrap();
         assert_eq!(result.entries[0].cells[0].best.as_ref().map(|b| b.subject.external_id.as_str()), Some("REAL"));
         // And in both directions, whatever the votes of the aliases alike only after folding.
-        for (crowd, real, entered) in [("Zangwei Weizang", "Zhang Wei", "张伟"), ("Zangwei", "张伟", "Zhangwei")] {
+        for (crowd, real, entered) in [
+            ("Zangwei Weizang", "Zhang Wei", "张伟"),
+            ("Zangwei", "张伟", "Zhangwei"),
+            ("张伟 Smith", "Zhangwei Ivanov", "Zhangwei Ivanov"),
+        ] {
             let mut subjects: Vec<ListedSubject> = (0..2100)
                 .map(|i| ListedSubject {
                     external_id: format!("Z-{i}"),

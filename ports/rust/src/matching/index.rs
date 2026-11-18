@@ -168,6 +168,9 @@ impl OrderedPostings {
     }
 }
 
+/// At most this many aliases that read exactly as pinyin are kept past the candidate limit (#93).
+const EXACT_PINYIN_KEPT: usize = 100;
+
 fn distinct_tokens(tokens: impl IntoIterator<Item = TokenRef>) -> Vec<TokenRef> {
     let mut out: Vec<TokenRef> = Vec::new();
     for t in tokens {
@@ -517,9 +520,10 @@ impl ListIndex {
                 }
             }
         }
-        // Aliases that read exactly as pinyin go first, whatever the votes (#93): a Chinese word's reading as an alias in
-        // Latin script (one word, or two read as one), or a Latin word's as a Chinese alias (aliases_by_pinyin holds only
-        // exact readings). So aliases alike only after folding (Zang Wei for 张伟) never crowd one out of the limit.
+        // Aliases that read exactly as pinyin are kept past the limit (#93): a Chinese word's reading as an alias in Latin
+        // script (one word, or two read as one), or a Latin word's as a Chinese alias (aliases_by_pinyin holds only exact
+        // readings). The rest ranks by its votes, so a whole name found as written keeps its place, and aliases alike
+        // only after folding (Zang Wei for 张伟) never crowd an exact reading out.
         let readings: Vec<&String> = tokens.iter().flat_map(|t| t.pinyin.iter().flatten()).collect();
         by_pinyin_reading.sort_unstable();
         by_pinyin_reading.dedup();
@@ -531,17 +535,22 @@ impl ListIndex {
                 exact.push(alias);
             }
         }
-        exact.sort_unstable();
-        exact.dedup();
+        let mut seen: HashSet<u32> = HashSet::default();
+        let exact_in_order: Vec<u32> = exact.iter().copied().filter(|a| seen.insert(*a)).collect();
         let (votes, voted) = (&mut state.votes, &mut state.voted);
         let mut ids = voted.clone();
-        let is_exact = |alias: &u32| exact.binary_search(alias).is_ok();
-        ids.sort_by(|a, b| is_exact(b).cmp(&is_exact(a)).then_with(|| votes[*b as usize].cmp(&votes[*a as usize])));
+        ids.sort_by(|a, b| votes[*b as usize].cmp(&votes[*a as usize]));
         for &alias in voted.iter() {
             votes[alias as usize] = 0;
         }
         voted.clear();
         ids.truncate(o.candidate_limit);
+        // Up to EXACT_PINYIN_KEPT exact readings the limit cut, in the order they were found.
+        if !exact_in_order.is_empty() {
+            let mut present: HashSet<u32> = ids.iter().copied().collect();
+            let missing: Vec<u32> = exact_in_order.into_iter().filter(|a| present.insert(*a)).take(EXACT_PINYIN_KEPT).collect();
+            ids.extend(missing);
+        }
         joinable.sort_unstable();
         joinable.dedup();
         (ids, joinable)

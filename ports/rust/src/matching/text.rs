@@ -229,7 +229,10 @@ pub fn pinyin_readings(word: &str) -> Vec<String> {
             i += w.len();
             continue;
         }
-        let Some(r) = original.get(i).and_then(|c| table.readings.get(c)).or_else(|| table.readings.get(&chars[i])) else {
+        // 々 repeats the character before it, and reads as it does.
+        let repeated = (chars[i] == '々').then(|| parts.last()).flatten();
+        let Some(r) = repeated.or_else(|| original.get(i).and_then(|c| table.readings.get(c))).or_else(|| table.readings.get(&chars[i]))
+        else {
             return Vec::new();
         };
         parts.push(r.clone());
