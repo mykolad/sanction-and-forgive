@@ -681,7 +681,8 @@ fn parse_new_zealand_register(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubjec
         if kind == SubjectType::Individual {
             let date = cell(born);
             b.add_birth_date(
-                excel_date(date.as_deref()).map(|d| d.format("%Y-%m-%d").to_string()).or_else(|| date.as_deref().and_then(birth_date_text)),
+                // As written first ("1970" is a year, never an Excel day in 1905), else an Excel date's serial.
+                date.as_deref().and_then(birth_date_text).or_else(|| excel_date(date.as_deref()).map(|d| d.format("%Y-%m-%d").to_string())),
             );
         }
         for number in cell(passport).map(|t| free_text_identifiers(&t)).unwrap_or_default() {
