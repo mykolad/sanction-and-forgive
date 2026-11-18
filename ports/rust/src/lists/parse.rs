@@ -154,6 +154,89 @@ pub fn identifier_values(text: &str) -> Vec<String> {
     out
 }
 
+/// The numbers in prose as some lists write their documents ("Yemen number 541939", "Afghan passport number SE 011252",
+/// "série 1808 n° 233282", "アフガニスタン旅券 P04581926（…）"), read after NFKC (full-width letters and digits are plain
+/// ones): in each part between commas, semicolons and brackets, each word of Latin or Cyrillic letters and digits with
+/// at least five of them, four digits. One word is never cut into pieces (АВ1234567 stays whole), and words a list
+/// writes as one number are joined: a series of one to three capitals before a number ("SE 011252"), a group of up to
+/// four digits before the rest ("1808 233282", the words "n", "no", "nr" between them aside), and a suffix of one to
+/// four capitals after it ("1234567 KZTV"). Dates are left out, never joined to a series ("DOB 1966-06-21").
+pub fn free_text_identifiers(text: &str) -> Vec<String> {
+    use unicode_normalization::UnicodeNormalization;
+    static DATE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let date = DATE.get_or_init(|| regex::Regex::new(r"^(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}[./-]\d{1,2}[./-]\d{1,2})$").unwrap());
+    // Letters of the scripts identifiers are written in (Latin, Cyrillic); any other script separates words.
+    let kept = |c: char| c.is_ascii_alphanumeric() || (c.is_alphabetic() && matches!(c as u32, 0x00C0..=0x024F | 0x0400..=0x04FF));
+    // A slash with a space on either side separates two identifiers (SE 011252 / SE 011697); one within a word
+    // doesn't (1990/345751).
+    static ALTERNATIVE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let alternative = ALTERNATIVE.get_or_init(|| regex::Regex::new(r"\s+/\s*|\s*/\s+").unwrap());
+    let text: String = text.nfkc().collect();
+    let mut out: Vec<String> = Vec::new();
+    let segments = text.split([',', ';', '(', ')', '[', ']', '\n', '\r']).flat_map(|segment| alternative.split(segment));
+    for segment in segments {
+        let cleaned: String = segment.chars().map(|c| if kept(c) || "-/.".contains(c) { c } else { ' ' }).collect();
+        let words: Vec<&str> = cleaned
+            .split_whitespace()
+            .map(|w| w.trim_matches(['-', '/', '.']))
+            .filter(|w| !w.is_empty() && !["n", "no", "nr"].contains(&w.to_lowercase().as_str()))
+            .collect();
+        let digits = |w: &str| w.chars().filter(char::is_ascii_digit).count();
+        let all_digits = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit());
+        let capitals = |w: &str, most: usize| w.chars().count() <= most && w.chars().all(|c| c.is_alphabetic() && c.is_uppercase());
+        let mut i = 0;
+        while i < words.len() {
+            let word = words[i];
+            if date.is_match(word) {
+                i += 1;
+                continue;
+            }
+            let next = words.get(i + 1).copied().filter(|n| !date.is_match(n));
+            // A series before its number, or a short group of digits before the rest of the number.
+            let (mut value, mut used) = match next {
+                Some(n) if capitals(word, 3) && n.starts_with(|c: char| c.is_ascii_digit()) => (format!("{word} {n}"), 2),
+                Some(n) if all_digits(word) && word.len() <= 4 && all_digits(n) && n.len() >= 5 => (format!("{word} {n}"), 2),
+                _ => (word.to_string(), 1),
+            };
+            // A suffix of capitals after a number stays with it, unless it's the series of a number that follows.
+            let starts_number = |at: usize| words.get(at).is_some_and(|w| w.starts_with(|c: char| c.is_ascii_digit()));
+            if value.ends_with(|c: char| c.is_ascii_digit()) && !starts_number(i + used + 1) {
+                if let Some(suffix) = words.get(i + used).filter(|w| capitals(w, 4)) {
+                    value = format!("{value} {suffix}");
+                    used += 1;
+                }
+            }
+            i += used;
+            let alphanumeric = value.chars().filter(|c| c.is_alphanumeric()).count();
+            if alphanumeric >= 5 && digits(&value) >= 4 && !date.is_match(&value) && !out.contains(&value) {
+                out.push(value);
+            }
+        }
+    }
+    out
+}
+
+/// A date of birth from its parts as written (a year, and a month and a day when known): "1960", "1960-03" or
+/// "1960-03-12". None without a year from 1800 to 2100, or when the parts don't make a date.
+pub fn birth_date_parts(year: Option<&str>, month: Option<&str>, day: Option<&str>) -> Option<String> {
+    let number = |v: Option<&str>| v.map(str::trim).filter(|v| !v.is_empty()).map(|v| v.parse::<u32>().ok());
+    let year = number(year)??;
+    if !(1800..=2100).contains(&year) {
+        return None;
+    }
+    let (month, day) = (number(month).flatten(), number(day).flatten());
+    // As precise as the parts allow: a day that isn't one leaves the month, a month that isn't one the year.
+    if let (Some(m), Some(d)) = (month, day) {
+        if let Some(date) = NaiveDate::from_ymd_opt(year as i32, m, d) {
+            return Some(date.format("%Y-%m-%d").to_string());
+        }
+    }
+    match month {
+        Some(m) if (1..=12).contains(&m) => Some(format!("{year}-{m:02}")),
+        _ => Some(year.to_string()),
+    }
+}
+
 /// The reference's ListFormatException: the file isn't the list it should be.
 #[derive(Debug)]
 pub struct FormatError(pub String);
@@ -501,7 +584,43 @@ pub fn records(
 
 #[cfg(test)]
 mod tests {
-    use super::{birth_date, birth_date_text, identifier_values};
+    use super::{birth_date, birth_date_parts, birth_date_text, free_text_identifiers, identifier_values};
+
+    /// Numbers in prose (#68): whole words, a series or a short group joined to its number, dates left out.
+    #[test]
+    fn numbers_in_prose_are_read_whole() {
+        assert_eq!(free_text_identifiers("Yemen number 541939"), ["541939"]);
+        assert_eq!(free_text_identifiers("Afghan passport number SE 011252"), ["SE 011252"]);
+        assert_eq!(free_text_identifiers(" série 1808 n° 233282"), ["1808 233282"]);
+        assert_eq!(free_text_identifiers("Tunisia number G737411, issued on 24 Oct. 1990 (expired on 20.09.1997)"), ["G737411"]);
+        assert_eq!(
+            free_text_identifiers("アフガニスタン旅券 P04581926（2024年8月7日にアフガニスタンのカンダハールで発行）"),
+            ["P04581926"]
+        );
+        assert_eq!(free_text_identifiers("ＳＥー０１１６９７"), ["SE 011697"]);
+        assert_eq!(
+            free_text_identifiers("Italian Fiscal Code: SSDSBN68B10Z352F; 1-78-09-44621-80"),
+            ["SSDSBN68B10Z352F", "1-78-09-44621-80"]
+        );
+        assert!(free_text_identifiers("born 1966-06-21 in Kabul; 1234").is_empty());
+        // Copilot's review of #127: a Cyrillic series and a suffix stay with the number; a date is never joined.
+        assert_eq!(free_text_identifiers("passport АВ1234567"), ["АВ1234567"]);
+        assert_eq!(free_text_identifiers("1234567 KZTV"), ["1234567 KZTV"]);
+        assert_eq!(free_text_identifiers("SE 011252 / SE 011697"), ["SE 011252", "SE 011697"]);
+        assert_eq!(free_text_identifiers("SE 011252 SE 011697"), ["SE 011252", "SE 011697"]);
+        assert_eq!(free_text_identifiers("1990/345751"), ["1990/345751"]);
+        assert_eq!(free_text_identifiers("Passport SE 011252; DOB 1966-06-21"), ["SE 011252"]);
+    }
+
+    #[test]
+    fn a_date_of_birth_is_as_precise_as_its_parts() {
+        assert_eq!(birth_date_parts(Some("1980"), Some("3"), Some("23")).as_deref(), Some("1980-03-23"));
+        assert_eq!(birth_date_parts(Some("1964"), Some("10"), None).as_deref(), Some("1964-10"));
+        assert_eq!(birth_date_parts(Some("1964"), Some("2"), Some("31")).as_deref(), Some("1964-02"));
+        assert_eq!(birth_date_parts(Some("1964"), Some(""), Some("")).as_deref(), Some("1964"));
+        assert_eq!(birth_date_parts(None, Some("3"), Some("23")), None);
+        assert_eq!(birth_date_parts(Some("64"), None, None), None);
+    }
 
     #[test]
     fn dates_of_birth_read_in_one_form() {

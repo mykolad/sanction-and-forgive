@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::io::BufRead;
 
 use super::manual::csv_rows;
-use super::parse::{clean, format_error, join, parse_date, Builder, ParseError, ParsedSubject, SubjectType};
+use super::parse::{
+    birth_date_parts, clean, format_error, free_text_identifiers, join, parse_date, Builder, ParseError, ParsedSubject, SubjectType,
+};
 
 /// The law the list is kept under; each row adds its category number.
 pub const JAPAN_PROGRAMME: &str = "Foreign Exchange and Foreign Trade Act";
@@ -80,6 +82,17 @@ pub fn parse_japan(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseE
                 cell("その他の情報"),
             ],
         );
+        // Identifiers and dates of birth (#68), in Japanese prose: "アフガニスタン旅券 P04581926（…に発行…）", "1941/8/20",
+        // "1970年". The columns are optional: a file without them has none.
+        let optional = |name: &str| rows[0].iter().position(|c| c.trim() == name).and_then(|i| row.get(i)).and_then(|v| clean(Some(v)));
+        for (column, kind) in [("旅券番号", "Passport"), ("身分証番号", "ID card")] {
+            for number in optional(column).map(|t| free_text_identifiers(&t)).unwrap_or_default() {
+                b.add_identifier(Some(kind), Some(&number), None);
+            }
+        }
+        for date in split(cell("生年月日")) {
+            b.add_birth_date(japanese_date(&date));
+        }
         for (i, name) in split(cell("氏名（英語）")).iter().enumerate() {
             b.add_name(Some(name), false, i == 0);
         }
@@ -115,6 +128,17 @@ pub fn parse_japan(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseE
     Ok(out)
 }
 
+/// A date as the list writes one: "1941/8/20", "1970年", "1970年8月20日" (full-width digits too). None otherwise.
+fn japanese_date(text: &str) -> Option<String> {
+    use unicode_normalization::UnicodeNormalization;
+    let text: String = text.nfkc().collect::<String>().replace(['年', '月'], "/").replace('日', "");
+    let parts: Vec<&str> = text.trim().trim_end_matches('/').split('/').collect();
+    if parts.is_empty() || parts.len() > 3 || parts.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
+    birth_date_parts(Some(parts[0]), parts.get(1).copied(), parts.get(2).copied())
+}
+
 /// A cell's list: split at semicolons (half or full width), each part without the "at the time of listing" note and
 /// the commas left at its end.
 fn split(cell: Option<String>) -> Vec<String> {
@@ -128,7 +152,15 @@ fn split(cell: Option<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::split;
+    use super::{japanese_date, split};
+
+    #[test]
+    fn dates_of_birth_read_as_the_list_writes_them() {
+        assert_eq!(japanese_date("1941/8/20").as_deref(), Some("1941-08-20"));
+        assert_eq!(japanese_date("1970年").as_deref(), Some("1970"));
+        assert_eq!(japanese_date("１９７０年８月２０日").as_deref(), Some("1970-08-20"));
+        assert_eq!(japanese_date("不明"), None);
+    }
 
     #[test]
     fn a_cell_splits_at_either_semicolon_without_its_listing_note_or_trailing_commas() {

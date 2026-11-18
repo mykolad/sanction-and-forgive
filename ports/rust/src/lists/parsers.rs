@@ -7,8 +7,8 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::parse::{
-    birth_date, birth_date_text, eq, format_error, identifier_values, join, parse_date, records, Builder, Element, OptionalElement,
-    ParseError, ParsedSubject, SubjectType,
+    birth_date, birth_date_parts, birth_date_text, eq, format_error, free_text_identifiers, identifier_values, join, parse_date, records,
+    Builder, Element, OptionalElement, ParseError, ParsedSubject, SubjectType,
 };
 
 pub type Parser = fn(&mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError>;
@@ -552,6 +552,54 @@ fn read_seco_target(target: &Element, programmes: &HashMap<String, String>) -> R
             addresses
                 .push((join(", ", &[a.val("c-o"), a.val("p-o-box"), a.val("address-details"), a.val("zip-code")]), a.attr("place-id")));
         }
+        // Identifiers and dates of birth (#68): each identity's documents and dates.
+        for d in identity.els("identification-document") {
+            let kind = match d.attr("document-type").as_deref() {
+                Some("passport") => "Passport",
+                Some("diplomatic-passport") => "Diplomatic passport",
+                Some("id-card") => "ID card",
+                Some("residence-permit") => "Residence permit",
+                Some("driving-license") => "Driving licence",
+                Some("travel-document") => "Travel document",
+                _ => "Identification document",
+            };
+            let issuer = d.el("issuer");
+            b.add_identifier(
+                Some(kind),
+                d.val("number").as_deref(),
+                issuer.attr("code").or_else(|| issuer.map(|i| i.value().to_string())).as_deref(),
+            );
+        }
+        for date in identity.els("day-month-year") {
+            b.add_birth_date(birth_date_parts(date.attr("year").as_deref(), date.attr("month").as_deref(), date.attr("day").as_deref()));
+        }
+    }
+    // Numbers the record gives in its other information, labelled ("Registration number: 1027700132195", "Tax
+    // Identification Number: …", "Personal ID: …"): each under its label. Telephones, dates and places aren't read.
+    static LABEL: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let label = LABEL.get_or_init(|| Regex::new(r"(?i)^\s*([^:]{2,60}?)\s*:\s*(.+)$").unwrap());
+    static KINDS: std::sync::OnceLock<(Regex, Regex)> = std::sync::OnceLock::new();
+    let (wanted, unwanted) = KINDS.get_or_init(|| {
+        (
+            Regex::new(r"(?i)registration|registrierung|\btax|\btin\b|\binn\b|\bkpp\b|\bogrn|\bunp\b|\bokpo|passport|\bid\b|identification|identity|\bimo\b|fiscal|company number").unwrap(),
+            Regex::new(r"(?i)date|place|phone|\btel|fax|mail|web|address").unwrap(),
+        )
+    });
+    for info in subject.els("other-information") {
+        for line in info.value().lines() {
+            if let Some(found) = label.captures(line) {
+                let kind = found[1].trim();
+                // A vessel's IMO number is read below, as its own.
+                if wanted.is_match(kind)
+                    && !unwanted.is_match(kind)
+                    && !(subject.name == "object" && kind.to_lowercase().starts_with("imo"))
+                {
+                    for number in free_text_identifiers(&found[2]) {
+                        b.add_identifier(Some(kind), Some(&number), None);
+                    }
+                }
+            }
+        }
     }
     if kind == SubjectType::Vessel {
         // "IMO number: 8405270" (and once "IMO Numbe: …") in the vessel's other information.
@@ -633,6 +681,12 @@ fn parse_canada(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
                 b.add_name(Some(&label.replace(alias, "")), false, false);
             }
         }
+        // A person's date of birth (#68), "1965-04-29" or "1972"; the same column is a ship's year built.
+        if kind == SubjectType::Individual {
+            b.add_birth_date(
+                record.val("DateOfBirthOrShipBuildDate-DateDeNaissanceOuDateDeConstructionDuNavire").and_then(|d| birth_date_text(&d)),
+            );
+        }
         if kind == SubjectType::Vessel {
             b.add_imo_number(imo.as_deref(), "IMO number as listed");
             // "General Cargo | Cargo classique": the English half.
@@ -671,10 +725,65 @@ fn parse_sfms(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError
         for a in record.els("address-list") {
             b.add_address(a.val("address").as_deref(), None);
         }
+        // Identifiers and dates of birth (#68), in prose: "Yemen number 541939", "Approximately 1971; 01.02.1960".
+        for d in record.els("document-list") {
+            for number in d.val("document-id").map(|t| free_text_identifiers(&t)).unwrap_or_default() {
+                b.add_identifier(Some("Document"), Some(&number), d.val("document-country").as_deref());
+            }
+        }
+        for n in record.els("id-number-list") {
+            for number in free_text_identifiers(n.value()) {
+                b.add_identifier(Some("Identification number"), Some(&number), None);
+            }
+        }
+        for d in record.els("date-of-birth-list") {
+            for date in prose_birth_dates(d.value()) {
+                b.add_birth_date(Some(date));
+            }
+        }
         out.extend(b.build());
         Ok(())
     })?;
     Ok(out)
+}
+
+/// The dates of birth in prose as SFMS writes them: "19711119", "1971", "Approximately 1971", "Between 1960 and
+/// 1962", "12 Jul. 1960", "01.02.1960", several separated by semicolons.
+pub fn prose_birth_dates(text: &str) -> Vec<String> {
+    const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    static FORMS: std::sync::OnceLock<[Regex; 4]> = std::sync::OnceLock::new();
+    let [compact, dotted, named, between] = FORMS.get_or_init(|| {
+        [
+            Regex::new(r"^(\d{4})(\d{2})(\d{2})$").unwrap(),
+            Regex::new(r"(\d{1,2})\.(\d{1,2})\.(\d{4})").unwrap(),
+            Regex::new(r"(?i)\b(\d{1,2})\s+([a-z]{3})[a-z]*\.?\s+(\d{4})").unwrap(),
+            Regex::new(r"(?i)between\s+(\d{4})\s+and\s+(\d{4})").unwrap(),
+        ]
+    });
+    static YEAR: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let year = YEAR.get_or_init(|| Regex::new(r"\b(\d{4})\b").unwrap());
+    let mut out: Vec<String> = Vec::new();
+    for part in text.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let date = if let Some(c) = compact.captures(part) {
+            birth_date_parts(Some(&c[1]), Some(&c[2]), Some(&c[3]))
+        } else if let Some(c) = dotted.captures(part) {
+            birth_date_parts(Some(&c[3]), Some(&c[2]), Some(&c[1]))
+        } else if let Some(c) = between.captures(part) {
+            match (c[1].parse::<i32>(), c[2].parse::<i32>()) {
+                (Ok(from), Ok(to)) if from < to && (1800..=2100).contains(&from) && to <= 2100 => Some(format!("{from}..{to}")),
+                _ => None,
+            }
+        } else if let Some(c) = named.captures(part) {
+            let month = MONTHS.iter().position(|m| c[2].eq_ignore_ascii_case(m)).map(|m| (m + 1).to_string());
+            birth_date_parts(Some(&c[3]), month.as_deref(), month.as_ref().map(|_| &c[1]))
+        } else {
+            year.captures(part).and_then(|c| birth_date_parts(Some(&c[1]), None, None))
+        };
+        if let Some(date) = date.filter(|d| !out.contains(d)) {
+            out.push(date);
+        }
+    }
+    out
 }
 
 /// A register entry's page: its official record.
@@ -793,6 +902,31 @@ fn parse_france(reader: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseErr
             let raw = join(", ", &[json_str(address, "Adresse"), json_str(address, "Pays")]);
             b.add_address(raw.as_deref(), None);
         }
+        // Identifiers and dates of birth (#68): what each number is, from its comment when that's short.
+        let kind_of = |value: &Value, otherwise: &str| {
+            json_str(value, "Commentaire")
+                .and_then(|c| super::parse::clean(Some(&c)))
+                .filter(|c| c.chars().count() <= 60)
+                .unwrap_or_else(|| otherwise.to_string())
+        };
+        for (field, key, otherwise) in [
+            ("IDENTIFICATION", "Identification", "Identification"),
+            ("PASSEPORT", "NumeroPasseport", "Passeport"),
+            ("AUTRE_IDENTITE", "NumeroCarte", "Autre identité"),
+        ] {
+            for value in values(field) {
+                for number in json_str(value, key).map(|t| free_text_identifiers(&t)).unwrap_or_default() {
+                    b.add_identifier(Some(&kind_of(value, otherwise)), Some(&number), None);
+                }
+            }
+        }
+        for date in values("DATE_DE_NAISSANCE") {
+            b.add_birth_date(birth_date_parts(
+                json_str(date, "Annee").as_deref(),
+                json_str(date, "Mois").as_deref(),
+                json_str(date, "Jour").as_deref(),
+            ));
+        }
         // A ship's IMO number (#69).
         for number in values("NUMERO_OMI") {
             b.add_imo_number(json_str(number, "NumeroOMI").as_deref(), "IMO number as listed");
@@ -909,6 +1043,46 @@ mod tests {
             let error = parse_france(&mut document.as_bytes()).expect_err(document);
             assert!(error.downcast_ref::<super::super::parse::FormatError>().is_some(), "{document}: {error}");
         }
+    }
+
+    /// SFMS's dates of birth in prose (#68).
+    #[test]
+    fn dates_of_birth_in_prose_are_read() {
+        assert_eq!(super::prose_birth_dates("19711119"), ["1971-11-19"]);
+        assert_eq!(super::prose_birth_dates("Approximately 1971; 01.02.1960"), ["1971", "1960-02-01"]);
+        assert_eq!(super::prose_birth_dates("Between 1960 and 1962"), ["1960..1962"]);
+        assert_eq!(super::prose_birth_dates("12 Jul. 1960; 3 May 1961"), ["1960-07-12", "1961-05-03"]);
+        assert!(super::prose_birth_dates("unknown").is_empty());
+    }
+
+    /// SECO's documents, dates and labelled numbers, France's identification fields and dates (#68).
+    #[test]
+    fn seco_and_france_read_identifiers_and_dates_of_birth() {
+        let seco = parse_seco(
+            &mut r#"<swiss-sanctions-list><target ssid="1"><sanctions-set-id>1</sanctions-set-id><individual><identity ssid="2" main="true">
+            <name ssid="3" name-type="primary-name" quality="good"><name-part order="1"><value>Leanid Dziadkou</value></name-part></name>
+            <day-month-year ssid="4" month="10" year="1964"/><identification-document ssid="5" document-type="id-card"><number>3271064M000PB3</number><issuer code="BY">Belarus</issuer></identification-document>
+            </identity><other-information ssid="6">Personal ID: 3281175A014PB8</other-information><other-information ssid="7">Tel.: +375 17 2800264</other-information></individual>
+            <modification modification-type="listed" effective-date="2020-01-01"/></target></swiss-sanctions-list>"#
+                .as_bytes(),
+        )
+        .unwrap();
+        let ids: Vec<(&str, &str, Option<&str>)> =
+            seco[0].identifiers.iter().map(|i| (i.kind.as_str(), i.value.as_str(), i.country.as_deref())).collect();
+        assert_eq!(ids, [("ID card", "3271064M000PB3", Some("BY")), ("Personal ID", "3281175A014PB8", None)]);
+        assert_eq!(seco[0].birth_dates, ["1964-10"]);
+
+        let france = parse_france(
+            &mut r#"{"Publications": {"PublicationDetail": [{"IdRegistre": 7, "Nature": "Personne morale", "Nom": "ROMASHKA",
+            "RegistreDetail": [{"TypeChamp": "IDENTIFICATION", "Valeur": [{"Identification": "1023202741781", "Commentaire": "Numéro d’enregistrement"}, {"Identification": "/", "Commentaire": "Type d’entité: société par actions"}]},
+            {"TypeChamp": "PASSEPORT", "Valeur": [{"NumeroPasseport": " série 1808 n° 233282", "Commentaire": "ou carte d'identité"}]}]},
+            {"IdRegistre": 8, "Nature": "Personne physique", "Nom": "PETROV", "RegistreDetail": [{"TypeChamp": "DATE_DE_NAISSANCE", "Valeur": [{"Jour": "20", "Mois": "10", "Annee": "1976", "Commentaire": ""}]}]}]}}"#
+                .as_bytes(),
+        )
+        .unwrap();
+        let ids: Vec<(&str, &str)> = france[0].identifiers.iter().map(|i| (i.kind.as_str(), i.value.as_str())).collect();
+        assert_eq!(ids, [("Numéro d’enregistrement", "1023202741781"), ("ou carte d'identité", "1808 233282")]);
+        assert_eq!(france[1].birth_dates, ["1976-10-20"]);
     }
 
     /// Vessels (#69), each format's way: a Vessel subject with its IMO number's seven digits.
