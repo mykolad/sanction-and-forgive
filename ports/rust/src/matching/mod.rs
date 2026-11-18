@@ -134,7 +134,7 @@ mod tests {
 
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "2bbc2988bdda");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "9689bc372b9d");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
