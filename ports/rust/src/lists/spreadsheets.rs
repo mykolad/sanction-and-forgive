@@ -586,7 +586,6 @@ fn parse_new_zealand_ships(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubject>,
     let mut out = Vec::new();
     for row in &rows[header_at + 1..] {
         let cell = |index: Option<usize>| index.and_then(|i| row.get(i)).and_then(|v| clean(Some(v)));
-        let Some(id) = cell(Some(identifier)) else { continue };
         let gone = cell(Some(status)).is_some_and(|s| {
             let lower = s.to_lowercase();
             ["revoked", "delisted", "removed"].iter().any(|word| lower.contains(word))
@@ -594,6 +593,13 @@ fn parse_new_zealand_ships(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubject>,
         if gone {
             continue;
         }
+        // A ship listed without its identifier is a broken file, never a ship quietly lost; an empty row is skipped.
+        let Some(id) = cell(Some(identifier)) else {
+            if cell(Some(name)).is_some() || cell(Some(imo)).is_some() {
+                return Err(format_error("A ship in New Zealand's Ships sheet has no Unique Identifier."));
+            }
+            continue;
+        };
         let mut b = Builder::new(&id, SubjectType::Vessel);
         b.programmes = Some(NEW_ZEALAND_PROGRAMME.to_string());
         let date = cell(Some(sanctioned));
@@ -959,6 +965,10 @@ mod tests {
         assert_eq!((ship.kind, ship.primary_name.as_str(), ship.names.len()), (super::SubjectType::Vessel, "Andaman Skies", 3));
         assert_eq!((ship.identifiers[0].kind.as_str(), ship.identifiers[0].value.as_str()), ("IMO number", "9288693"));
         assert!(super::parse_new_zealand_ships(vec![row(&["Ship"])]).is_err());
+        let unnamed = row(&["Ship", "", "9288693", "Andaman Skies", "45827", "", "", "Sanctioned", ""]);
+        assert!(super::parse_new_zealand_ships(vec![header.clone(), unnamed]).is_err());
+        let blank = row(&["", "", "", "", "", "", "", "", ""]);
+        assert!(super::parse_new_zealand_ships(vec![header, blank]).unwrap().is_empty());
     }
 
     #[test]

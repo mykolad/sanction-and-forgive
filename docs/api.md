@@ -105,11 +105,14 @@ or not, the last one the check digit, so a slip of a digit is refused), either o
 - **The name** is compared with the lists' vessels only (each list keeps its ships in an index of their own, so they
   never weigh on how people's and companies' names score), read as a company's name without a prefix like "M/V" or
   "MT". A receiver's or a company's name never finds a ship, nor a vessel's name a person or a company.
-- **The IMO number** is compared with the IMO numbers the lists give for their ships, as an identifier is: an equal
+- **The IMO number** is compared with the IMO numbers the lists give for their ships, and only with those (a ship's
+  other numbers, an MMSI or a registration number, never), as an identifier is: an equal
   one is a **Match** (100%) whatever the name (ships are renamed), the line "Identifier: equals the listed IMO number
   9321689"; a ship the name found with another IMO number keeps its percentage, and a line says so. An IMO number
   alone is screened too; the entry's `input` is then "IMO 9321689".
-- A list that lists no ships is searched and finds none: `NoMatch`, as for any name it doesn't list.
+- A list that lists no ships is searched and finds none: `NoMatch`, as for any name it doesn't list. A list that does
+  list ships (OFAC SDN, UK, Canada, SECO, France, New Zealand) but whose loaded import has none was imported before
+  ships were kept: its vessel cell is `NotChecked` until the list is imported again.
 
 The lists that give ships (docs/sources.md): OFAC, the UK, Canada, France, Switzerland and New Zealand. The EU's
 "shadow fleet" vessels are designated under Regulation 833/2014, not in the financial sanctions file, and no

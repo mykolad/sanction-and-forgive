@@ -184,6 +184,31 @@ mod tests {
         });
         assert_eq!(renamed.outcome, OverallOutcome::Match);
 
+        // An IMO number is compared with listed IMO numbers alone: another number of the ship's that's equal is no match.
+        let other = ListIndex::build(vec![ListedSubject {
+            identifiers: vec![
+                ListedIdentifier { kind: "IMO number".to_string(), value: "9321689".to_string(), country: None },
+                ListedIdentifier { kind: "Registration Number".to_string(), value: "1234567".to_string(), country: None },
+            ],
+            ..subject("W", "Glacia", SubjectKind::Vessel, None)
+        }]);
+        let other = [ScreenedList { code: "xx".to_string(), name: "XX".to_string(), index: Some(std::sync::Arc::new(other)) }];
+        let by_registration = screener
+            .screen(&ScreeningRequest { vessel_imo_number: Some("1234567".to_string()), ..Default::default() }, &other, &AllowList::empty())
+            .unwrap();
+        assert_eq!(by_registration.entries[0].cells[0].outcome, Some(Outcome::NoMatch));
+
+        // A list that lists ships but was imported before they were kept: its vessel cell is Not checked.
+        let old = [ScreenedList {
+            code: "uk".to_string(),
+            name: "UK".to_string(),
+            index: Some(std::sync::Arc::new(ListIndex::build(vec![subject("U", "Kelly Grace", SubjectKind::Individual, None)]))),
+        }];
+        let before = screener
+            .screen(&ScreeningRequest { vessel_name: "Ocean Faye".to_string(), ..Default::default() }, &old, &AllowList::empty())
+            .unwrap();
+        assert_eq!((before.entries[0].cells[0].checked, before.outcome), (false, OverallOutcome::Incomplete));
+
         // A person's or a company's name never finds a ship, and a ship's name never finds a person.
         let person = screen(ScreeningRequest { receiver_name: "Ocean Faye".to_string(), ..Default::default() });
         assert!(person.entries[0].cells[0].best.as_ref().is_none_or(|b| b.subject.external_id != "V"));

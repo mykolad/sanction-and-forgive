@@ -323,8 +323,12 @@ impl ListIndex {
     }
 
     /// The subjects that list an identifier equal to an entered one (its key, identifiers::identifier_key), each with
-    /// the listed identifier that matched, in list order, each subject once.
-    pub fn identified(&self, entered_keys: &[String]) -> Vec<(Arc<ListedSubject>, ListedIdentifier)> {
+    /// the listed identifier that matched, in list order, each subject once; only identifiers `compared` keeps count.
+    pub fn identified(
+        &self,
+        entered_keys: &[String],
+        compared: impl Fn(&ListedIdentifier) -> bool,
+    ) -> Vec<(Arc<ListedSubject>, ListedIdentifier)> {
         let mut found: Vec<(Arc<ListedSubject>, ListedIdentifier)> = Vec::new();
         for key in entered_keys {
             for &s in postings(&self.subjects_by_identifier, key) {
@@ -332,7 +336,7 @@ impl ListIndex {
                 if found.iter().any(|(f, _)| Arc::ptr_eq(f, subject)) {
                     continue;
                 }
-                if let Some(identifier) = subject.identifiers.iter().find(|i| listed_keys(&i.value).contains(key)) {
+                if let Some(identifier) = subject.identifiers.iter().find(|i| compared(i) && listed_keys(&i.value).contains(key)) {
                     found.push((subject.clone(), identifier.clone()));
                 }
             }

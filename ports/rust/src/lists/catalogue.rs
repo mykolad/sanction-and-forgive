@@ -212,6 +212,10 @@ pub static SOURCES: [ListSource; 17] = [
     source("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", FeedStatus::Active, "https://fiu.gov.ua/", "", ""),
 ];
 
+/// The feeds that list ships, whose parsers keep them (#69): one of these whose import has no ship was imported
+/// before vessels were kept, so its vessels can't be checked until it's imported again.
+pub const LISTS_WITH_VESSELS: [&str; 6] = ["ofac-sdn", "uk", "ca-sema", "ch-seco", "fr-tresor", "nz-mfat"];
+
 /// A catalogued feed by code, ignoring case.
 pub fn find_source(code: &str) -> Option<&'static ListSource> {
     SOURCES.iter().find(|s| s.code.eq_ignore_ascii_case(code))
