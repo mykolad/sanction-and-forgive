@@ -47,6 +47,12 @@ function el(tag, attributes = {}, ...children) {
   return node;
 }
 
+// A name or address from a list or the user inside a sentence, isolated so a right-to-left one (Arabic, Persian,
+// Hebrew) neither reorders the words around it nor is reordered by them (#92). Where one stands alone, dir="auto".
+function isolate(text) {
+  return `\u2068${text}\u2069`;
+}
+
 function percentText(percent) {
   if (percent === null || percent === undefined) return "";
   return percent < 1 ? "<1%" : `${percent}%`;
@@ -273,7 +279,7 @@ function resultTable(result, entries, caption) {
   return el("table", { class: "result-table" },
     caption ? el("caption", { class: "party-caption" }, caption) : null,
     el("thead", {}, el("tr", {}, el("th", { scope: "col" }, "List"),
-      entries.map((entry) => el("th", { scope: "col" }, title(entry), el("span", { class: "entry-input" }, entry.input))))),
+      entries.map((entry) => el("th", { scope: "col" }, title(entry), el("span", { class: "entry-input", dir: "auto" }, entry.input))))),
     body);
 }
 
@@ -354,7 +360,7 @@ function partiesChanged() {
 function cellButton(cell, entry, list) {
   // An allowed possible match (the entry is on the allow-list) keeps its percentage but isn't counted.
   const state = cell.state === "NotChecked" ? "NotChecked" : cell.allowed ? "Allowed" : cell.outcome;
-  const who = cell.bestCandidate ? cell.bestCandidate.listedName : null;
+  const who = cell.bestCandidate ? isolate(cell.bestCandidate.listedName) : null;
   const label = cell.state === "NotChecked"
     ? `${list.name}: not checked`
     : `${list.name}, ${entryTitle(entry)}: ${percentText(cell.percent)} match likelihood, ${LABELS[state]}${who ? ", " + who : ""}`;
@@ -379,15 +385,15 @@ function showDetail(button, cell, entry, list) {
   const detail = $("detail");
   // replaceChildren would show a null as the text "null": only the parts there are.
   detail.replaceChildren(...[
-    el("h3", {}, candidate.listedName),
+    el("h3", { dir: "auto" }, candidate.listedName),
     el("p", { class: "meta" }, `${list.name} · ${entryTitle(entry)} “${entry.input}” · ${percentText(candidate.percent)} match likelihood (${LABELS[candidate.outcome]})`),
     cell.allowed && entry.allowedBy ? el("p", { class: "allowed-note" }, el("strong", {}, "Allowed by the allow-list: "),
       `“${entry.allowedBy.name}”: ${entry.allowedBy.reason}. This possible match doesn't raise the outcome; a person can still review it.`) : null,
     el("dl", {},
-      el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
+      el("dt", {}, "Name matched"), el("dd", { dir: "auto" }, candidate.alias),
       el("dt", {}, "Type"), el("dd", {}, candidate.type === "Unknown" ? "Not stated by the list" : candidate.type),
       el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
-      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses.length ? el("ul", {}, candidate.listedAddresses.map((address) => el("li", {}, address))) : "None listed"),
+      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses.length ? el("ul", {}, candidate.listedAddresses.map((address) => el("li", { dir: "auto" }, address))) : "None listed"),
       candidate.listedIdentifiers ? el("dt", {}, "Listed identifiers") : null,
       candidate.listedIdentifiers ? el("dd", {}, el("ul", {}, candidate.listedIdentifiers.map((id) => el("li", {}, identifierText(id))))) : null,
       candidate.listedBirthDates ? el("dt", {}, "Listed dates of birth") : null,
@@ -399,7 +405,7 @@ function showDetail(button, cell, entry, list) {
     el("ul", {}, candidate.alignment.map((line) => el("li", {}, line))),
     cell.otherHits.length ? el("div", { class: "others" },
       el("p", {}, el("strong", {}, `Other possible matches on ${list.name}`)),
-      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, `${hit.listedName} — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null,
+      el("ul", {}, cell.otherHits.map((hit) => el("li", {}, el("bdi", {}, hit.listedName), ` — ${percentText(hit.percent)} (${LABELS[hit.outcome]})`)))) : null,
   ].filter(Boolean));
   detail.hidden = false;
 }
@@ -428,7 +434,7 @@ function buildRecord() {
     if (!cell) return "";
     if (cell.state === "NotChecked") return `${SYMBOLS.NotChecked} ${LABELS.NotChecked}`;
     const state = cell.allowed ? "Allowed" : cell.outcome;
-    const who = cell.bestCandidate && cell.outcome !== "NoMatch" ? `: ${cell.bestCandidate.listedName}` : "";
+    const who = cell.bestCandidate && cell.outcome !== "NoMatch" ? `: ${isolate(cell.bestCandidate.listedName)}` : "";
     return `${SYMBOLS[state]} ${LABELS[state]} ${percentText(cell.percent)}${who}`;
   };
   const listByCode = new Map(result.lists.map((list) => [list.code, list]));
@@ -438,13 +444,13 @@ function buildRecord() {
 
   // One candidate in full: the best of a cell, or another possible match on the same list.
   const candidateBlock = (entry, cell, list, candidate, percent, outcome) => el("div", { class: "print-hit" },
-    el("h3", {}, candidate.listedName),
+    el("h3", { dir: "auto" }, candidate.listedName),
     el("p", {}, `${list ? list.name : cell.list} · ${entryTitle(entry)} · ${percentText(percent)} match likelihood (${LABELS[outcome]})`),
     cell.allowed && entry.allowedBy ? el("p", {}, `Allowed by the allow-list: “${entry.allowedBy.name}”: ${entry.allowedBy.reason}.`) : null,
     el("dl", { class: "print-meta" },
-      el("dt", {}, "Name matched"), el("dd", {}, candidate.alias),
+      el("dt", {}, "Name matched"), el("dd", { dir: "auto" }, candidate.alias),
       el("dt", {}, "Programme"), el("dd", {}, candidate.programme || "—"),
-      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses && candidate.listedAddresses.length ? candidate.listedAddresses.join("; ") : "None listed"),
+      el("dt", {}, "Listed addresses"), el("dd", {}, candidate.listedAddresses && candidate.listedAddresses.length ? candidate.listedAddresses.map(isolate).join("; ") : "None listed"),
       candidate.listedIdentifiers ? el("dt", {}, "Listed identifiers") : null,
       candidate.listedIdentifiers ? el("dd", {}, candidate.listedIdentifiers.map(identifierText).join("; ")) : null,
       candidate.listedBirthDates ? el("dt", {}, "Listed dates of birth") : null,

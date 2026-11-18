@@ -147,7 +147,7 @@ function entryRows(entry, id) {
       toggle.setAttribute("aria-expanded", String(open));
       detail.hidden = !open;
     },
-  }, entry.primaryName);
+  }, el("bdi", {}, entry.primaryName));
   const aliases = entry.names.length - 1;
   return [
     el("tr", {},
@@ -163,10 +163,10 @@ function details(entry) {
   return el("div", { class: "detail" },
     el("dl", {},
       el("dt", {}, "Names"),
-      el("dd", {}, el("ul", {}, entry.names.map((name) => el("li", {}, name.name, name.isWeak ? el("span", { class: "muted" }, " (the list marks this alias as low quality)") : null)))),
+      el("dd", {}, el("ul", {}, entry.names.map((name) => el("li", {}, el("bdi", {}, name.name), name.isWeak ? el("span", { class: "muted" }, " (the list marks this alias as low quality)") : null)))),
       el("dt", {}, "Addresses"),
       el("dd", {}, entry.addresses.length
-        ? el("ul", {}, entry.addresses.map((address) => el("li", {}, address.raw, address.countryCode && !address.raw.includes(address.countryCode) ? ` (${address.countryCode})` : "")))
+        ? el("ul", {}, entry.addresses.map((address) => el("li", {}, el("bdi", {}, address.raw), address.countryCode && !address.raw.includes(address.countryCode) ? ` (${address.countryCode})` : "")))
         : el("span", { class: "muted" }, "None listed")),
       el("dt", {}, "Programme"),
       el("dd", {}, entry.programme ?? el("span", { class: "muted" }, "None stated")),
