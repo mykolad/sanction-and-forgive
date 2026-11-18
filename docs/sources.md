@@ -138,6 +138,23 @@ The other formats follow. A record's identifiers and dates of birth join its con
 when it has any, so a list without them hashes as before; the first import of a list that has them after this change
 is a new version, every record with them counted as changed.
 
+## Other national lists checked (#89)
+
+Checked on 2026-11-18 with the app's honest client (`sanction-and-forgive/<version>`). The owner's rule (2026-11-17):
+only lists that can be downloaded automatically; lists that target Russia or China are fine, lists issued by them
+aren't.
+
+| Candidate | What's published | Result |
+|---|---|---|
+| **Czech Republic** (Ministry of Foreign Affairs, `vnitrostátní sankční seznam`, Act No. 1/2023) | A CSV on the ministry's open-data page ([Vnitrostátní sankční seznam (otevřená data)](https://mzv.gov.cz/jnp/cz/o_ministerstvu/otevrena_data/index_5.html)) under a dated name (`/file/<n>/Vnitrostatni_sankcni_seznam_2026_07_23.csv`), UTF-8, comma-separated: surname or name (spellings separated by `/`, Latin, Cyrillic, Georgian, Arabic), given names likewise, `Stav zápisu` (`platný` in force, `změněn` amended, `zrušen` cancelled), date of birth, nationality or seat, date and act of listing, the EU provision, the grounds, the measures. 26 rows on 23 Jul 2026: 14 in force, 3 amended, 9 cancelled; people (Russia, Georgia) and organisations (Voice of Europe, Al-Qard Al-Hassan). Published as open data, which Czech law (Act No. 106/1999, §3(11)) defines as data whose reuse isn't restricted. | **Candidate**: downloadable, terms open; a `LinkPattern` source like `jp-mof` (#121). |
+| **Kazakhstan** (Financial Monitoring Agency, list of persons connected with terrorism and extremism financing, Law No. 191-IV, art. 12) | The agency's portal (`websfm.kz`, a JavaScript app for reporting entities) reads a paged JSON API, `https://api.websfm.kz/v1/sanctions/sanction-terrorist/?limit=100&offset=…`, open to an anonymous client: 3,873 entries, names in Cyrillic (Latin often empty), type, status (`included`), dates added and removed, date of birth. The XML and Excel exports (`…/xml/`, `…/excel/`) answer 403 "Authentication required for download". No terms are stated. | **Owner's decision**: the only open route is the portal's own API, not a published file, and the terms are unstated. Mostly Kazakh nationals listed domestically, a transit-lane concern. |
+| **Estonia** (Government sanction to protect Estonia's security, regulation of 13 Mar 2025 No 18) | [A page](https://www.vm.ee/en/list-subjects-sanction-government-republic-protect-estonias-security-and-interests-and-against) naming four people in prose; no file. | Not added: no file, and four names. |
+| **Singapore** (Terrorism (Suppression of Financing) Act, First Schedule) | Domestic designations are the Act's First Schedule on Singapore Statutes Online; [MAS](https://www.mas.gov.sg/regulation/anti-money-laundering/targeted-financial-sanctions/lists-of-designated-individuals-and-entities) otherwise points to the UN's lists. | Not added: statute text, no list file; the UN list covers the rest. |
+| **South Korea** (independent designations, mostly North Korea) | Announced in press releases by the Foreign Ministry; the financial-transaction list is kept by the Ministry of Economy and Finance under the Foreign Exchange Transactions Act. No machine-readable file found. | Not added: no file found. |
+| **World Bank** debarred firms and individuals | The [debarment page](https://www.worldbank.org/debarr), a table (OpenSanctions reads it from a World Bank API gateway, `apigwext.worldbank.org`); no published file found. | Not added: procurement debarment, not sanctions, of little use for logistics (#89). |
+| **Ukraine, War & Sanctions** (Defence Intelligence) | A portal of components, vessels and companies; not a legal list. | Not added: not a list of designations. |
+| Latvia, Lithuania, Israel, Turkey, Canada's listed terrorist entities, Belgium | Checked earlier (2026-11-16/17). | Latvia: a form only; Lithuania: 403; Israel: no file for a non-browser; Turkey (MASAK): no file; Canada's terrorist entities: non-commercial terms (#71); Belgium: imported (`be-terrorism`). |
+
 ## Scripts of the listed names
 
 Measured on 2026-11-16 with `probe --source all --scripts` (#90): every name of every fetched list (primary names and
