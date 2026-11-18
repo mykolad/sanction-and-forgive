@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text.Json;
+using System.Xml.Linq;
+using SanctionAndForgive.Conformance.Feeds;
 using SanctionAndForgive.Conformance.Harness;
 
 namespace SanctionAndForgive.Conformance.Tests;
@@ -90,5 +92,39 @@ public sealed class VesselsTests
         var page = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         var entries = page.GetProperty("entries").EnumerateArray().ToList();
         Assert.Equal(("SHIP0001", "Vessel"), (entries.Single().GetProperty("externalId").GetString(), entries.Single().GetProperty("type").GetString()));
+    }
+}
+
+// A list that lists ships, imported before ships were kept (#69): its vessel cells are NotChecked, never NoMatch, and
+// the summary says so. Imported as a UK file without its ship, then the base files again.
+[Collection("3 Changes")]
+public sealed class VesselsBeforeShipsWereKeptTests
+{
+    [SinceVersionFact(2)]
+    public async Task AListImportedWithoutItsShips_LeavesTheVesselNotChecked_AndTheSummarySaysSo()
+    {
+        await Suite.ReadyAsync();
+        var document = XDocument.Load(Suite.FeedPath("uk", "base"));
+        document.Root!.Elements("Designation").Single(designation => (string?)designation.Element("UniqueID") == "SHIP0001").Remove();
+        var path = Suite.FeedPath("uk", "without-ships");
+        document.Save(path);
+        try
+        {
+            var import = await Suite.CliAsync($"import --source uk --file {Suite.Quote(path)}");
+            Assert.True(import.ExitCode == 0, import.Output);
+            await Suite.WaitForListsAsync(lists => lists["uk"].GetProperty("recordCount").GetInt32() == FeedFiles.RecordCount("uk") - 1);
+
+            var result = await Suite.ScreenAsync(new { reference = "vessel-old-import", vesselName = "Conformance Star" });
+
+            Assert.Equal("NotChecked", Suite.Cell(result, "uk")!.Value.GetProperty("state").GetString());
+            Assert.Equal("Match", Suite.Cell(result, "ofac-sdn")!.Value.GetProperty("outcome").GetString());
+            var summary = result.GetProperty("summary").GetString()!;
+            Assert.Contains("The vessel wasn't checked in: UK", summary, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.Delete(path);
+            await Suite.RestoreBaseAsync();
+        }
     }
 }

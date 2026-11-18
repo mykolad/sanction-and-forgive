@@ -834,8 +834,18 @@ impl ScreeningService {
         let mut not_checked = Vec::new();
         let mut switched_off = Vec::new();
         let by_code: HashMap<&str, &LoadedList> = lists.iter().map(|l| (l.code.as_str(), l.as_ref())).collect();
+        // A list searched for some entries but not all (a vessel on a list imported before ships were kept, #69): never
+        // "No match found" in it, and a sentence of its own.
+        let partly: Vec<&str> = lists
+            .iter()
+            .filter(|l| l.is_searched() && result.entries.iter().flat_map(|e| &e.cells).any(|c| c.list == l.code && !c.checked))
+            .map(|l| l.code.as_str())
+            .collect();
+        let mut vessel_not_checked = Vec::new();
         for list in lists {
-            if list.is_searched() {
+            if list.is_searched() && partly.contains(&list.code.as_str()) {
+                vessel_not_checked.push(list.name.clone());
+            } else if list.is_searched() {
                 checked.push(format!("{}, as of {}", list.name, as_of(list.last_checked_at)));
             }
             if list.switched_off.is_none() && !list.is_searched() {
@@ -863,6 +873,12 @@ impl ScreeningService {
         }
         if !switched_off.is_empty() {
             gap += &format!(" Not searched: {}.", switched_off.join("; "));
+        }
+        if !vessel_not_checked.is_empty() {
+            gap += &format!(
+                " The vessel wasn't checked in: {} (imported before ships were kept; checked from its next import).",
+                vessel_not_checked.join(", ")
+            );
         }
         for age in &ages {
             gap +=
@@ -920,7 +936,10 @@ impl ScreeningService {
             OverallOutcome::Review => {
                 format!("Review needed: a similar listed party on {}.{destination}{gap}{allowed}", hits.join(", "))
             }
-            OverallOutcome::Incomplete if checked.is_empty() => format!("Incomplete: no list could be checked.{gap}"),
+            OverallOutcome::Incomplete if checked.is_empty() && vessel_not_checked.is_empty() => {
+                format!("Incomplete: no list could be checked.{gap}")
+            }
+            OverallOutcome::Incomplete if checked.is_empty() => format!("Incomplete.{gap}{allowed}"),
             OverallOutcome::Incomplete => format!("Incomplete. No match found in: {}.{gap}{allowed}", checked.join("; ")),
             OverallOutcome::NoMatch if !allowed.is_empty() => {
                 format!("No match found in: {}, apart from what the allow-list allows.{gap}{allowed}", checked.join("; "))
