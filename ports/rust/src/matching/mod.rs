@@ -488,6 +488,7 @@ mod tests {
             assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
         }
         assert_eq!(crate::matching::text::pinyin_readings("丽々"), ["lili"]);
+        assert_eq!(crate::matching::text::pinyin_readings("重庆々"), ["chongqingqing"]);
         let (outcome, percent) = screen("张 Wei", "Zhang Wei Ming", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Review), "张 Wei / Zhang Wei Ming: {percent:?}");
         // Never two Chinese names that only sound alike, a transliteration, or a reading alike only after folding; a
@@ -534,6 +535,7 @@ mod tests {
             ("Zangwei Weizang", "Zhang Wei", "张伟"),
             ("Zangwei", "张伟", "Zhangwei"),
             ("张伟 Smith", "Zhangwei Ivanov", "Zhangwei Ivanov"),
+            ("Zangwei Weizang", "张伟", "张伟"),
         ] {
             let mut subjects: Vec<ListedSubject> = (0..2100)
                 .map(|i| ListedSubject {

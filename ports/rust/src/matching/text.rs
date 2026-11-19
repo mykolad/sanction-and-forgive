@@ -229,21 +229,26 @@ pub fn pinyin_name_readings(word: &str) -> (Vec<String>, usize) {
     let table = &*PINYIN;
     // One part per character, or per word read as a whole.
     let mut parts: Vec<String> = Vec::new();
+    // The last character's own syllable, for 々, which repeats that character only (重庆々: chongqingqing).
+    let mut last: Option<String> = None;
     let (mut i, mut first_alone) = (0, true);
     while i < chars.len() {
         if let Some((w, r)) = table.words.iter().find(|(w, _)| chars[i..].starts_with(w)) {
             first_alone &= i != 0;
             parts.push(r.clone());
+            last = w.last().and_then(|c| table.readings.get(c)).cloned();
             i += w.len();
             continue;
         }
-        // 々 repeats the character before it, and reads as it does.
-        let repeated = (chars[i] == '々').then(|| parts.last()).flatten();
-        let Some(r) = repeated.or_else(|| original.get(i).and_then(|c| table.readings.get(c))).or_else(|| table.readings.get(&chars[i]))
+        let repeated = if chars[i] == '々' { last.clone() } else { None };
+        let Some(r) = repeated
+            .or_else(|| original.get(i).and_then(|c| table.readings.get(c)).cloned())
+            .or_else(|| table.readings.get(&chars[i]).cloned())
         else {
             return (Vec::new(), 0);
         };
-        parts.push(r.clone());
+        last = Some(r.clone());
+        parts.push(r);
         i += 1;
     }
     let mut out: Vec<String> = Vec::new();
