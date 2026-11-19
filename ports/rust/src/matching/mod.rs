@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn matcher_version_is_the_references() {
-        assert_eq!(Screener::new(Options::default()).matcher_version, "688b7434be57");
+        assert_eq!(Screener::new(Options::default()).matcher_version, "0d436265fc5d");
     }
 
     /// The outcome and percentage of screening `query` (a company) against one subject named `listed`.
@@ -418,6 +418,163 @@ mod tests {
 
     /// Chinese and Korean names (data/cjk.json, #93): spacing, traditional and simplified characters, and company forms
     /// written without a space don't keep a name from matching.
+    /// Chinese names in characters and in pinyin (data/pinyin.json, #93): each way round, a surname's own reading, a
+    /// city read as a word; never two Chinese names that only sound alike.
+    #[test]
+    fn a_chinese_name_matches_its_pinyin_but_never_another_name_that_sounds_alike() {
+        for (query, listed, kind) in [
+            ("张伟", "Zhang Wei", SubjectKind::Individual),
+            ("習近平", "Xi Jinping", SubjectKind::Individual),
+            ("Zhang Wei", "张伟", SubjectKind::Individual),
+            ("曾国藩", "Zeng Guofan", SubjectKind::Individual),
+            ("华为", "Huawei", SubjectKind::Entity),
+            ("重庆", "Chongqing", SubjectKind::Entity),
+            // The given name first, as OFAC writes it; a single character a word, never an initial.
+            ("张伟", "Wei ZHANG", SubjectKind::Individual),
+            ("张 Guofan", "Zhang Guofan", SubjectKind::Individual),
+            // A traditional character's own reading, and a word read as a whole after a surname.
+            ("乾隆", "Qianlong", SubjectKind::Individual),
+            ("曾长江", "Zeng Changjiang", SubjectKind::Individual),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        // A word joined from particles is in Latin script too, compared whole; a surname as a word of its own reads as one.
+        for (query, listed) in [("An Na", "安娜"), ("曾 Guofan", "Zeng Guofan")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        // Never a particle reading of a Latin word; marked pinyin reads as plain.
+        for (query, listed) in [("Al Lina", "利娜"), ("Abouguofan", "阿布国藩")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        let (outcome, percent) = screen("Ān Nà", "安娜", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "Ān Nà / 安娜: {percent:?}");
+        // A Chinese word aligned by its pinyin is long enough for initials, as its Latin spelling is.
+        let person = |name: &str, address: Option<&str>| ListedSubject {
+            external_id: "P".to_string(),
+            kind: SubjectKind::Individual,
+            primary_name: name.to_string(),
+            names: vec![ListedName { full_name: name.to_string(), is_weak: false }],
+            addresses: address.map(|a| ListedAddress { raw: a.to_string(), country_code: String::new() }).into_iter().collect(),
+            programme: None,
+            source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
+        };
+        let one = |subject: ListedSubject, request: ScreeningRequest| {
+            let list = ScreenedList {
+                code: "xx".to_string(),
+                name: "XX".to_string(),
+                index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
+            };
+            Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap().entries[0].cells[0].outcome
+        };
+        for entered in ["张 W.", "Zhang W."] {
+            let outcome = one(person("Zhang Wei", None), ScreeningRequest { receiver_name: entered.to_string(), ..Default::default() });
+            assert_eq!(outcome, Some(Outcome::Review), "{entered} / Zhang Wei");
+        }
+        // A name read given name first is a person's: an address never aligns by it (武汉 isn't Hanwu).
+        let outcome = one(
+            person("Somebody", Some("Albert Hanwu 12")),
+            ScreeningRequest { address: "Albert 武汉 12".to_string(), ..Default::default() },
+        );
+        assert_eq!(outcome, Some(Outcome::NoMatch), "Albert 武汉 12 / Albert Hanwu 12");
+        // A partial name in either script is a contained name, as in one script.
+        // 〇 and a supplementary character have readings; 々 reads as the character it repeats.
+        for (query, listed) in [("七〇八", "Qilingba"), ("王𠵾", "Wang Huo"), ("王㗲", "Wang Huo")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        assert_eq!(crate::matching::text::pinyin_readings("丽々"), ["lili"]);
+        assert_eq!(crate::matching::text::pinyin_readings("重庆々"), ["chongqingqing"]);
+        let (outcome, percent) = screen("张 Wei", "Zhang Wei Ming", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Review), "张 Wei / Zhang Wei Ming: {percent:?}");
+        // Never two Chinese names that only sound alike, a transliteration, or a reading alike only after folding; a
+        // place's name isn't read given name first, and one character is a short name on either side.
+        for (query, listed, kind) in [
+            ("章伟", "张伟", SubjectKind::Individual),
+            ("利娜", "Лина", SubjectKind::Individual),
+            ("张伟", "Zang Wei", SubjectKind::Individual),
+            ("Ли На", "利娜", SubjectKind::Individual),
+            ("Jingbei", "北京", SubjectKind::Entity),
+            ("Zhang", "张", SubjectKind::Entity),
+        ] {
+            let (outcome, percent) = screen(query, listed, kind);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        // The exact reading is found however many aliases read alike only after folding.
+        let mut subjects: Vec<ListedSubject> = (0..2100)
+            .map(|i| ListedSubject {
+                external_id: format!("Z-{i}"),
+                kind: SubjectKind::Individual,
+                primary_name: "Zang Wei".to_string(),
+                names: vec![ListedName { full_name: "Zang Wei".to_string(), is_weak: false }],
+                addresses: Vec::new(),
+                programme: None,
+                source_url: None,
+                identifiers: Vec::new(),
+                birth_dates: Vec::new(),
+            })
+            .collect();
+        subjects.push(ListedSubject {
+            external_id: "REAL".to_string(),
+            primary_name: "Zhang Wei".to_string(),
+            names: vec![ListedName { full_name: "Zhang Wei".to_string(), is_weak: false }],
+            ..subjects[0].clone()
+        });
+        let list =
+            ScreenedList { code: "xx".to_string(), name: "XX".to_string(), index: Some(std::sync::Arc::new(ListIndex::build(subjects))) };
+        let result = Screener::new(Options::default())
+            .screen(&ScreeningRequest { receiver_name: "张伟".to_string(), ..Default::default() }, &[list], &AllowList::empty())
+            .unwrap();
+        assert_eq!(result.entries[0].cells[0].best.as_ref().map(|b| b.subject.external_id.as_str()), Some("REAL"));
+        // And in both directions, whatever the votes of the aliases alike only after folding.
+        for (crowd, real, entered) in [
+            ("Zangwei Weizang", "Zhang Wei", "张伟"),
+            ("Zangwei", "张伟", "Zhangwei"),
+            ("张伟 Smith", "Zhangwei Ivanov", "Zhangwei Ivanov"),
+            ("Zangwei Weizang", "张伟", "张伟"),
+        ] {
+            let mut subjects: Vec<ListedSubject> = (0..2100)
+                .map(|i| ListedSubject {
+                    external_id: format!("Z-{i}"),
+                    kind: SubjectKind::Individual,
+                    primary_name: crowd.to_string(),
+                    names: vec![ListedName { full_name: crowd.to_string(), is_weak: false }],
+                    addresses: Vec::new(),
+                    programme: None,
+                    source_url: None,
+                    identifiers: Vec::new(),
+                    birth_dates: Vec::new(),
+                })
+                .collect();
+            subjects.push(ListedSubject {
+                external_id: "REAL".to_string(),
+                primary_name: real.to_string(),
+                names: vec![ListedName { full_name: real.to_string(), is_weak: false }],
+                ..subjects[0].clone()
+            });
+            let list = ScreenedList {
+                code: "xx".to_string(),
+                name: "XX".to_string(),
+                index: Some(std::sync::Arc::new(ListIndex::build(subjects))),
+            };
+            let result = Screener::new(Options::default())
+                .screen(&ScreeningRequest { receiver_name: entered.to_string(), ..Default::default() }, &[list], &AllowList::empty())
+                .unwrap();
+            assert_eq!(
+                result.entries[0].cells[0].best.as_ref().map(|b| b.subject.external_id.as_str()),
+                Some("REAL"),
+                "{entered} among {crowd}"
+            );
+        }
+        use crate::matching::text::pinyin_readings;
+        assert_eq!(pinyin_readings("曾国藩"), ["cengguofan", "zengguofan", "guofanceng", "guofanzeng"]);
+        assert_eq!(pinyin_readings("重庆"), ["chongqing"]);
+    }
+
     #[test]
     fn chinese_and_korean_names_match_however_spaced_or_written() {
         for (query, listed, kind) in [

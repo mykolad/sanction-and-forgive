@@ -5,7 +5,7 @@ use super::compare::{AlignMethod, Alignment, TokenComparer};
 use super::data::MatcherData;
 use super::names::NameForm;
 use super::options::Options;
-use super::text::{to_upper_invariant, Token, TokenRef};
+use super::text::{is_latin_word, to_upper_invariant, Token, TokenRef};
 use super::HashMap;
 
 /// One word of a name alignment, without the entered text.
@@ -92,10 +92,19 @@ const MAX_JOINS: usize = 6;
 /// The joins a comparison could make, in a fixed order: (on the listed side, the pair's first word), the listed name's
 /// first. A pair is eligible when the other name has a word that reads exactly as the two (NameForm::joined).
 fn eligible_joins(query: &NameForm, listed: &NameForm) -> Vec<(bool, usize)> {
-    let has = |tokens: &[TokenRef], key: &str| !key.is_empty() && tokens.iter().any(|t| t.forms.iter().any(|f| f == key));
+    // A word's own reading, or a Chinese word's pinyin (#93) where the two words are in Latin script: 张伟 reads as
+    // Zhang Wei's two words read as one, never as two transliterated words'.
+    let has = |tokens: &[TokenRef], key: &str, pair: &[TokenRef]| {
+        let latin = pair.iter().all(|t| is_latin_word(t));
+        !key.is_empty()
+            && tokens
+                .iter()
+                .any(|t| t.forms.iter().any(|f| f == key) || (latin && t.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| r == key))))
+    };
+    let pair = |form: &NameForm, at: usize| form.core.get(at..at + 2).unwrap_or(&[]).to_vec();
     let mut out: Vec<(bool, usize)> =
-        listed.joined.iter().enumerate().filter(|(_, k)| has(&query.core, k)).map(|(j, _)| (true, j)).collect();
-    out.extend(query.joined.iter().enumerate().filter(|(_, k)| has(&listed.core, k)).map(|(i, _)| (false, i)));
+        listed.joined.iter().enumerate().filter(|(j, k)| has(&query.core, k, &pair(listed, *j))).map(|(j, _)| (true, j)).collect();
+    out.extend(query.joined.iter().enumerate().filter(|(i, k)| has(&listed.core, k, &pair(query, *i))).map(|(i, _)| (false, i)));
     out
 }
 
@@ -378,7 +387,12 @@ impl<'a> NameScorer<'a> {
             && pairs.iter().all(|p| {
                 matches!(
                     p.alignment.method,
-                    AlignMethod::Identical | AlignMethod::Transliteration | AlignMethod::SpellingPair | AlignMethod::FoldKey
+                    AlignMethod::Identical
+                        | AlignMethod::Transliteration
+                        | AlignMethod::SpellingPair
+                        | AlignMethod::FoldKey
+                        | AlignMethod::Pinyin
+                        | AlignMethod::PinyinReversed
                 )
             });
 
@@ -393,7 +407,10 @@ impl<'a> NameScorer<'a> {
             && query_core.len() == 1
             && listed_core.len() == 1
             && pairs.len() == 1
-            && query_core[0].is_short_core()
+            // A single Chinese character read in pinyin is as short on either side (张 / Zhang).
+            && (query_core[0].is_short_core()
+                || (matches!(pairs[0].alignment.method, AlignMethod::Pinyin | AlignMethod::PinyinReversed)
+                    && listed_core[0].is_short_core()))
             && !intersects(&query.legal_classes, &listed.legal_classes)
         {
             let reason =
@@ -490,7 +507,11 @@ impl<'a> NameScorer<'a> {
         }
         let mut pairs = Vec::new();
         self.align(&initials_side.core, &other_side.core, &mut unit_weight, &mut pairs);
-        let any_long = pairs.iter().any(|p| initials_side.core[p.query].len() >= 4);
+        // A Chinese word aligned by its pinyin is as long as the Latin word it reads as (张 / Zhang).
+        let any_long = pairs.iter().any(|p| {
+            let pinyin = matches!(p.alignment.method, AlignMethod::Pinyin | AlignMethod::PinyinReversed);
+            initials_side.core[p.query].len() >= 4 || (pinyin && other_side.core[p.listed].len() >= 4)
+        });
         if pairs.len() != initials_side.core.len() || !any_long {
             return None;
         }
@@ -710,6 +731,11 @@ pub fn describe(query: &Token, listed: &Token, a: Alignment) -> String {
         AlignMethod::FoldKey => format!("{q} ~ {l} (romanisation)"),
         AlignMethod::FoldKeyLatin => format!("{q} ~ {l} (romanisation, both Latin)"),
         AlignMethod::Cognate => format!("{q} ~ {l} (Russian and Ukrainian forms of one name)"),
+        // From the Chinese word, whichever side it's on.
+        AlignMethod::Pinyin if query.pinyin.is_some() => format!("{q} read in pinyin = {l}"),
+        AlignMethod::Pinyin => format!("{l} read in pinyin = {q}"),
+        AlignMethod::PinyinReversed if query.pinyin.is_some() => format!("{q} read in pinyin, given name first = {l}"),
+        AlignMethod::PinyinReversed => format!("{l} read in pinyin, given name first = {q}"),
         AlignMethod::OneEdit | AlignMethod::OneEditShort => format!("{q} ~ {l} (one letter differs)"),
         AlignMethod::TwoEdits => format!("{q} ~ {l} (two letters differ)"),
         AlignMethod::None => format!("{q} ≠ {l}"),
@@ -723,6 +749,7 @@ pub fn how(method: AlignMethod) -> &'static str {
         AlignMethod::SpellingPair => "SpellingVariant",
         AlignMethod::FoldKey | AlignMethod::FoldKeyLatin => "Romanisation",
         AlignMethod::Cognate => "Cognate",
+        AlignMethod::Pinyin | AlignMethod::PinyinReversed => "Pinyin",
         AlignMethod::OneEdit | AlignMethod::OneEditShort => "OneLetterDiffers",
         AlignMethod::TwoEdits => "TwoLettersDiffer",
         AlignMethod::None => "Different",

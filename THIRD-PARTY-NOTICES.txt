@@ -74,14 +74,20 @@ END OF TERMS AND CONDITIONS
 
 
 ================================================================================================================
-2. Unicode CLDR and ICU: src/SanctionAndForgive.Matching/Data/countries.json
+2. Unicode CLDR, ICU and the Unihan database: src/SanctionAndForgive.Matching/Data/countries.json and
+   src/SanctionAndForgive.Matching/Data/pinyin.json
 ================================================================================================================
 
 Source: country and territory names from the Unicode Common Locale Data Repository (CLDR),
-https://github.com/unicode-org/cldr-json, and from ICU, under the Unicode License V3.
+https://github.com/unicode-org/cldr-json, and from ICU; Mandarin readings from the Unicode Han Database (Unihan,
+Unicode 18.0.0, Unihan_Readings.txt, kMandarin), https://www.unicode.org/Public/UCD/latest/ucd/Unihan.zip; all
+under the Unicode License V3.
 
-Changes made: names selected per country and language, names that are also first names, words, abbreviations of
-something else or common place names elsewhere left out, merged with this project's own names, written as JSON.
+Changes made: countries.json: names selected per country and language, names that are also first names, words,
+abbreviations of something else or common place names elsewhere left out, merged with this project's own names,
+written as JSON. pinyin.json: the first kMandarin reading of each character Unihan reads (and 〇, ling), without
+tone marks (u for ü), grouped by reading, with this project's own short
+tables of surname readings and of words read as a whole, written as JSON.
 
 UNICODE LICENSE V3
 

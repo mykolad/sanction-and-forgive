@@ -12,7 +12,7 @@ use super::data::{data, MatcherData};
 use super::names::{NameForm, NameParser};
 use super::options::{Options, Outcome};
 use super::scorer::{NameScorer, ScoreValue, WordAlignment};
-use super::text::{fold_key, Token, TokenRef, Tokenizer};
+use super::text::{fold_key, is_latin_word, latin_reads_as, latin_spellings, Token, TokenRef, Tokenizer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SubjectKind {
@@ -125,6 +125,8 @@ pub struct ListIndex {
     aliases_by_fold: HashMap<String, Box<[u32]>>,
     /// By the fold key of two adjacent words read as one (NameForm::joined).
     aliases_by_joined: HashMap<String, Box<[u32]>>,
+    /// Chinese words by their pinyin readings (#93), for a word or two in Latin script; kept apart from the vocabulary.
+    aliases_by_pinyin: HashMap<String, Box<[u32]>>,
     name_vocabulary: FuzzyVocabulary,
     subjects_by_address_key: HashMap<String, Box<[u32]>>,
     address_vocabulary: FuzzyVocabulary,
@@ -165,6 +167,9 @@ impl OrderedPostings {
         (self.keys, ids)
     }
 }
+
+/// At most this many aliases that read exactly as pinyin are kept past the candidate limit (#93).
+const EXACT_PINYIN_KEPT: usize = 100;
 
 fn distinct_tokens(tokens: impl IntoIterator<Item = TokenRef>) -> Vec<TokenRef> {
     let mut out: Vec<TokenRef> = Vec::new();
@@ -248,11 +253,16 @@ impl ListIndex {
         let mut document_frequency: HashMap<String, usize> = HashMap::default();
         let mut by_fold = OrderedPostings::default();
         let mut by_joined = OrderedPostings::default();
+        let mut by_pinyin = OrderedPostings::default();
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
                 *document_frequency.entry(token.key().to_string()).or_default() += 1;
                 for k in lookup_keys(&token).into_iter().chain(korean_keys(&token)) {
                     by_fold.post(k, a);
+                }
+                // A Chinese word under its pinyin (#93), apart from the vocabulary: a word in Latin script finds it.
+                for reading in token.pinyin.iter().flatten() {
+                    by_pinyin.post(reading, a);
                 }
             }
             // Two adjacent words read as one, by fold key (finding is loose, scoring exact), kept apart from the
@@ -275,6 +285,7 @@ impl ListIndex {
         let idf = document_frequency.into_iter().map(|(k, frequency)| (k, (alias_count / frequency.max(1) as f64).ln())).collect();
         let (fold_keys, aliases_by_fold) = by_fold.packed();
         let (_, aliases_by_joined) = by_joined.packed();
+        let (_, aliases_by_pinyin) = by_pinyin.packed();
         let (address_keys, subjects_by_address_key) = by_address.packed();
         let address_vocabulary: Vec<String> = address_keys.into_iter().filter(|k| !k.starts_with('#')).collect();
         let mut by_identifier: HashMap<String, Vec<u32>> = HashMap::default();
@@ -298,6 +309,7 @@ impl ListIndex {
             idf,
             aliases_by_fold,
             aliases_by_joined,
+            aliases_by_pinyin,
             name_vocabulary: FuzzyVocabulary::new(&fold_keys),
             subjects_by_address_key,
             address_vocabulary: FuzzyVocabulary::new(&address_vocabulary),
@@ -414,6 +426,8 @@ impl ListIndex {
             }
         };
         let (by_fold, by_joined) = (&self.aliases_by_fold, &self.aliases_by_joined);
+        // The aliases a Chinese word's pinyin found by fold key: those that read exactly so are put first (below).
+        let mut exact: Vec<u32> = Vec::new();
         let tokens = distinct_tokens(query.entity.core.iter().chain(query.person.core.iter()).cloned());
         for token in &tokens {
             for k in lookup_keys(token) {
@@ -435,6 +449,23 @@ impl ListIndex {
                     }
                 }
                 vote(&extra, 3, false);
+            }
+            // A Chinese word's pinyin finds the aliases in Latin script that read exactly so, as one word or as two (found
+            // by fold key, voted for only when exact: Zang Wei gets no vote from 张伟); a word in Latin script finds the
+            // Chinese words that read as it (#93).
+            for reading in token.pinyin.iter().flatten() {
+                for (list, joined) in [(postings(by_fold, &fold_key(reading)), false), (postings(by_joined, &fold_key(reading)), true)] {
+                    let found: Vec<u32> = list.iter().copied().filter(|&alias| self.reads_exactly(alias, reading)).collect();
+                    vote(&found, 3, joined);
+                    exact.extend_from_slice(&found);
+                }
+            }
+            if is_latin_word(token) {
+                for spelling in latin_spellings(token) {
+                    let list = postings(&self.aliases_by_pinyin, &spelling);
+                    vote(list, 3, false);
+                    exact.extend_from_slice(list);
+                }
             }
             for &group in token.cognate_groups() {
                 for fold in &self.data.cognate_folds[group] {
@@ -478,16 +509,47 @@ impl ListIndex {
                 joined.push(key);
             }
         }
+        // Two words in Latin script read as one find a Chinese word that reads so (#93): Zhang Wei, 张伟.
+        let mut read: Vec<&str> = Vec::new();
+        for form in [query.entity, query.person] {
+            for (pair, k) in form.core.windows(2).zip(&form.joined) {
+                if !k.is_empty() && pair.iter().all(|t| is_latin_word(t)) && !read.contains(&k.as_str()) {
+                    let list = postings(&self.aliases_by_pinyin, k);
+                    vote(list, 3, true);
+                    exact.extend_from_slice(list);
+                    read.push(k);
+                }
+            }
+        }
+        // Aliases that read exactly as pinyin (#93), the only ones pinyin voted for, are kept past the limit when it cuts
+        // them: up to EXACT_PINYIN_KEPT, those with the most votes (the evidence for the whole name) first.
+        let (votes, voted) = (&mut state.votes, &mut state.voted);
         let mut ids = voted.clone();
         ids.sort_by(|a, b| votes[*b as usize].cmp(&votes[*a as usize]));
+        let mut rescued: Vec<u32> = Vec::new();
+        if !exact.is_empty() && ids.len() > o.candidate_limit {
+            let mut present: HashSet<u32> = ids[..o.candidate_limit].iter().copied().collect();
+            rescued = exact.iter().copied().filter(|a| present.insert(*a)).collect();
+            rescued.sort_by(|a, b| votes[*b as usize].cmp(&votes[*a as usize]));
+            rescued.truncate(EXACT_PINYIN_KEPT);
+        }
         for &alias in voted.iter() {
             votes[alias as usize] = 0;
         }
         voted.clear();
         ids.truncate(o.candidate_limit);
+        ids.extend(rescued);
         joinable.sort_unstable();
         joinable.dedup();
         (ids, joinable)
+    }
+
+    /// Whether an alias reads exactly as a Chinese word's pinyin reading (#93): a word in Latin script spelled so, or
+    /// two adjacent ones read as one.
+    fn reads_exactly(&self, alias: u32, reading: &str) -> bool {
+        let form = &self.aliases[alias as usize].form;
+        form.core.iter().any(|t| latin_reads_as(t, reading))
+            || form.core.windows(2).zip(&form.joined).any(|(pair, k)| k == reading && pair.iter().all(|t| is_latin_word(t)))
     }
 
     /// The subjects a name entry finds, best first (then by name): the best one, whatever its percentage, and every
