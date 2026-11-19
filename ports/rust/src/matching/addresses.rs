@@ -5,7 +5,7 @@ use super::{HashMap, HashSet};
 
 use unicode_general_category::GeneralCategory;
 
-use super::compare::TokenComparer;
+use super::compare::{AlignMethod, TokenComparer};
 use super::data::MatcherData;
 use super::scorer::{how, WordAlignment};
 use super::text::{category, is_letter, to_upper_invariant, words, TokenRef, Tokenizer};
@@ -325,7 +325,9 @@ fn aligned_words(comparer: &mut TokenComparer, entered: &[TokenRef], listed: &[T
     for word in entered {
         for candidate in listed {
             let pointer = candidate.as_ref() as *const _;
-            if !used.contains(&pointer) && comparer.compare(word, candidate).aligned() {
+            // A Chinese name read given name first is a person's: never an address's (武汉 isn't Hanwu).
+            let alignment = comparer.compare(word, candidate);
+            if !used.contains(&pointer) && alignment.aligned() && alignment.method != AlignMethod::PinyinReversed {
                 used.push(pointer);
                 pairs.push((word.clone(), candidate.clone()));
                 break;

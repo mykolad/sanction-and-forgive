@@ -19,6 +19,8 @@ pub enum AlignMethod {
     Cognate,
     /// A Chinese word whose pinyin reading is the Latin word (#93).
     Pinyin,
+    /// A Chinese name read given name first is the Latin word (张伟 / Weizhang): a person's name only, never an address.
+    PinyinReversed,
     OneEdit,
     OneEditShort,
     TwoEdits,
@@ -144,9 +146,14 @@ fn compare_once(query: &Token, listed: &Token) -> Alignment {
     // A Chinese word and a word in Latin script (#93): a pinyin reading of the one is exactly the other. Never two
     // Chinese words (names that sound alike are other names), nor a transliteration (Лина isn't 利娜), nor a reading
     // only alike after folding (Zang isn't Zhang).
-    let reads_as = |chinese: &Token, latin: &Token| chinese.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| latin_reads_as(latin, r)));
-    if reads_as(query, listed) || reads_as(listed, query) {
-        return Alignment::new(0.96, AlignMethod::Pinyin);
+    // Which reading: one in written order, or one given name first.
+    let reads_as = |chinese: &Token, latin: &Token| {
+        chinese.pinyin.as_ref().and_then(|p| p.iter().position(|r| latin_reads_as(latin, r))).map(|i| i < chinese.pinyin_in_order as usize)
+    };
+    match reads_as(query, listed).or_else(|| reads_as(listed, query)) {
+        Some(true) => return Alignment::new(0.96, AlignMethod::Pinyin),
+        Some(false) => return Alignment::new(0.96, AlignMethod::PinyinReversed),
+        None => {}
     }
     compare_edits(query, listed)
 }

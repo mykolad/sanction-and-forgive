@@ -27,6 +27,9 @@ pub struct Token {
     /// A Chinese word's readings in pinyin (pinyin_readings: "zhangwei"), compared exactly with a word in Latin script
     /// only, never with another Chinese word or a transliteration; None for any other word.
     pub pinyin: Option<Box<[String]>>,
+    /// How many of the pinyin readings are in written order; the rest read given name first (pinyin_readings), for a
+    /// person's name only: an address never aligns by them.
+    pub pinyin_in_order: u8,
 }
 
 /// The spelling-pair and cognate groups a token belongs to, looked up once when it's made.
@@ -216,6 +219,11 @@ static PINYIN: std::sync::LazyLock<PinyinTable> = std::sync::LazyLock::new(|| {
 /// or three characters, the given name before the surname, as some lists write it (张伟: weizhang, OFAC's Wei ZHANG).
 /// Empty when a character has no reading.
 pub fn pinyin_readings(word: &str) -> Vec<String> {
+    pinyin_name_readings(word).0
+}
+
+/// pinyin_readings, and how many of them are in written order (the others read given name first).
+pub fn pinyin_name_readings(word: &str) -> (Vec<String>, usize) {
     let original: Vec<char> = word.chars().collect();
     let chars: Vec<char> = simplified(word).chars().collect();
     let table = &*PINYIN;
@@ -233,13 +241,13 @@ pub fn pinyin_readings(word: &str) -> Vec<String> {
         let repeated = (chars[i] == '々').then(|| parts.last()).flatten();
         let Some(r) = repeated.or_else(|| original.get(i).and_then(|c| table.readings.get(c))).or_else(|| table.readings.get(&chars[i]))
         else {
-            return Vec::new();
+            return (Vec::new(), 0);
         };
         parts.push(r.clone());
         i += 1;
     }
     let mut out: Vec<String> = Vec::new();
-    let mut add = |reading: String| {
+    let add = |out: &mut Vec<String>, reading: String| {
         if !out.contains(&reading) {
             out.push(reading);
         }
@@ -249,15 +257,16 @@ pub fn pinyin_readings(word: &str) -> Vec<String> {
     let surname = table.surnames.get(&chars[0]).filter(|_| first_alone);
     let firsts: Vec<&String> = std::iter::once(&parts[0]).chain(surname).collect();
     for first in &firsts {
-        add(format!("{first}{}", parts[1..].concat()));
+        add(&mut out, format!("{first}{}", parts[1..].concat()));
     }
+    let in_order = out.len();
     // Given name first only for a person's name: two or three characters, the first a common surname.
     if first_alone && (2..=3).contains(&chars.len()) && table.common_surnames.contains(&chars[0]) {
         for first in &firsts {
-            add(format!("{}{first}", parts[1..].concat()));
+            add(&mut out, format!("{}{first}", parts[1..].concat()));
         }
     }
-    out
+    (out, in_order)
 }
 
 /// A word in Latin script (not a transliteration of another script's word, which reads in Latin letters too).
@@ -272,14 +281,12 @@ pub fn latin_reads_as(token: &Token, reading: &str) -> bool {
     is_latin_word(token) && latin_spellings(token).iter().any(|s| s == reading)
 }
 
-/// A word in Latin script's full spellings: its forms, or for a word joined from particles its text without hyphens
-/// alone (Al Lina: allina, never the lina of a reading that drops a part).
+/// A word in Latin script's spelling as compared with pinyin: its text, without hyphens (Al Lina: allina, never the lina
+/// of a reading that drops a part) or marks.
 pub fn latin_spellings(token: &Token) -> Vec<String> {
-    if token.text.contains('-') {
-        vec![token.text.replace('-', "")]
-    } else {
-        token.forms.clone()
-    }
+    // The word as written, without hyphens or marks (Ān Nà: anna): never a particle reading of it (Abouguofan isn't
+    // abuguofan).
+    vec![strip_diacritics(&token.text.replace('-', ""))]
 }
 
 /// A Han character: the unified and compatibility ideographs, in the Basic Multilingual Plane and beyond it.
@@ -883,10 +890,9 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         folds
     };
     // A Chinese word's pinyin readings, for a Latin word (#93).
-    let pinyin = (!has_latin && !is_number && chars.iter().all(|&c| is_han(c)))
-        .then(|| pinyin_readings(text))
-        .filter(|readings| !readings.is_empty())
-        .map(Vec::into_boxed_slice);
+    let (readings, in_order) =
+        if !has_latin && !is_number && chars.iter().all(|&c| is_han(c)) { pinyin_name_readings(text) } else { (Vec::new(), 0) };
+    let pinyin = (!readings.is_empty()).then(|| readings.into_boxed_slice());
     Token {
         text: text.to_string(),
         forms: distinct,
@@ -897,6 +903,7 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
         groups: None,
         korean: None,
         pinyin,
+        pinyin_in_order: in_order as u8,
     }
 }
 

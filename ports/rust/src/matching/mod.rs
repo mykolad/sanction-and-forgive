@@ -444,8 +444,43 @@ mod tests {
             let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
             assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
         }
-        let (outcome, percent) = screen("Al Lina", "利娜", SubjectKind::Individual);
-        assert_ne!(outcome, Some(Outcome::Match), "Al Lina / 利娜: {percent:?}");
+        // Never a particle reading of a Latin word; marked pinyin reads as plain.
+        for (query, listed) in [("Al Lina", "利娜"), ("Abouguofan", "阿布国藩")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        let (outcome, percent) = screen("Ān Nà", "安娜", SubjectKind::Individual);
+        assert_eq!(outcome, Some(Outcome::Match), "Ān Nà / 安娜: {percent:?}");
+        // A Chinese word aligned by its pinyin is long enough for initials, as its Latin spelling is.
+        let person = |name: &str, address: Option<&str>| ListedSubject {
+            external_id: "P".to_string(),
+            kind: SubjectKind::Individual,
+            primary_name: name.to_string(),
+            names: vec![ListedName { full_name: name.to_string(), is_weak: false }],
+            addresses: address.map(|a| ListedAddress { raw: a.to_string(), country_code: String::new() }).into_iter().collect(),
+            programme: None,
+            source_url: None,
+            identifiers: Vec::new(),
+            birth_dates: Vec::new(),
+        };
+        let one = |subject: ListedSubject, request: ScreeningRequest| {
+            let list = ScreenedList {
+                code: "xx".to_string(),
+                name: "XX".to_string(),
+                index: Some(std::sync::Arc::new(ListIndex::build(vec![subject]))),
+            };
+            Screener::new(Options::default()).screen(&request, &[list], &AllowList::empty()).unwrap().entries[0].cells[0].outcome
+        };
+        for entered in ["张 W.", "Zhang W."] {
+            let outcome = one(person("Zhang Wei", None), ScreeningRequest { receiver_name: entered.to_string(), ..Default::default() });
+            assert_eq!(outcome, Some(Outcome::Review), "{entered} / Zhang Wei");
+        }
+        // A name read given name first is a person's: an address never aligns by it (武汉 isn't Hanwu).
+        let outcome = one(
+            person("Somebody", Some("Albert Hanwu 12")),
+            ScreeningRequest { address: "Albert 武汉 12".to_string(), ..Default::default() },
+        );
+        assert_eq!(outcome, Some(Outcome::NoMatch), "Albert 武汉 12 / Albert Hanwu 12");
         // A partial name in either script is a contained name, as in one script.
         // 〇 and a supplementary character have readings; 々 reads as the character it repeats.
         for (query, listed) in [("七〇八", "Qilingba"), ("王𠵾", "Wang Huo"), ("王㗲", "Wang Huo")] {
