@@ -414,7 +414,11 @@ registration `infra/admin-sign-in.ps1` sets up. Every implementation does the sa
     current as uploaded); 202 `{uploadId, code, result: "Writing", recordCount}` when the write takes longer than 30 s (a
     large list on the small database takes minutes, past the ingress's 240 s): it goes on, holding the upload's place;
     `GET /api/v1/admin/uploads/{uploadId}` (admin) says what became of it, `result` `Writing`, `HeldForReview` (with
-    `importId`), `Unchanged` or `Failed` (kept in the replica's memory, its latest 20; 404 for one it doesn't know); 400 a file its parser refuses (the reason, never an entry's text), a missing one, or files
+    `importId`), `Unchanged` or `Failed` (kept in the replica's memory, its latest 20; 404 for one it doesn't know),
+    and `GET /api/v1/admin/uploads` lists them, the latest first, each `{uploadId, code, result, importId,
+    recordCount, startedAt, stage, rowsWritten, rows}`: `stage` says what the write is doing ("Writing names", ...)
+    and `rowsWritten` of `rows` how far it has got (entries, names, addresses and identifiers together). The admin
+    page shows an upload being written, after a reload too, and offers no other upload meanwhile; 400 a file its parser refuses (the reason, never an entry's text), a missing one, or files
     with no entries (an upload never empties a list); 404 a list that isn't uploaded.
     Who uploaded is logged, never shown publicly.
   - `GET /api/v1/admin/imports/{id}/changes`: what a held update changes against the list it was compared with (the

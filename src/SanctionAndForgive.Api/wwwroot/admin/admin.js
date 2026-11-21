@@ -93,6 +93,7 @@ function showUploads(lists, features) {
   section.hidden = !features.includes("uploads") || !lists.length;
   if (section.hidden) return;
   $("uploads").replaceChildren(...lists.map(uploadRow));
+  followUploads();
 }
 
 // What to download for a list that's published as more than one file: they're uploaded together.
@@ -100,11 +101,15 @@ const UPLOAD_FILES = {
   "ua-nsdc": "Download its three subjects' exports (people, companies and vessels) and choose all three together.",
 };
 
+// Each upload row by its list's code (its button and status line), for followUploads.
+const uploadRows = new Map();
+
 function uploadRow(list) {
   const status = el("p", { class: "review-status", "aria-live": "polite" });
   const input = el("input", { type: "file", multiple: true, "aria-label": `${list.name}: the file or files to upload` });
   const button = el("button", { type: "button", class: "primary", disabled: !me?.isAdmin }, "Upload");
   button.addEventListener("click", () => upload(list, input, button, status));
+  uploadRows.set(list.code, { button, status });
   const asOf = list.state === "NotImported" || !list.version ? "No upload confirmed yet." : `In use: ${list.recordCount.toLocaleString()} entries, uploaded ${utc(list.lastCheckedAt)}.`;
   return el("article", { class: "held-card" },
     el("h3", {}, list.name),
@@ -115,43 +120,65 @@ function uploadRow(list) {
     status);
 }
 
-// Asks what became of an upload still being written (its id from the 202 answer) every 20 s, for up to 20 minutes.
-function waitForUpload(uploadId, status) {
-  let tries = 0;
-  const look = async () => {
-    tries += 1;
-    let body = null;
-    try {
-      const response = await fetch(`/api/v1/admin/uploads/${encodeURIComponent(uploadId)}`, { headers: { Accept: "application/json" } });
-      if (response.status === 404) {
-        status.textContent = "The service no longer knows this upload (it restarted): look for it under the updates held for review, or in the list's history on the status page.";
-        loadHeld();
-        return;
+// Uploads being written (one at a time), read from the service every 3 s while there's one: its list's row shows how
+// far it has got, every Upload button waits, and when it ends its row says how. After a reload too: the upload goes on
+// on the service whatever the page does.
+const followed = new Map(); // upload id -> list code, for uploads seen being written
+const OTHER_UPLOAD = "Another list's upload is being written: one at a time, so this waits until it's done.";
+let following = false;
+let sending = 0; // uploads this page is sending (their files not yet read by the service)
+
+async function followUploads() {
+  if (following || !me?.isAdmin) return;
+  following = true;
+  try {
+    for (;;) {
+      let uploads = [];
+      try {
+        const response = await fetch("/api/v1/admin/uploads", { headers: { Accept: "application/json" } });
+        if (response.ok) uploads = (await response.json()).uploads || [];
+      } catch {
+        // Asked again below.
       }
-      if (response.ok) body = await response.json();
-    } catch {
-      // Asked again below.
+      const writing = uploads.find((u) => u.result === "Writing");
+      for (const [code, row] of uploadRows) {
+        row.button.disabled = !!writing || sending > 0;
+        if (writing && writing.code === code) {
+          row.status.textContent = progressText(writing);
+        } else if (writing && !row.status.textContent) {
+          row.status.textContent = OTHER_UPLOAD;
+        } else if (!writing && row.status.textContent === OTHER_UPLOAD) {
+          row.status.textContent = "";
+        }
+      }
+      for (const [id, code] of [...followed]) {
+        const ended = uploads.find((u) => u.uploadId === id && u.result !== "Writing");
+        const row = uploadRows.get(code);
+        if (!ended && uploads.some((u) => u.uploadId === id)) continue;
+        followed.delete(id);
+        if (row) row.status.textContent = endedText(ended);
+        loadHeld();
+        setTimeout(loadHeld, 5000);
+      }
+      if (writing) followed.set(writing.uploadId, writing.code);
+      if (!writing && sending === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }
-    if (body && body.result === "HeldForReview") {
-      status.textContent = "Written: held for review below.";
-      // Once more shortly, in case the lists' reload after it failed and the next check for changes brings it.
-      loadHeld();
-      setTimeout(loadHeld, 5000);
-      return;
-    }
-    if (body && body.result === "Unchanged") {
-      status.textContent = "The same as the list in use: its date is updated, nothing to review.";
-      loadHeld();
-      return;
-    }
-    if (body && body.result === "Failed") {
-      status.textContent = "Writing it failed. Try again in a moment.";
-      return;
-    }
-    if (tries < 60) setTimeout(look, 20000);
-    else status.textContent = "Not written yet after 20 minutes: see the list's history on the status page.";
-  };
-  setTimeout(look, 20000);
+  } finally {
+    following = false;
+  }
+}
+
+function progressText(u) {
+  const rows = u.rows ? `: ${u.rowsWritten.toLocaleString()} of ${u.rows.toLocaleString()} rows written` : "";
+  return `Being written (${u.recordCount.toLocaleString()} entries, started ${utc(u.startedAt)}). ${u.stage}${rows}. It appears under the updates held for review when it's done; a large list takes minutes.`;
+}
+
+function endedText(u) {
+  if (!u) return "The service no longer knows this upload (it restarted): look for it under the updates held for review, or in the list's history on the status page.";
+  if (u.result === "HeldForReview") return "Written: held for review below.";
+  if (u.result === "Unchanged") return "The same as the list in use: its date is updated, nothing to review.";
+  return "Writing it failed. Try again in a moment.";
 }
 
 async function upload(list, input, button, status) {
@@ -161,7 +188,11 @@ async function upload(list, input, button, status) {
     return;
   }
   button.disabled = true;
-  status.textContent = `Reading ${files.map((f) => f.name).join(", ")}…`;
+  status.textContent = `Sending and reading ${files.map((f) => f.name).join(", ")}…`;
+  // While it's sent, no other upload; once read, its progress shows (followUploads).
+  sending += 1;
+  for (const row of uploadRows.values()) row.button.disabled = true;
+  followUploads();
   // One form, a part per file; the browser sets its content type.
   const form = new FormData();
   for (const f of files) form.append("file", f, f.name);
@@ -174,8 +205,8 @@ async function upload(list, input, button, status) {
     const body = await response.json().catch(() => null);
     if (response.status === 202) {
       // Read, and still being written (a large list takes minutes on the small database): it appears below when done.
-      status.textContent = `Read: ${body.recordCount.toLocaleString()} entries, being written. It appears under the updates held for review when it's done, in a few minutes for a large list.`;
-      waitForUpload(body.uploadId, status);
+      status.textContent = `Read: ${body.recordCount.toLocaleString()} entries, being written. It appears under the updates held for review when it's done; a large list takes minutes.`;
+      followed.set(body.uploadId, list.code);
     } else if (response.ok) {
       status.textContent = body.result === "Unchanged"
         ? "The same as the list in use: its date is updated, nothing to review."
@@ -197,7 +228,9 @@ async function upload(list, input, button, status) {
   } catch {
     status.textContent = "The service isn't answering. Try again in a moment.";
   } finally {
-    button.disabled = !me?.isAdmin;
+    // Sent: followUploads sets the buttons (waiting while an upload is being written) within 3 s.
+    sending -= 1;
+    followUploads();
   }
 }
 
