@@ -134,6 +134,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/v1/screenings", post(screen))
         .route("/api/v1/screenings/stream", post(stream))
         .merge(admin::routes())
+        .merge(super::uploads::routes())
         .merge(super::destinations::routes())
         .merge(signin::routes())
         .fallback(page)
@@ -197,7 +198,7 @@ struct StatusResponse<'a> {
 
 async fn status(State(s): State<Shared>) -> Response {
     let now = s.screenings.now();
-    let lists = s.catalog.lists().iter().map(|l| list_response(l, now)).collect();
+    let lists = s.catalog.screened_lists().iter().map(|l| list_response(l, now)).collect();
     let state = if s.catalog.is_ready() { "ready" } else { "warmingUp" };
     json_response(
         StatusCode::OK,
@@ -205,7 +206,7 @@ async fn status(State(s): State<Shared>) -> Response {
             state,
             version: &s.config.version,
             matcher_version: &s.screenings.screener.matcher_version,
-            features: &["parties", "destinations", "identifiers", "vessels"],
+            features: &["parties", "destinations", "identifiers", "vessels", "uploads"],
             lists,
         },
     )
@@ -477,7 +478,8 @@ async fn stream(State(s): State<Shared>, request: Request) -> Response {
     }
     let (max_records, max_seconds) = (s.config.stream_max_records, s.config.stream_max_seconds);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(max_seconds);
-    let (lists, allow_list, destinations, now) = (s.catalog.lists(), s.catalog.allow_list(), s.catalog.destinations(), s.screenings.now());
+    let (lists, allow_list, destinations, now) =
+        (s.catalog.screened_lists(), s.catalog.allow_list(), s.catalog.destinations(), s.screenings.now());
     let (tx, rx) = mpsc::channel::<Bytes>(64);
     let header_line = StreamHeaderLine {
         kind: "header",

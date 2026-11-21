@@ -693,6 +693,133 @@ fn parse_new_zealand_register(rows: Vec<Vec<String>>) -> Result<Vec<ParsedSubjec
     Ok(out)
 }
 
+pub const AUSTRALIA_SHEET: &str = "Consolidated List";
+pub const AUSTRALIA_RECORD_URL: &str = "https://www.dfat.gov.au/international-relations/security/sanctions/consolidated-list";
+
+/// Australia's Consolidated List (DFAT, XLSX, uploaded by an administrator: FeedStatus::Upload), its one sheet: a row
+/// per name, a party's rows sharing their Reference's number ("2", "2a", "2b"), one of them its Primary Name. Its type
+/// (Individual, Entity, Vessel), aliases (Weak ones marked so), names in their original script, addresses, dates of
+/// birth (an Excel date, years, "dd/mm/yyyy" and "Approximately 1963", several separated by commas), a vessel's IMO
+/// number, passport and national identification numbers in the additional information, its committees (programmes).
+/// A party without its Primary Name, or a row without a reference or a name, is a format error.
+pub fn parse_australia(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
+    let rows = xlsx_rows(input, AUSTRALIA_SHEET)?;
+    let is_cell = |cell: &str, name: &str| cell.trim().eq_ignore_ascii_case(name);
+    let header_at = rows
+        .iter()
+        .position(|row| row.iter().any(|c| is_cell(c, "Reference")) && row.iter().any(|c| is_cell(c, "Name of Individual or Entity")))
+        .ok_or_else(|| format_error("No header row (Reference, Name of Individual or Entity, …) in Australia's Consolidated List."))?;
+    let header = &rows[header_at];
+    let find = |name: &str| header.iter().position(|cell| is_cell(cell, name));
+    let required = |name: &str| find(name).ok_or_else(|| format_error(format!("Australia's Consolidated List has no \"{name}\" column.")));
+    let (reference, name, kind, name_type) =
+        (required("Reference")?, required("Name of Individual or Entity")?, required("Type")?, required("Name Type")?);
+    let (strength, born, address, information, listing, imo, committees, instrument) = (
+        find("Alias Strength"),
+        find("Date of Birth"),
+        find("Address"),
+        find("Additional Information"),
+        find("Listing Information"),
+        find("IMO Number"),
+        find("Committees"),
+        find("Instrument of Designation"),
+    );
+
+    // A party's rows, in the order its number first appears.
+    let mut order: Vec<String> = Vec::new();
+    let mut parties: std::collections::HashMap<String, Vec<&Vec<String>>> = std::collections::HashMap::new();
+    for row in &rows[header_at + 1..] {
+        let cell = |index: usize| row.get(index).and_then(|v| clean(Some(v)));
+        if row.iter().all(|value| clean(Some(value)).is_none()) {
+            continue;
+        }
+        let Some(r) = cell(reference) else { return Err(format_error("A row of Australia's Consolidated List has no Reference.")) };
+        if cell(name).is_none() {
+            return Err(format_error(format!("Row {r} of Australia's Consolidated List has no name.")));
+        }
+        let number: String = r.chars().take_while(char::is_ascii_digit).collect();
+        let key = if number.is_empty() { r.clone() } else { number };
+        if !parties.contains_key(&key) {
+            order.push(key.clone());
+        }
+        parties.entry(key).or_default().push(row);
+    }
+
+    static LISTED: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let listed = LISTED.get_or_init(|| regex::Regex::new(r"(?i)listed on\s+(\d{1,2})\s+([a-z]+)\.?\s+(\d{4})").unwrap());
+    static DOCUMENT: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    // "Passport no: Afghanistan number P04581926, issued … National identification no: na Address: …": a document's text
+    // runs to the next label.
+    let document = DOCUMENT.get_or_init(|| {
+        regex::Regex::new(r"(?i)(passport no|national identification no)\s*[.:]\s*(.*?)(?:\s+[A-Z][A-Za-z .()-]{2,40}:|$)").unwrap()
+    });
+    const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+    let mut out = Vec::new();
+    for key in order {
+        let group = &parties[&key];
+        let cell = |row: &Vec<String>, index: Option<usize>| index.and_then(|i| row.get(i)).and_then(|v| clean(Some(v)));
+        let primary = group
+            .iter()
+            .find(|row| cell(row, Some(name_type)).is_some_and(|t| t.eq_ignore_ascii_case("Primary Name")))
+            .ok_or_else(|| format_error(format!("Party {key} of Australia's Consolidated List has no Primary Name.")))?;
+        let subject_type = match cell(primary, Some(kind)).map(|t| t.to_lowercase()).as_deref() {
+            Some("individual") => SubjectType::Individual,
+            Some("entity") => SubjectType::Entity,
+            Some("vessel") => SubjectType::Vessel,
+            _ => SubjectType::Unknown,
+        };
+        let mut b = Builder::new(&key, subject_type);
+        b.source_url = Some(AUSTRALIA_RECORD_URL.to_string());
+        b.add_name(cell(primary, Some(name)).as_deref(), false, true);
+        for row in group {
+            let weak = cell(row, strength).is_some_and(|s| s.eq_ignore_ascii_case("Weak"));
+            b.add_name(cell(row, Some(name)).as_deref(), weak, false);
+        }
+        let mut programmes: Vec<Option<String>> = Vec::new();
+        for row in group {
+            b.add_address(cell(row, address).as_deref(), None);
+            let committee = cell(row, committees);
+            if !programmes.contains(&committee) {
+                programmes.push(committee);
+            }
+        }
+        b.programmes = join(", ", &programmes);
+        b.remarks = join("; ", &[cell(primary, information), cell(primary, instrument)]);
+        b.listed_on = cell(primary, listing).and_then(|l| {
+            let found = listed.captures(&l)?;
+            let month = MONTHS.iter().position(|m| found[2].to_lowercase().starts_with(m))? as u32 + 1;
+            chrono::NaiveDate::from_ymd_opt(found[3].parse().ok()?, month, found[1].parse().ok()?)
+        });
+        if subject_type == SubjectType::Individual {
+            for part in cell(primary, born).unwrap_or_default().split([',', ';']) {
+                let part = part.trim_matches(|c: char| c.is_whitespace());
+                let date = if part.len() == 5 && part.chars().all(|c| c.is_ascii_digit()) {
+                    excel_date(Some(part)).map(|d| d.format("%Y-%m-%d").to_string())
+                } else {
+                    birth_date_text(part).or_else(|| super::parsers::prose_birth_dates(part).into_iter().next())
+                };
+                b.add_birth_date(date);
+            }
+            for found in document.captures_iter(&cell(primary, information).unwrap_or_default()) {
+                let kind = if found[1].to_lowercase().starts_with("passport") { "Passport" } else { "National identification number" };
+                for number in free_text_identifiers(&found[2]) {
+                    b.add_identifier(Some(kind), Some(&number), None);
+                }
+            }
+        }
+        if subject_type == SubjectType::Vessel {
+            for row in group {
+                if let Some(number) = cell(row, imo) {
+                    b.add_imo_number(Some(&number), "IMO number as listed");
+                }
+            }
+        }
+        out.extend(b.build());
+    }
+    Ok(out)
+}
+
 pub const BELGIUM_PROGRAMME: &str = "Belgian national list (royal decree of 28 December 2006, financing of terrorism)";
 
 /// Belgium's national terrorism list (XLSX, its first sheet): BelgiumParser in the reference. A row per number (first
@@ -986,6 +1113,74 @@ mod tests {
         assert!(super::parse_new_zealand_ships(vec![header.clone(), nameless]).is_err());
         let blank = row(&["", "", "", "", "", "", "", "", ""]);
         assert!(super::parse_new_zealand_ships(vec![header, blank]).unwrap().is_empty());
+    }
+
+    /// Australia's Consolidated List: a party's rows by their Reference's number, its Primary Name, weak aliases, dates of
+    /// birth in its forms, documents from the additional information, a vessel's IMO number.
+    #[test]
+    fn australias_consolidated_list_is_read_by_party() {
+        let cell = |r: usize, c: usize, text: &str| {
+            let column = (b'A' + c as u8) as char;
+            format!(r#"<c r="{column}{r}" t="inlineStr"><is><t>{text}</t></is></c>"#)
+        };
+        let header = [
+            "Reference",
+            "Name of Individual or Entity",
+            "Type",
+            "Name Type",
+            "Alias Strength",
+            "Date of Birth",
+            "Address",
+            "Additional Information",
+            "IMO Number",
+            "Committees",
+        ];
+        let rows = [
+            header.to_vec(),
+            vec![
+                "2",
+                "MOHAMMAD HASSAN AKHUND",
+                "Individual",
+                "Primary Name",
+                "",
+                "1945, 30/01/1972",
+                "Kabul, Afghanistan",
+                "Passport no: Afghanistan number P04581926, issued on 7 Aug. 2024 National identification no: na Address: Kabul",
+                "",
+                "1988 (Taliban)",
+            ],
+            vec!["2a", "Mullah Akhund", "Individual", "Alias", "Weak", "", "", "", "", "1988 (Taliban)"],
+            vec!["8227", "ANDAMAN SKIES", "Vessel", "Primary Name", "", "", "", "", "9288693", "Autonomous (Russia)"],
+        ];
+        let sheet_rows: String = rows
+            .iter()
+            .enumerate()
+            .map(|(r, row)| format!("<row>{}</row>", row.iter().enumerate().map(|(c, t)| cell(r + 1, c, t)).collect::<String>()))
+            .collect();
+        let workbook = r#"<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Consolidated List" sheetId="1" r:id="rId1"/></sheets></workbook>"#;
+        let mut buffer = std::io::Cursor::new(Vec::new());
+        {
+            let mut zip = zip::ZipWriter::new(&mut buffer);
+            for (name, content) in [
+                ("xl/workbook.xml", workbook.to_string()),
+                ("xl/_rels/workbook.xml.rels", RELATIONSHIPS.to_string()),
+                ("xl/sharedStrings.xml", format!(r#"<sst xmlns="{MAIN}"/>"#)),
+                ("xl/worksheets/sheet1.xml", format!(r#"<worksheet xmlns="{MAIN}"><sheetData>{sheet_rows}</sheetData></worksheet>"#)),
+            ] {
+                zip.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+                zip.write_all(content.as_bytes()).unwrap();
+            }
+            zip.finish().unwrap();
+        }
+        let parties = super::parse_australia(&mut std::io::Cursor::new(buffer.into_inner())).unwrap();
+        assert_eq!(parties.len(), 2);
+        let person = &parties[0];
+        assert_eq!((person.external_id.as_str(), person.primary_name.as_str(), person.names.len()), ("2", "MOHAMMAD HASSAN AKHUND", 2));
+        assert!(person.names[1].is_weak);
+        assert_eq!(person.birth_dates, ["1945", "1972-01-30"]);
+        assert_eq!((person.identifiers[0].kind.as_str(), person.identifiers[0].value.as_str()), ("Passport", "P04581926"));
+        let vessel = &parties[1];
+        assert_eq!((vessel.kind, vessel.identifiers[0].value.as_str()), (super::SubjectType::Vessel, "9288693"));
     }
 
     #[test]

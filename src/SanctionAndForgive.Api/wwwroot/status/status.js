@@ -11,6 +11,7 @@ const STATE = {
 const WHY = {
   TermsUnclear: "Terms don't allow this use yet",
   NeedsAccess: "Can't be fetched automatically",
+  Upload: "Uploaded by an administrator, not uploaded yet",
   Active: "Not imported yet",
 };
 
@@ -64,6 +65,7 @@ function listCell(list) {
       : el("a", { class: "list-title", href: `/lists?list=${encodeURIComponent(list.code)}`, title: "Browse its entries" }, list.name),
     el("span", { class: "sub" }, list.code,
       list.status === "Manual" ? " · maintained by hand" : "",
+      list.state !== "NotImported" && list.status === "Upload" ? " · uploaded by an administrator from the publisher's file" : "",
       list.state !== "NotImported" && list.status === "TermsUnclear" ? " · imported by decision; its terms aren't cleared" : ""));
 }
 

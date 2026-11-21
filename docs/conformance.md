@@ -66,7 +66,9 @@ field or endpoint) is a `[SinceVersionFact(2)]`, skipped below it: `PartiesTests
 and leaves it empty, so the golden files see no destination) and `IdentifiersTests` (identifiers and dates of birth,
 #68: a variant of the OFAC consolidated file gives two parties some, and the base files are imported again) and
 `VesselsTests` (vessels, #69: the fictional ship CONFORMANCE STAR, IMO 1234567, that every format able to list ships
-lists; version 1 leaves it out).
+lists; version 1 leaves it out) and `UploadsTests` (lists an administrator uploads: a fictional Australian workbook
+uploaded, held, its changes shown, confirmed and searched, a second one rejected, the first again unchanged; Ukraine's
+register refused without all three of its files; the list removed again at the end, so the golden files never see it).
 
 ## What an implementation must provide
 

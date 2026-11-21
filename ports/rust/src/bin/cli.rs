@@ -11,8 +11,8 @@ use sanction_and_forgive::lists::manual::{read_manual_csv, DownloadRetry, Downlo
 use sanction_and_forgive::lists::parse::{FormatError, NameScript, ParseError, ParsedSubject, SubjectType};
 use sanction_and_forgive::lists::parsers::parser_for;
 use sanction_and_forgive::store::db::{Database, DbError};
-use sanction_and_forgive::store::imports::{ImportOutcome, ImportResult, Imports, ReviewResult, SourceRecord};
-use sanction_and_forgive::store::queries::{Subject, SubjectAddress, SubjectIdentifier, SubjectName, Time};
+use sanction_and_forgive::store::imports::{to_stored, ImportOutcome, ImportResult, Imports, ReviewResult, SourceRecord};
+use sanction_and_forgive::store::queries::{Subject, Time};
 
 const USAGE: &str = "Usage (tools/lists.ps1 wraps these):
   probe        [--source <code>|all] [--file <path>] [--keep <directory>]
@@ -130,34 +130,6 @@ struct Commands {
     eu_token: String,
 }
 
-fn to_stored(parsed: Vec<ParsedSubject>) -> Vec<Subject> {
-    parsed
-        .into_iter()
-        .map(|p| Subject {
-            id: 0,
-            external_id: p.external_id,
-            kind: p.kind as u8,
-            primary_name: p.primary_name,
-            programmes: p.programmes,
-            listed_on: p.listed_on,
-            remarks: p.remarks,
-            source_url: p.source_url,
-            names: p
-                .names
-                .into_iter()
-                .map(|n| SubjectName { full_name: n.full_name, is_weak: n.is_weak, script: n.script as u8 })
-                .collect(),
-            addresses: p.addresses.into_iter().map(|a| SubjectAddress { raw: a.raw, country_code: a.country_code }).collect(),
-            identifiers: p
-                .identifiers
-                .into_iter()
-                .map(|i| SubjectIdentifier { kind: i.kind, value: i.value, country: i.country })
-                .collect(),
-            birth_dates: p.birth_dates,
-        })
-        .collect()
-}
-
 /// An error's kind, as the reference prints an exception's type.
 fn kind(e: &(dyn std::error::Error + 'static)) -> &'static str {
     if e.is::<FormatError>() {
@@ -247,7 +219,18 @@ impl Commands {
             println!("{}: no parser yet ({}); see docs/sources.md.", source.code, source.status.as_str());
             return false;
         };
-        let masked = (!source.url.is_empty()).then(|| source.url.replace("{token}", "…"));
+        // A list an administrator uploads has no address to download: its file is given, and the publisher's page
+        // stands for its address; the import is held for review as an upload on the admin page is.
+        let uploaded = source.status == FeedStatus::Upload;
+        if uploaded && file.is_empty() {
+            println!("{}: uploaded by an administrator: give its file (--file), or upload it on the admin page.", source.code);
+            return false;
+        }
+        let masked = if uploaded {
+            Some(source.homepage.to_string())
+        } else {
+            (!source.url.is_empty()).then(|| source.url.replace("{token}", "…"))
+        };
         let mut record = match self.imports.ensure_source(source.code, source.name, masked.as_deref(), Some(source.max_age_hours)).await {
             Ok(record) => record,
             Err(e) => return self.fail(source, None, e.as_ref()).await,
@@ -268,7 +251,12 @@ impl Commands {
             Ok(parsed) => parsed,
             Err(e) => return self.fail(source, Some(&record), e.as_ref()).await,
         };
-        let outcome = match self.imports.import(&mut record, to_stored(parsed), force).await {
+        let stored = to_stored(parsed);
+        let outcome = match if uploaded {
+            self.imports.upload(&mut record, stored).await
+        } else {
+            self.imports.import(&mut record, stored, force).await
+        } {
             Ok(outcome) => outcome,
             Err(e) => return self.fail(source, Some(&record), e.as_ref()).await,
         };
@@ -279,7 +267,8 @@ impl Commands {
             let id = outcome.import_id.unwrap_or_default();
             println!("{}: check the publisher's site, then confirm -Import {id} or reject -Import {id}.", source.code);
         }
-        outcome.result != ImportResult::Rejected && outcome.result != ImportResult::HeldForReview
+        // An upload is always held: that's its success.
+        outcome.result != ImportResult::Rejected && (uploaded || outcome.result != ImportResult::HeldForReview)
     }
 
     async fn status(&self) -> i32 {

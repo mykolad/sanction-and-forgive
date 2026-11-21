@@ -3,6 +3,7 @@
 pub mod catalogue;
 pub mod japan;
 pub mod manual;
+pub mod nsdc;
 pub mod parse;
 pub mod parsers;
 pub mod spreadsheets;

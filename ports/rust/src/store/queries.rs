@@ -251,6 +251,30 @@ pub async fn active_subjects(conn: &mut Connection, code: &str, import_id: i32) 
     result
 }
 
+/// A held import as its review reads it: the source's code, its status, whether it has its records, and the import it
+/// was compared with (the active one when it was written).
+pub struct HeldImport {
+    pub code: String,
+    pub status: String,
+    pub has_data: bool,
+    pub based_on: Option<i32>,
+}
+
+pub async fn held_import(conn: &mut Connection, import_id: i32) -> DbResult<Option<HeldImport>> {
+    let found = rows(
+        conn,
+        "SELECT s.Code, i.Status, i.HasData, i.BasedOnImportId FROM Imports i JOIN Sources s ON s.Id = i.SourceId WHERE i.Id = @P1",
+        &[&import_id],
+    )
+    .await?;
+    Ok(found.first().map(|r| HeldImport {
+        code: text(r, 0),
+        status: text(r, 1),
+        has_data: r.get::<bool, _>(2).unwrap_or_default(),
+        based_on: optional_int(r, 3),
+    }))
+}
+
 pub(crate) async fn read_subjects(conn: &mut Connection, import_id: i32) -> DbResult<Vec<Subject>> {
     let subject_rows = rows(
         conn,

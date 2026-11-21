@@ -280,7 +280,7 @@ async fn check_and_store(
     confirmed: &HashSet<String>,
 ) -> (StatusCode, Value, Option<(i32, Vec<String>)>) {
     let catalog = &s.catalog;
-    let lists = catalog.lists();
+    let lists = catalog.screened_lists();
     let unavailable = !catalog.is_ready() || lists.is_empty() || lists.iter().any(|l| l.index.is_none());
     if unavailable {
         return (

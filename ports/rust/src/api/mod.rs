@@ -7,3 +7,4 @@ pub mod handlers;
 pub mod screening;
 pub mod server;
 pub mod signin;
+pub mod uploads;

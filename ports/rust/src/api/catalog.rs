@@ -100,6 +100,19 @@ impl Catalog {
         self.snapshot.read().unwrap().lists.clone()
     }
 
+    /// The lists screenings search and name: every list but one an administrator uploads that has no confirmed upload
+    /// yet (FeedStatus::Upload): a first upload held for review mustn't make every result Incomplete. The status page
+    /// still shows it (lists()), with its held update.
+    pub fn screened_lists(&self) -> Vec<Arc<LoadedList>> {
+        self.lists()
+            .into_iter()
+            .filter(|l| {
+                l.active_import_id.is_some()
+                    || crate::lists::catalogue::find_source(&l.code).is_none_or(|s| s.status != crate::lists::catalogue::FeedStatus::Upload)
+            })
+            .collect()
+    }
+
     pub fn replace(&self, lists: Vec<Arc<LoadedList>>) {
         *self.snapshot.write().unwrap() = Arc::new(Snapshot { lists, ready: true });
     }

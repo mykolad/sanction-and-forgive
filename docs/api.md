@@ -402,6 +402,24 @@ registration `infra/admin-sign-in.ps1` sets up. Every implementation does the sa
   import; 409 `NotPending` (already reviewed, superseded, or held against a list that has changed since). Confirming
   makes it the active list (searched while it's current: the status page shows whether it is) and reloads the lists
   at once; the review is logged with the reviewer's sign-in name.
+- **Uploaded lists** (Rust only so far; `"uploads"` in `features`; owner's decision, 2026-11-21): a list whose
+  publisher's site refuses automated downloads (catalogue status `Upload`: Australia's `au-dfat`, Ukraine's `ua-nsdc`)
+  is downloaded by an administrator in a browser and uploaded.
+  - `POST /api/v1/admin/lists/{code}/upload`: the file as the body, or the files as `multipart/form-data` (a part
+    each; Ukraine's register is three: people, companies, vessels, all required). Same role and header as reviewing;
+    at most 256 MB together, each file parsed as it arrives. 200 `{code, result, importId, recordCount,
+    previousCount, message, reloaded}`: `HeldForReview` (every upload: written in full, held until reviewed) or
+    `Unchanged` (the list in use again: nothing to review, and its date moves, the list being current as uploaded);
+    400 a file its parser refuses (the reason, never an entry's text) or a missing one; 404 a list that isn't uploaded.
+    Who uploaded is logged, never shown publicly.
+  - `GET /api/v1/admin/imports/{id}/changes`: what a held update changes against the list it was compared with (the
+    one in use when it was written; none for a list's first upload): `added`, `removed` and `changed`, each
+    `{count, entries}` (at most 500 shown, the counts whole), each entry `{externalId, name, type, fields}`, a changed
+    one's `fields` `[{field, added, removed}]` (names, addresses, identifiers, dates of birth, programmes...), and how
+    many are `unchanged`. 404 for an import that isn't held.
+  - An uploaded list is `Overdue` a year after its last upload (owner's decision, 2026-11-21). One that has never had
+    an upload confirmed isn't screened at all (never Not checked in every result while its first upload waits).
+    The CLI's `import --source au-dfat --file …` holds it for review as well.
 - `POST /api/v1/admin/lists/{code}/switch-off` (`{"reason": "…"}`, 1-500 characters, required) and
   `…/switch-on`: an administrator's decision to stop or resume searching a list (owner's decision, 2026-11-09). An
   off list is still imported daily, shown on the status page (`SwitchedOff`, with when and the reason) and browsable;

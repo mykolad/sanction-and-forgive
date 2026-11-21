@@ -74,6 +74,80 @@ async function loadHeld() {
   switches.replaceChildren(...(loaded.length ? loaded.map(switchRow) : [el("p", { class: "muted" }, "No lists are loaded.")]));
   const held = body.lists.filter((list) => list.held);
   box.replaceChildren(...(held.length ? held.map(heldCard) : [el("p", { class: "muted" }, "No updates are held for review.")]));
+  showUploads(body.lists.filter((list) => list.status === "Upload"));
+}
+
+// Lists an administrator uploads (the "uploads" feature): one row each, with the publisher's page and a file to send.
+async function showUploads(lists) {
+  let features = [];
+  try {
+    features = (await (await fetch("/api/v1/status", { headers: { Accept: "application/json" } })).json()).features || [];
+  } catch {
+    // Without the status, the section stays hidden.
+  }
+  const section = $("uploads-section");
+  section.hidden = !features.includes("uploads") || !lists.length;
+  if (section.hidden) return;
+  $("uploads").replaceChildren(...lists.map(uploadRow));
+}
+
+// What to download for a list that's published as more than one file: they're uploaded together.
+const UPLOAD_FILES = {
+  "ua-nsdc": "Download its three subjects' exports (people, companies and vessels) and choose all three together.",
+};
+
+function uploadRow(list) {
+  const status = el("p", { class: "review-status", "aria-live": "polite" });
+  const input = el("input", { type: "file", multiple: true, "aria-label": `${list.name}: the file or files to upload` });
+  const button = el("button", { type: "button", class: "primary", disabled: !me?.isAdmin }, "Upload");
+  button.addEventListener("click", () => upload(list, input, button, status));
+  const asOf = list.state === "NotImported" || !list.version ? "No upload confirmed yet." : `In use: ${list.recordCount.toLocaleString()} entries, uploaded ${utc(list.lastCheckedAt)}.`;
+  return el("article", { class: "held-card" },
+    el("h3", {}, list.name),
+    el("p", {}, asOf, " ", link(list.homepage, "The publisher's page"), " (download the file there)."),
+    UPLOAD_FILES[list.code] ? el("p", { class: "muted" }, UPLOAD_FILES[list.code]) : null,
+    el("div", { class: "actions" }, input, button),
+    me?.isAdmin ? null : el("p", { class: "muted" }, "Only a lists administrator can upload."),
+    status);
+}
+
+async function upload(list, input, button, status) {
+  const files = [...(input.files || [])];
+  if (!files.length) {
+    status.textContent = "Choose the file first.";
+    return;
+  }
+  button.disabled = true;
+  status.textContent = `Reading ${files.map((f) => f.name).join(", ")}…`;
+  // One form, a part per file; the browser sets its content type.
+  const form = new FormData();
+  for (const f of files) form.append("file", f, f.name);
+  try {
+    const response = await fetch(`/api/v1/admin/lists/${encodeURIComponent(list.code)}/upload`, {
+      method: "POST",
+      headers: { Accept: "application/json", "X-Requested-By": "sanction-and-forgive-admin" },
+      body: form,
+    });
+    const body = await response.json().catch(() => null);
+    if (response.ok) {
+      status.textContent = body.result === "Unchanged"
+        ? "The same as the list in use: its date is updated, nothing to review."
+        : `Held for review below: ${body.recordCount.toLocaleString()} entries. See what it changes, then confirm or reject it.`;
+      setTimeout(loadHeld, 1500);
+    } else if (response.status === 400 && body && body.errors) {
+      status.textContent = Object.values(body.errors).flat().join(" ");
+    } else if (response.status === 413) {
+      status.textContent = "The file is too large for a list.";
+    } else if (response.status === 401 || response.status === 403) {
+      status.textContent = "Your sign-in doesn't allow this. Sign in again as a lists administrator.";
+    } else {
+      status.textContent = "That didn't work. Try again in a moment.";
+    }
+  } catch {
+    status.textContent = "The service isn't answering. Try again in a moment.";
+  } finally {
+    button.disabled = !me?.isAdmin;
+  }
 }
 
 const STATES = { Current: "Searched", Overdue: "Searched, out of date", NotChecked: "Not checked (not loaded)", SwitchedOff: "Switched off" };
@@ -149,21 +223,56 @@ async function switchList(actions, status, list, off, reason) {
 }
 
 function heldCard(list) {
-  const drop = list.recordCount ? Math.round(100 * (1 - list.held.recordCount / list.recordCount)) : 0;
   const status = el("p", { class: "review-status", "aria-live": "polite" });
   const actions = el("div", { class: "actions" });
+  const uploaded = list.status === "Upload";
+  const against = list.version && list.recordCount
+    ? `, against ${list.recordCount.toLocaleString()} in the list searched now${list.held.recordCount < list.recordCount ? ` (${Math.round(100 * (1 - list.held.recordCount / list.recordCount))}% fewer)` : ""}.`
+    : ": the list has no confirmed version yet, so it isn't searched.";
+  const changes = el("div", { class: "changes" });
   const card = el("article", { class: "held-card" },
     el("h3", {}, list.name),
-    el("p", {}, `Downloaded ${utc(list.held.downloadedAt)}: ${list.held.recordCount.toLocaleString()} records, against ${list.recordCount.toLocaleString()} in the list searched now (${drop}% fewer).`),
+    el("p", {}, `${uploaded ? "Uploaded" : "Downloaded"} ${utc(list.held.downloadedAt)}: ${list.held.recordCount.toLocaleString()} records${against}`),
     list.held.reason ? el("p", { class: "muted" }, list.held.reason) : null,
     list.held.added !== null && list.held.added !== undefined
       ? el("p", {}, `Against the list it was compared with (the list in use when it was downloaded): ${list.held.added.toLocaleString()} entries added, ${list.held.removed.toLocaleString()} removed, ${list.held.changed.toLocaleString()} changed.`)
       : null,
     el("p", {}, link(list.homepage, "The publisher's page"), list.fileUrl ? " · " : "", link(list.fileUrl, "the file"), " · ", link(`/lists?list=${encodeURIComponent(list.code)}`, "browse the list searched now")),
+    me?.isAdmin ? el("p", {}, el("button", { type: "button", class: "secondary", onclick: () => showChanges(list, changes) }, "See the changes")) : null,
+    changes,
     actions,
     status);
   if (me?.isAdmin) showActions(actions, status, list);
   return card;
+}
+
+// What a held update changes against the list it was compared with, entry by entry (GET .../imports/{id}/changes).
+async function showChanges(list, box) {
+  box.textContent = "Comparing…";
+  let body;
+  try {
+    const response = await fetch(`/api/v1/admin/imports/${list.held.importId}/changes`, { headers: { Accept: "application/json" } });
+    if (!response.ok) {
+      box.textContent = response.status === 404 ? "It isn't held any more." : "That didn't work. Try again in a moment.";
+      return;
+    }
+    body = await response.json();
+  } catch {
+    box.textContent = "The service isn't answering. Try again in a moment.";
+    return;
+  }
+  const entry = (e) => el("li", {}, el("bdi", {}, e.name), ` (${e.type}, id ${e.externalId})`,
+    e.fields ? el("ul", {}, e.fields.map((f) => el("li", {}, `${f.field}: `,
+      f.added.length ? el("span", {}, "added ", el("bdi", {}, f.added.join("; "))) : null,
+      f.added.length && f.removed.length ? "; " : null,
+      f.removed.length ? el("span", {}, "removed ", el("bdi", {}, f.removed.join("; "))) : null))) : null);
+  const group = (title, g) => el("details", { open: g.count > 0 && g.count <= 20 ? true : null },
+    el("summary", {}, `${title}: ${g.count.toLocaleString()}`),
+    g.count > g.entries.length ? el("p", { class: "muted" }, `The first ${g.entries.length.toLocaleString()} shown.`) : null,
+    el("ul", {}, g.entries.map(entry)));
+  box.replaceChildren(
+    el("p", {}, body.comparedWith ? `Against the list it was compared with: ${body.unchanged.toLocaleString()} entries unchanged.` : "The list's first version: every entry is new."),
+    group("Added", body.added), group("Removed", body.removed), group("Changed", body.changed));
 }
 
 // Two steps for each: a click asks, a second click does it.

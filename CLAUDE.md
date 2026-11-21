@@ -59,7 +59,9 @@ tools/lists.ps1           The script the owner runs to manage lists
 - `ListSources.All` is the catalogue: code, name, URL, `MaxAgeHours` (72 for the daily feeds), `FeedStatus`, parser.
   Only `Active` feeds are imported automatically. A feed published under a dated name (jp-mof) has the publisher's
   page as its URL and a `LinkPattern`: `FeedDownloader.DownloadAsync(ListSource, …)` takes the newest matching link. `TermsUnclear` (un, ch-seco, ca-sema) wait for the owner's
-  decision, and `NeedsAccess` (au-dfat, ua-nsdc) wait for a file or an API key. The EU URL's `{token}` comes from
+  decision. `Upload` (au-dfat, ua-nsdc; Rust only, owner's decision 2026-11-21) is a list whose site refuses
+  automated downloads: an administrator uploads its file on the admin page, every upload held for review with its
+  changes shown (`api/uploads.rs`), Overdue a year after the last upload, never screened before a first one is confirmed. The EU URL's `{token}` comes from
   `LISTS_EU_TOKEN` (the public token by default).
 - One `IListParser` per format reduces a file to `ParsedSubject`s: external id, `SubjectType` (`Unknown` when the
   source doesn't say: US export records), primary name, every name with its script and weak flag, addresses as one
@@ -248,7 +250,8 @@ never rewrites a version's golden files. New fields and endpoints (owner's decis
 `features` (`parties`: several parties per screening, #65; `destinations`: the table of destinations under broad
 restrictions, #67, kept on the admin page in `RestrictedDestinations`, whose migration comes from .NET like every
 table; `identifiers`: identifiers and dates of birth entered with a name, #68; `vessels`: a vessel's name and IMO
-number, searched in each list's ships, #69; docs/api.md), the shared website
+number, searched in each list's ships, #69; `uploads`: lists an administrator uploads, held for review; docs/api.md),
+the shared website
 offers them only when listed,
 and their conformance tests are `[SinceVersionFact(2)]`. A dictionary change still reaches all three (the files are shared).
 The dictionaries and `wwwroot` are copied into the ports at build time; never edit copies. The dictionaries are LF
