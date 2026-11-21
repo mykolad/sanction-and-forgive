@@ -97,26 +97,31 @@ public sealed class UploadsTests
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
     }
 
-    /// <summary>The list removed whole (its records, imports and source), so later tests see the lists as they were; the
-    /// change check sees fewer sources and imports than during the test.</summary>
+    /// <summary>The list removed whole (its records, imports and source), so later tests see the lists as they were. In
+    /// two steps, each seen before the next: removed at once, the database would be as it was before the test, and a
+    /// replica whose change check saw nothing in between (every step here reloads by itself) would see no change.</summary>
     private static async Task RemoveAsync(string code)
     {
-        await using (var connection = await Suite.OpenSqlAsync())
-        {
-            await using var command = new Microsoft.Data.SqlClient.SqlCommand(
-                """
-                DECLARE @id int = (SELECT Id FROM Sources WHERE Code = @code);
-                UPDATE Sources SET ActiveImportId = NULL WHERE Id = @id;
-                DELETE FROM Subjects WHERE ImportId IN (SELECT Id FROM Imports WHERE SourceId = @id);
-                UPDATE Imports SET BasedOnImportId = NULL WHERE SourceId = @id;
-                DELETE FROM Imports WHERE SourceId = @id;
-                DELETE FROM Sources WHERE Id = @id;
-                """, connection);
-            command.Parameters.AddWithValue("@code", code);
-            await command.ExecuteNonQueryAsync();
-        }
-
+        await SqlAsync(
+            code,
+            """
+            DECLARE @id int = (SELECT Id FROM Sources WHERE Code = @code);
+            UPDATE Sources SET ActiveImportId = NULL WHERE Id = @id;
+            DELETE FROM Subjects WHERE ImportId IN (SELECT Id FROM Imports WHERE SourceId = @id);
+            UPDATE Imports SET BasedOnImportId = NULL WHERE SourceId = @id;
+            DELETE FROM Imports WHERE SourceId = @id;
+            """);
+        await Suite.WaitForListsAsync(lists => !lists.TryGetValue(code, out var list) || list.GetProperty("state").GetString() != "Current");
+        await SqlAsync(code, "DELETE FROM Sources WHERE Code = @code;");
         await Suite.WaitForListsAsync(lists => !lists.TryGetValue(code, out var list) || list.GetProperty("state").GetString() == "NotImported");
+    }
+
+    private static async Task SqlAsync(string code, string sql)
+    {
+        await using var connection = await Suite.OpenSqlAsync();
+        await using var command = new Microsoft.Data.SqlClient.SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@code", code);
+        await command.ExecuteNonQueryAsync();
     }
 
     /// <summary>A fictional Consolidated List: its one sheet, a header row and a row per name.</summary>

@@ -30,19 +30,7 @@ pub fn parse_nsdc(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseEr
         }
         let Some(columns) = &header else {
             let names: Vec<String> = row.iter().map(|c| c.trim().to_lowercase()).collect();
-            let has = |n: &str| names.iter().any(|c| c == n);
-            if !has("sid") || !has("name") || !has("status") {
-                return Err(format_error("No header row (sid, name, …, status, …) in the register's file: is it a subjects' export?"));
-            }
-            kind = if has("birthdate") {
-                SubjectType::Individual
-            } else if has("tax_id") {
-                SubjectType::Entity
-            } else if has("country") && has("reg_id") {
-                SubjectType::Vessel
-            } else {
-                return Err(format_error("The register's file has neither a person's, a company's nor a vessel's columns."));
-            };
+            kind = header_kind(&names)?;
             header = Some(names);
             return Ok(());
         };
@@ -102,6 +90,32 @@ pub fn parse_nsdc(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseEr
         return Err(format_error("The register's file is empty."));
     }
     Ok(out)
+}
+
+/// A subjects' export's kind from its columns: people have birthdate, companies tax_id, vessels country and reg_id.
+fn header_kind(names: &[String]) -> Result<SubjectType, ParseError> {
+    let has = |n: &str| names.iter().any(|c| c == n);
+    if !has("sid") || !has("name") || !has("status") {
+        return Err(format_error("No header row (sid, name, …, status, …) in the register's file: is it a subjects' export?"));
+    }
+    if has("birthdate") {
+        Ok(SubjectType::Individual)
+    } else if has("tax_id") {
+        Ok(SubjectType::Entity)
+    } else if has("country") && has("reg_id") {
+        Ok(SubjectType::Vessel)
+    } else {
+        Err(format_error("The register's file has neither a person's, a company's nor a vessel's columns."))
+    }
+}
+
+/// Which of the register's exports a file is, from its header row alone (whatever its rows hold); None if it isn't one.
+pub fn file_kind(file: &[u8]) -> Option<SubjectType> {
+    let end = file.iter().position(|b| *b == b'\n').unwrap_or(file.len());
+    let line = std::str::from_utf8(&file[..end]).ok()?;
+    let names: Vec<String> =
+        line.trim_start_matches('\u{FEFF}').split('\t').map(|c| c.trim().trim_matches('"').trim().to_lowercase()).collect();
+    header_kind(&names).ok()
 }
 
 /// The register's "label:value; label:value" lists, each item whole: a semicolon starts an item only where a label
@@ -183,6 +197,11 @@ mod tests {
         assert_eq!(ships[0].addresses[0].raw, "Російська Федерація");
 
         assert!(parse_nsdc(&mut "id\taction_type\n1\tЗастосування санкцій\n".as_bytes()).is_err());
+        // A file's kind is its header's, even when none of its rows is still active.
+        let header_only = people.lines().next().unwrap();
+        assert_eq!(file_kind(header_only.as_bytes()), Some(SubjectType::Individual));
+        assert_eq!(file_kind(vessels.as_bytes()), Some(SubjectType::Vessel));
+        assert_eq!(file_kind(b"id\taction_type\n"), None);
         assert!(parse_nsdc(&mut people.replace("inactive", "weird").as_bytes()).is_err());
     }
 }

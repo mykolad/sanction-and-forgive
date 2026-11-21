@@ -17,15 +17,18 @@ use serde_json::json;
 
 use super::admin::{path_id, refuse, server_error};
 use super::server::{bad_request, json_response, not_found, one_error, Shared};
-use crate::lists::catalogue::{find_source, missing_upload_kinds, FeedStatus};
+use crate::lists::catalogue::{find_source, max_upload_bytes, missing_upload_files, FeedStatus};
 use crate::lists::parse::ParsedSubject;
 use crate::lists::parsers::parser_for;
 use crate::store::imports::{to_stored, Imports};
 use crate::store::queries::{self, Subject};
 
-/// The most an upload may send, all its files together: Ukraine's three exports are about 110 MB (their sanctions'
-/// text), Australia's file 1.3 MB. Each file is parsed as it arrives and dropped, so only one is held at a time.
+/// The most any upload may send, all its files together (each list's own limit, catalogue::max_upload_bytes, is lower
+/// or equal). Each file is parsed as it arrives and dropped, so only one is held at a time.
 pub const MAX_UPLOAD_BYTES: usize = 256 << 20;
+
+/// One upload at a time per replica: each holds a file and its parsed entries in memory beside the lists in use.
+static UPLOADING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
 /// At most this many entries of each kind (added, removed, changed) in a review; the counts are always whole.
 pub const MAX_CHANGES_SHOWN: usize = 500;
@@ -48,6 +51,21 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
     };
     let Some(source) = find_source(&code).filter(|source| source.status == FeedStatus::Upload) else { return not_found() };
     let Some(parser) = parser_for(source.code) else { return not_found() };
+    // Its length said first (a browser's form and file uploads say it), and within the list's limit: nothing is read
+    // before then.
+    let length = headers.get(axum::http::header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+    let Some(length) = length else {
+        return json_response(StatusCode::LENGTH_REQUIRED, &json!({ "errors": one_error("File", "The upload must state its length.") }));
+    };
+    if length > max_upload_bytes(source.code) {
+        let message = format!("{}'s upload is at most {} MB.", source.name, max_upload_bytes(source.code) >> 20);
+        return json_response(StatusCode::PAYLOAD_TOO_LARGE, &json!({ "errors": one_error("File", &message) }));
+    }
+    let Ok(_uploading) = UPLOADING.try_acquire() else {
+        let message = "Another upload is being read: try again when it's done.";
+        return json_response(StatusCode::CONFLICT, &json!({ "errors": one_error("File", message) }));
+    };
+    let mut file_kinds: Vec<Bytes> = Vec::new();
     let parse = |file: Bytes| async move {
         match tokio::task::spawn_blocking(move || parser(&mut file.as_ref())).await {
             Ok(Ok(subjects)) => Ok(subjects),
@@ -79,6 +97,9 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
                 continue;
             }
             files += 1;
+            // Its header row, kept to check every file of the list was sent.
+            let end = bytes.iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| i + 1).min(64 << 10);
+            file_kinds.push(bytes.slice(..end));
             match parse(bytes).await {
                 Ok(parsed) => subjects.extend(parsed),
                 Err(r) => return r,
@@ -90,6 +111,8 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
         };
         if !bytes.is_empty() {
             files = 1;
+            let end = bytes.iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| i + 1).min(64 << 10);
+            file_kinds.push(bytes.slice(..end));
             match parse(bytes).await {
                 Ok(parsed) => subjects = parsed,
                 Err(r) => return r,
@@ -99,10 +122,14 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
     if files == 0 {
         return bad_request(one_error("File", "Choose the list's file."));
     }
-    let missing = missing_upload_kinds(source.code, &subjects);
+    let headers_sent: Vec<&[u8]> = file_kinds.iter().map(|b| b.as_ref()).collect();
+    let missing = missing_upload_files(source.code, &headers_sent);
     if !missing.is_empty() {
         let message = format!("Upload all of {}'s files together; missing: {}.", source.name, missing.join(", "));
         return bad_request(one_error("File", &message));
+    }
+    if subjects.is_empty() {
+        return bad_request(one_error("File", &format!("The file has no entries: {} is never emptied by an upload.", source.name)));
     }
     let imports = Imports { db: s.db.clone() };
     let outcome = async {

@@ -65,16 +65,30 @@ const fn source(
 /// uploaded, but Overdue.
 pub const UPLOADED: i32 = 365 * 24;
 
-/// The kinds of party an uploaded list's files must have between them, one file each: a list published as several
-/// files is uploaded whole, so none of its parties drop out because a file was left behind. The names of the kinds
-/// missing from `subjects`.
-pub fn missing_upload_kinds(code: &str, subjects: &[crate::lists::parse::ParsedSubject]) -> Vec<&'static str> {
+/// The files a list published as several must be uploaded with, one per kind of party, so none of its parties drop out
+/// because a file was left behind: the names of the kinds none of `files` is (each file's kind from its header, so a
+/// file whose entries are all gone still counts).
+pub fn missing_upload_files(code: &str, files: &[&[u8]]) -> Vec<&'static str> {
     use crate::lists::parse::SubjectType;
-    let required: &[(SubjectType, &str)] = match code {
-        "ua-nsdc" => &[(SubjectType::Individual, "people"), (SubjectType::Entity, "companies"), (SubjectType::Vessel, "vessels")],
-        _ => &[],
+    type KindOf = fn(&[u8]) -> Option<SubjectType>;
+    let (required, kind_of): (&[(SubjectType, &str)], KindOf) = match code {
+        "ua-nsdc" => (
+            &[(SubjectType::Individual, "people"), (SubjectType::Entity, "companies"), (SubjectType::Vessel, "vessels")],
+            crate::lists::nsdc::file_kind,
+        ),
+        _ => return Vec::new(),
     };
-    required.iter().filter(|(kind, _)| !subjects.iter().any(|s| s.kind == *kind)).map(|(_, name)| *name).collect()
+    let kinds: Vec<SubjectType> = files.iter().filter_map(|file| kind_of(file)).collect();
+    required.iter().filter(|(kind, _)| !kinds.contains(kind)).map(|(_, name)| *name).collect()
+}
+
+/// The most an upload of the list may send, its files together: far above the list's real size (Australia's file is
+/// 1.3 MB; Ukraine's three exports about 110 MB, most of it their sanctions' text), so a replica's memory holds it.
+pub fn max_upload_bytes(code: &str) -> u64 {
+    match code {
+        "ua-nsdc" => 256 << 20,
+        _ => 16 << 20,
+    }
 }
 
 /// A list an administrator uploads (FeedStatus::Upload): no address to download, a year's allowed age.

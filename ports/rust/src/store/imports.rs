@@ -128,24 +128,15 @@ struct ReviewStamp {
 impl Imports {
     pub async fn ensure_source(&self, code: &str, name: &str, url: Option<&str>, max_age_hours: Option<i32>) -> DbResult<SourceRecord> {
         let mut conn = self.db.connect().await?;
-        match find_source(&mut conn, "Code = @P1", &code).await? {
-            None => {
-                execute(
-                    &mut conn,
-                    "INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4)",
-                    &[&code, &name, &url, &max_age_hours],
-                )
-                .await?
-            }
-            Some(existing) => {
-                execute(
-                    &mut conn,
-                    "UPDATE Sources SET Name = @P1, Url = @P2, MaxAgeHours = @P3 WHERE Id = @P4",
-                    &[&name, &url, &max_age_hours, &existing.id],
-                )
-                .await?
-            }
-        };
+        // One statement, the code's key range locked: two first imports at once (an upload and the CLI) both find the
+        // one row, never a duplicate key.
+        execute(
+            &mut conn,
+            "UPDATE Sources WITH (UPDLOCK, SERIALIZABLE) SET Name = @P2, Url = @P3, MaxAgeHours = @P4 WHERE Code = @P1; \
+             IF @@ROWCOUNT = 0 INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4)",
+            &[&code, &name, &url, &max_age_hours],
+        )
+        .await?;
         Ok(find_source(&mut conn, "Code = @P1", &code).await?.expect("just written"))
     }
 

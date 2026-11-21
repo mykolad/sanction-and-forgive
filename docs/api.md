@@ -406,11 +406,13 @@ registration `infra/admin-sign-in.ps1` sets up. Every implementation does the sa
   publisher's site refuses automated downloads (catalogue status `Upload`: Australia's `au-dfat`, Ukraine's `ua-nsdc`)
   is downloaded by an administrator in a browser and uploaded.
   - `POST /api/v1/admin/lists/{code}/upload`: the file as the body, or the files as `multipart/form-data` (a part
-    each; Ukraine's register is three: people, companies, vessels, all required). Same role and header as reviewing;
-    at most 256 MB together, each file parsed as it arrives. 200 `{code, result, importId, recordCount,
-    previousCount, message, reloaded}`: `HeldForReview` (every upload: written in full, held until reviewed) or
-    `Unchanged` (the list in use again: nothing to review, and its date moves, the list being current as uploaded);
-    400 a file its parser refuses (the reason, never an entry's text) or a missing one; 404 a list that isn't uploaded.
+    each; Ukraine's register is three: people, companies, vessels, each told by its header and all required). Same
+    role and header as reviewing. The request states its length (411 otherwise), at most 16 MB (Ukraine's 256 MB;
+    413 above), and one upload is read at a time (409 while another is), each file parsed as it arrives. 200 `{code,
+    result, importId, recordCount, previousCount, message, reloaded}`: `HeldForReview` (every upload: written in full,
+    held until reviewed) or `Unchanged` (the list in use again: nothing to review, and its date moves, the list being
+    current as uploaded); 400 a file its parser refuses (the reason, never an entry's text), a missing one, or files
+    with no entries (an upload never empties a list); 404 a list that isn't uploaded.
     Who uploaded is logged, never shown publicly.
   - `GET /api/v1/admin/imports/{id}/changes`: what a held update changes against the list it was compared with (the
     one in use when it was written; none for a list's first upload): `added`, `removed` and `changed`, each
