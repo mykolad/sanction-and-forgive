@@ -271,6 +271,13 @@ impl ListIndex {
             for k in alias.form.joined.iter().filter(|k| !k.is_empty()) {
                 by_joined.post(&fold_key(k), a);
             }
+            // A Chinese name split in two (its surname, its given name) under the whole name's pinyin too, as the one
+            // word was before the split: Zhangwei finds 张伟 exactly (#93).
+            for (pair, k) in alias.form.core.windows(2).zip(&alias.form.joined) {
+                if !k.is_empty() && pair.iter().all(|t| t.pinyin.is_some()) {
+                    by_pinyin.post(k, a);
+                }
+            }
         }
         let mut by_address = OrderedPostings::default();
         for (s, list) in addresses.iter().enumerate() {
@@ -518,6 +525,16 @@ impl ListIndex {
                     let list = postings(&self.aliases_by_pinyin, k);
                     vote(list, 3, true);
                     exact.extend_from_slice(list);
+                    read.push(k);
+                }
+                // A Chinese name split in two (its surname, its given name) reads as the whole name did, finding the
+                // aliases that read exactly so, as one word or as two, past a common surname's crowd (高彬: Gaobin).
+                if !k.is_empty() && pair.iter().all(|t| t.pinyin.is_some()) && !read.contains(&k.as_str()) {
+                    for (list, joined) in [(postings(by_fold, &fold_key(k)), false), (postings(by_joined, &fold_key(k)), true)] {
+                        let found: Vec<u32> = list.iter().copied().filter(|&alias| self.reads_exactly(alias, k)).collect();
+                        vote(&found, 3, joined);
+                        exact.extend_from_slice(&found);
+                    }
                     read.push(k);
                 }
             }
