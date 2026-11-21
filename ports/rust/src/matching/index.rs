@@ -463,15 +463,43 @@ impl ListIndex {
             // A Chinese word's pinyin finds the aliases in Latin script that read exactly so, as one word or as two (found
             // by fold key, voted for only when exact: Zang Wei gets no vote from 张伟); a word in Latin script finds the
             // Chinese words that read as it (#93).
+            // Each alias once for the word, however many of its readings find it (written order, given name first, a
+            // surname's own reading): found as written if any reading finds it so, else through a join.
+            let (mut as_written, mut through_join): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
             for reading in token.pinyin.iter().flatten() {
                 let key = fold_key(reading);
                 for (list, joined) in
                     [(postings(by_fold, &key), false), (postings(by_joined, &key), true), (postings(&self.aliases_by_joined3, &key), true)]
                 {
-                    let found: Vec<u32> = list.iter().copied().filter(|&alias| self.reads_exactly(alias, reading)).collect();
-                    vote(&found, 3, joined);
-                    exact.extend_from_slice(&found);
+                    let found = list.iter().copied().filter(|&alias| self.reads_exactly(alias, reading));
+                    if joined {
+                        through_join.extend(found)
+                    } else {
+                        as_written.extend(found)
+                    }
                 }
+            }
+            if !as_written.is_empty() || !through_join.is_empty() {
+                // In the order first found, each once.
+                let mut written: HashSet<u32> = HashSet::default();
+                as_written.retain(|alias| written.insert(*alias));
+                let (mut once, mut joined_too): (HashSet<u32>, Vec<u32>) = (HashSet::default(), Vec::new());
+                through_join.retain(|alias| {
+                    if !once.insert(*alias) {
+                        return false;
+                    }
+                    if written.contains(alias) {
+                        joined_too.push(*alias);
+                        return false;
+                    }
+                    true
+                });
+                vote(&as_written, 3, false);
+                vote(&through_join, 3, true);
+                // Found both ways: counted once as written, still joinable for the scorer.
+                vote(&joined_too, 0, true);
+                exact.extend_from_slice(&as_written);
+                exact.extend_from_slice(&through_join);
             }
             if is_latin_word(token) {
                 for spelling in latin_spellings(token) {
