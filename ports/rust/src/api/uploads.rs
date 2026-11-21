@@ -58,15 +58,27 @@ struct UploadState {
 
 const KEPT_UPLOADS: usize = 20;
 
-static UPLOADS: std::sync::Mutex<Vec<(u64, UploadState)>> = std::sync::Mutex::new(Vec::new());
+static UPLOADS: std::sync::Mutex<Vec<(String, UploadState)>> = std::sync::Mutex::new(Vec::new());
 static NEXT_UPLOAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-fn set_upload_state(id: u64, state: UploadState) {
+/// This process's random part of every upload id: after a restart, or from another replica, an id this one didn't
+/// give is unknown (404), never another upload's.
+static PROCESS_TAG: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).expect("the system's random source");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+});
+
+fn new_upload_id() -> String {
+    format!("{}-{}", *PROCESS_TAG, NEXT_UPLOAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+fn set_upload_state(id: &str, state: UploadState) {
     let mut uploads = UPLOADS.lock().unwrap();
-    match uploads.iter_mut().find(|(i, _)| *i == id) {
+    match uploads.iter_mut().find(|(i, _)| i == id) {
         Some(entry) => entry.1 = state,
         None => {
-            uploads.push((id, state));
+            uploads.push((id.to_string(), state));
             if uploads.len() > KEPT_UPLOADS {
                 uploads.remove(0);
             }
@@ -80,7 +92,6 @@ async fn upload_state(State(s): State<Shared>, headers: HeaderMap, Path(id): Pat
     if let Err(r) = refuse(&s, &headers, false).await {
         return r;
     }
-    let Ok(id) = id.parse::<u64>() else { return not_found() };
     let found = UPLOADS.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, state)| state.clone());
     let Some(state) = found else { return not_found() };
     json_response(
@@ -187,9 +198,10 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
     let shared = s.clone();
     let user_name = user.name.clone();
     let record_count = subjects.len();
-    let upload_id = NEXT_UPLOAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let upload_id = new_upload_id();
+    let task_upload_id = upload_id.clone();
     let state = move |state: &'static str, import_id: Option<i32>| UploadState { code: source.code, state, import_id, record_count };
-    set_upload_state(upload_id, state("Writing", None));
+    set_upload_state(&upload_id, state("Writing", None));
     let written = tokio::spawn(async move {
         let _place = _uploading;
         let imports = Imports { db: shared.db.clone() };
@@ -202,17 +214,20 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
             Ok(outcome) => outcome,
             Err(e) => {
                 shared.loader.logger.error("Uploading a list failed", &[("code", source.code.into()), ("error", e.to_string().into())]);
-                set_upload_state(upload_id, state("Failed", None));
+                set_upload_state(&task_upload_id, state("Failed", None));
                 return None;
             }
         };
-        set_upload_state(upload_id, state(outcome.result.as_str(), outcome.import_id));
+
         // Who uploaded is logged, never shown publicly.
         shared.loader.logger.info(
             &format!("List {} uploaded by {user_name}: {} ({} records)", source.code, outcome.result.as_str(), outcome.record_count),
             &[],
         );
         let reloaded = shared.loader.refresh().await.is_ok();
+        // Its result once the lists are reloaded (the held update is then in /api/v1/sources), or once the reload has
+        // failed (the next check for changes shows it within seconds).
+        set_upload_state(&task_upload_id, state(outcome.result.as_str(), outcome.import_id));
         Some((outcome, reloaded))
     });
     let mut written = written;
@@ -388,15 +403,19 @@ mod tests {
     #[test]
     fn an_uploads_state_is_kept_by_its_id_and_the_oldest_go() {
         let state = |state: &'static str, import_id: Option<i32>| UploadState { code: "au-dfat", state, import_id, record_count: 3 };
-        let first = NEXT_UPLOAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        set_upload_state(first, state("Writing", None));
-        set_upload_state(first, state("HeldForReview", Some(7)));
-        let found = |id: u64| UPLOADS.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, s)| (s.state, s.import_id));
-        assert_eq!(found(first), Some(("HeldForReview", Some(7))));
+        let first = new_upload_id();
+        assert!(first.starts_with(PROCESS_TAG.as_str()) && PROCESS_TAG.len() == 16, "{first}");
+        set_upload_state(&first, state("Writing", None));
+        set_upload_state(&first, state("HeldForReview", Some(7)));
+        let found = |id: &str| UPLOADS.lock().unwrap().iter().find(|(i, _)| i == id).map(|(_, s)| (s.state, s.import_id));
+        assert_eq!(found(&first), Some(("HeldForReview", Some(7))));
+        // Another process's id, the same number with another tag, is unknown here.
+        let number = first.rsplit('-').next().unwrap();
+        assert_eq!(found(&format!("0000000000000000-{number}")), None);
         for _ in 0..KEPT_UPLOADS {
-            set_upload_state(NEXT_UPLOAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed), state("Writing", None));
+            set_upload_state(&new_upload_id(), state("Writing", None));
         }
-        assert_eq!(found(first), None);
+        assert_eq!(found(&first), None);
         assert!(UPLOADS.lock().unwrap().len() <= KEPT_UPLOADS);
     }
 

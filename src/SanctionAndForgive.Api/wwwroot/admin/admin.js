@@ -134,7 +134,9 @@ function waitForUpload(uploadId, status) {
     }
     if (body && body.result === "HeldForReview") {
       status.textContent = "Written: held for review below.";
+      // Once more shortly, in case the lists' reload after it failed and the next check for changes brings it.
       loadHeld();
+      setTimeout(loadHeld, 5000);
       return;
     }
     if (body && body.result === "Unchanged") {
