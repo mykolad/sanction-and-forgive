@@ -565,6 +565,10 @@ mod tests {
             ("Gao Bin", "高彬 倪", "Gaobin Ni"),
             // Three words read as one find only a Chinese word's pinyin: an ordinary query never votes through them.
             ("Zhangweiming Zhang Wei Ming Ouyang Na Na", "Zhangweiming Ouyangnana", "Zhangweiming Ouyangnana"),
+            // Three words in Latin script find the Chinese name they read as past a crowd of partial Latin names, and
+            // the Chinese name finds the three words past names alike only after folding.
+            ("Zhang Wei Ming Smith", "张伟明", "Zhang Wei Ming"),
+            ("Zang Wei Ming", "Zhang Wei Ming", "张伟明"),
             ("Zangwei Weizang", "张伟", "张伟"),
         ] {
             let mut subjects: Vec<ListedSubject> = (0..2100)
