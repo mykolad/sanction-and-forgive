@@ -572,6 +572,8 @@ mod tests {
             // A Chinese word votes once for an alias however many of its readings find it: both orders of the name in
             // one alias don't outvote the exact one.
             ("Zhang Wei Ming Wei Ming Zhang Smith", "Zhangweiming Smith", "张伟明 Smith"),
+            // An alias found by a word alike only after folding isn't exact through three words elsewhere in it.
+            ("Zangweiming Zhang Wei Ming", "Zhangweiming", "张伟明"),
             ("Zangwei Weizang", "张伟", "张伟"),
         ] {
             let mut subjects: Vec<ListedSubject> = (0..2100)

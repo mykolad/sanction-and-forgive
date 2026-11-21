@@ -468,10 +468,11 @@ impl ListIndex {
             let (mut as_written, mut through_join): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
             for reading in token.pinyin.iter().flatten() {
                 let key = fold_key(reading);
-                for (list, joined) in
-                    [(postings(by_fold, &key), false), (postings(by_joined, &key), true), (postings(&self.aliases_by_joined3, &key), true)]
+                for (list, words) in
+                    [(postings(by_fold, &key), 1), (postings(by_joined, &key), 2), (postings(&self.aliases_by_joined3, &key), 3)]
                 {
-                    let found = list.iter().copied().filter(|&alias| self.reads_exactly(alias, reading));
+                    let joined = words > 1;
+                    let found = list.iter().copied().filter(|&alias| self.reads_exactly(alias, reading, words));
                     if joined {
                         through_join.extend(found)
                     } else {
@@ -594,13 +595,17 @@ impl ListIndex {
         (ids, joinable)
     }
 
-    /// Whether an alias reads exactly as a Chinese word's pinyin reading (#93): a word in Latin script spelled so, or
-    /// two adjacent ones read as one.
-    fn reads_exactly(&self, alias: u32, reading: &str) -> bool {
+    /// Whether an alias reads exactly as a Chinese word's pinyin reading (#93), as the postings that found it do: a word
+    /// in Latin script spelled so (words 1, found by fold key), two adjacent ones read as one (2) or three (3). Each
+    /// only by its own kind, so an alias found by a word alike only after folding never counts as exact through a
+    /// run of words elsewhere in it.
+    fn reads_exactly(&self, alias: u32, reading: &str, words: usize) -> bool {
         let form = &self.aliases[alias as usize].form;
-        form.core.iter().any(|t| latin_reads_as(t, reading))
-            || form.core.windows(2).zip(&form.joined).any(|(pair, k)| k == reading && pair.iter().all(|t| is_latin_word(t)))
-            || form.joined3.iter().any(|k| k == reading)
+        match words {
+            1 => form.core.iter().any(|t| latin_reads_as(t, reading)),
+            2 => form.core.windows(2).zip(&form.joined).any(|(pair, k)| k == reading && pair.iter().all(|t| is_latin_word(t))),
+            _ => form.joined3.iter().any(|k| k == reading),
+        }
     }
 
     /// The subjects a name entry finds, best first (then by name): the best one, whatever its percentage, and every
