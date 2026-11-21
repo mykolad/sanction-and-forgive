@@ -416,7 +416,8 @@ async fn start(State(s): State<Shared>, headers: HeaderMap) -> Response {
 }
 
 /// The starting rows (starting-destinations.json), each settlement with its region's restrictedBy and legalSource when
-/// it has none of its own.
+/// it has none of its own, unless it's outside the restricted area (Zaporizhzhia and Kherson, government-controlled
+/// cities in partly occupied regions): nothing restricts it, so it cites nothing.
 pub fn starting_rows() -> Vec<Destination> {
     let document: Value = serde_json::from_str(include_str!("starting-destinations.json")).expect("starting-destinations.json");
     let day = |key: &str| NaiveDate::parse_from_str(document[key].as_str().unwrap(), "%Y-%m-%d").unwrap();
@@ -426,6 +427,7 @@ pub fn starting_rows() -> Vec<Destination> {
     let mut rows: Vec<Destination> = Vec::new();
     for item in items {
         let parent = item["parent"].as_str().map(str::to_string);
+        let status = DestinationStatus::parse(&text(item, "status")).unwrap();
         let inherited = |key: &str| -> String {
             let own = text(item, key);
             if !own.is_empty() {
@@ -443,9 +445,17 @@ pub fn starting_rows() -> Vec<Destination> {
             country: text(item, "country"),
             parent: parent.clone(),
             needs_region: item["needsRegion"].as_bool().unwrap_or(false),
-            status: DestinationStatus::parse(&text(item, "status")).unwrap(),
-            restricted_by: if parent.is_some() { inherited("restrictedBy") } else { text(item, "restrictedBy") },
-            legal_source: if parent.is_some() { inherited("legalSource") } else { text(item, "legalSource") },
+            status,
+            restricted_by: if parent.is_some() && status != DestinationStatus::Outside {
+                inherited("restrictedBy")
+            } else {
+                text(item, "restrictedBy")
+            },
+            legal_source: if parent.is_some() && status != DestinationStatus::Outside {
+                inherited("legalSource")
+            } else {
+                text(item, "legalSource")
+            },
             as_of,
             review_by,
         });
@@ -484,6 +494,10 @@ mod tests {
             assert_eq!(&parsed, row);
             assert_eq!(refused_by_table(row, &in_force, true), None, "{}", row.code);
             assert!(!in_force.iter().any(|d| d.code == row.code), "{} twice", row.code);
+            // A place outside the restricted area cites no restriction: none applies to it.
+            if row.status == DestinationStatus::Outside {
+                assert!(row.restricted_by.is_empty() && row.legal_source.is_empty(), "{} cites a restriction", row.code);
+            }
             in_force.push(row.clone());
         }
         let table = table();
