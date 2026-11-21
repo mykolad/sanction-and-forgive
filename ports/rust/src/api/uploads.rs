@@ -27,6 +27,11 @@ use crate::store::queries::{self, Subject};
 /// or equal). Each file is parsed as it arrives and dropped, so only one is held at a time.
 pub const MAX_UPLOAD_BYTES: usize = 256 << 20;
 
+/// How long an upload's answer waits for its write: a large list on the small database takes minutes (Ukraine's,
+/// 23,555 subjects, about seven), longer than the ingress waits for an answer (240 s), so past this the answer is 202
+/// and the update appears under the held ones when it's written.
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// One upload at a time per replica: each holds a file and its parsed entries in memory beside the lists in use.
 static UPLOADING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
@@ -37,6 +42,62 @@ pub fn routes() -> Router<Shared> {
     Router::new()
         .route("/api/v1/admin/lists/{code}/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
         .route("/api/v1/admin/imports/{id}/changes", get(changes))
+        .route("/api/v1/admin/uploads/{id}", get(upload_state))
+}
+
+/// What became of an upload answered 202 (still writing): by its id, in this replica's memory, the latest
+/// KEPT_UPLOADS of them. "Writing" until its write ends; then its result ("HeldForReview" with the import's id,
+/// "Unchanged") or "Failed".
+#[derive(Clone)]
+struct UploadState {
+    code: &'static str,
+    state: &'static str,
+    import_id: Option<i32>,
+    record_count: usize,
+}
+
+const KEPT_UPLOADS: usize = 20;
+
+static UPLOADS: std::sync::Mutex<Vec<(String, UploadState)>> = std::sync::Mutex::new(Vec::new());
+static NEXT_UPLOAD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// This process's random part of every upload id: after a restart, or from another replica, an id this one didn't
+/// give is unknown (404), never another upload's.
+static PROCESS_TAG: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).expect("the system's random source");
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+});
+
+fn new_upload_id() -> String {
+    format!("{}-{}", *PROCESS_TAG, NEXT_UPLOAD.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+fn set_upload_state(id: &str, state: UploadState) {
+    let mut uploads = UPLOADS.lock().unwrap();
+    match uploads.iter_mut().find(|(i, _)| i == id) {
+        Some(entry) => entry.1 = state,
+        None => {
+            uploads.push((id.to_string(), state));
+            if uploads.len() > KEPT_UPLOADS {
+                uploads.remove(0);
+            }
+        }
+    }
+}
+
+/// GET an upload's state by the id its 202 answer gave. Admin only; 404 for an id this replica doesn't know (another
+/// replica's, or from before a restart): the page then looks at the held updates and the list's history.
+async fn upload_state(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(r) = refuse(&s, &headers, false).await {
+        return r;
+    }
+    let found = UPLOADS.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, state)| state.clone());
+    let Some(state) = found else { return not_found() };
+    json_response(
+        StatusCode::OK,
+        &json!({ "uploadId": id, "code": state.code, "result": state.state, "importId": state.import_id, "recordCount": state.record_count }),
+    )
 }
 
 /// POST the list's file as the request's body (any content type), or its files as multipart/form-data (each part a
@@ -131,25 +192,53 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
     if subjects.is_empty() {
         return bad_request(one_error("File", &format!("The file has no entries: {} is never emptied by an upload.", source.name)));
     }
-    let imports = Imports { db: s.db.clone() };
-    let outcome = async {
-        let mut record = imports.ensure_source(source.code, source.name, Some(source.homepage), Some(source.max_age_hours)).await?;
-        imports.upload(&mut record, to_stored(subjects)).await
-    }
-    .await;
-    let outcome = match outcome {
-        Ok(outcome) => outcome,
-        Err(e) => {
-            s.loader.logger.error("Uploading a list failed", &[("code", source.code.into()), ("error", e.to_string().into())]);
-            return server_error();
+    // Written and reloaded in a task of its own, holding the upload's place: a request cut off meanwhile (the ingress
+    // waits 240 s; a large list on a small database can take longer) never leaves the write half done, and the update
+    // appears under the held ones when it's written.
+    let shared = s.clone();
+    let user_name = user.name.clone();
+    let record_count = subjects.len();
+    let upload_id = new_upload_id();
+    let task_upload_id = upload_id.clone();
+    let state = move |state: &'static str, import_id: Option<i32>| UploadState { code: source.code, state, import_id, record_count };
+    set_upload_state(&upload_id, state("Writing", None));
+    let written = tokio::spawn(async move {
+        let _place = _uploading;
+        let imports = Imports { db: shared.db.clone() };
+        let outcome = async {
+            let mut record = imports.ensure_source(source.code, source.name, Some(source.homepage), Some(source.max_age_hours)).await?;
+            imports.upload(&mut record, to_stored(subjects)).await
         }
+        .await;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                shared.loader.logger.error("Uploading a list failed", &[("code", source.code.into()), ("error", e.to_string().into())]);
+                set_upload_state(&task_upload_id, state("Failed", None));
+                return None;
+            }
+        };
+
+        // Who uploaded is logged, never shown publicly.
+        shared.loader.logger.info(
+            &format!("List {} uploaded by {user_name}: {} ({} records)", source.code, outcome.result.as_str(), outcome.record_count),
+            &[],
+        );
+        let reloaded = shared.loader.refresh().await.is_ok();
+        // Its result once the lists are reloaded (the held update is then in /api/v1/sources), or once the reload has
+        // failed (the next check for changes shows it within seconds).
+        set_upload_state(&task_upload_id, state(outcome.result.as_str(), outcome.import_id));
+        Some((outcome, reloaded))
+    });
+    let mut written = written;
+    let Ok(finished) = tokio::time::timeout(ANSWER_WAIT, &mut written).await else {
+        // Still writing: the task goes on (dropping its handle doesn't stop it), its place held until it ends.
+        return json_response(
+            StatusCode::ACCEPTED,
+            &json!({ "uploadId": upload_id, "code": source.code, "result": "Writing", "recordCount": record_count }),
+        );
     };
-    // Who uploaded is logged, never shown publicly.
-    s.loader.logger.info(
-        &format!("List {} uploaded by {}: {} ({} records)", source.code, user.name, outcome.result.as_str(), outcome.record_count),
-        &[],
-    );
-    let reloaded = s.loader.refresh().await.is_ok();
+    let Ok(Some((outcome, reloaded))) = finished else { return server_error() };
     json_response(
         StatusCode::OK,
         &json!({
@@ -309,6 +398,26 @@ fn diff(before: &[Subject], after: &[Subject]) -> (ChangeGroup, ChangeGroup, Cha
 mod tests {
     use super::*;
     use crate::store::queries::{SubjectAddress, SubjectName};
+
+    /// An upload's state moves from Writing to its result by its id; the latest KEPT_UPLOADS are kept, the oldest go.
+    #[test]
+    fn an_uploads_state_is_kept_by_its_id_and_the_oldest_go() {
+        let state = |state: &'static str, import_id: Option<i32>| UploadState { code: "au-dfat", state, import_id, record_count: 3 };
+        let first = new_upload_id();
+        assert!(first.starts_with(PROCESS_TAG.as_str()) && PROCESS_TAG.len() == 16, "{first}");
+        set_upload_state(&first, state("Writing", None));
+        set_upload_state(&first, state("HeldForReview", Some(7)));
+        let found = |id: &str| UPLOADS.lock().unwrap().iter().find(|(i, _)| i == id).map(|(_, s)| (s.state, s.import_id));
+        assert_eq!(found(&first), Some(("HeldForReview", Some(7))));
+        // Another process's id, the same number with another tag, is unknown here.
+        let number = first.rsplit('-').next().unwrap();
+        assert_eq!(found(&format!("0000000000000000-{number}")), None);
+        for _ in 0..KEPT_UPLOADS {
+            set_upload_state(&new_upload_id(), state("Writing", None));
+        }
+        assert_eq!(found(&first), None);
+        assert!(UPLOADS.lock().unwrap().len() <= KEPT_UPLOADS);
+    }
 
     fn subject(id: &str, name: &str, aliases: &[&str], address: Option<&str>) -> Subject {
         Subject {

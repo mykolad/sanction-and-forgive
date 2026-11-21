@@ -205,6 +205,15 @@ impl Imports {
         mode: Mode,
     ) -> DbResult<ImportOutcome> {
         *source = find_source(conn, "Id = @P1", &source.id).await?.ok_or("The source went away.")?;
+        // An import of this source still Running is one that was cut off (its process stopped, or its request was
+        // dropped mid-write): under the source's lock nothing else writes it. It failed; its records go with the old
+        // ones (delete_old_imports).
+        execute(
+            conn,
+            "UPDATE Imports SET Status = 'Failed', CompletedAt = @P1, Message = @P2 WHERE SourceId = @P3 AND Status = 'Running'",
+            &[&now().fixed_offset(), &"interrupted", &source.id],
+        )
+        .await?;
         let subjects = match subjects {
             Some(subjects) => subjects,
             None => {
