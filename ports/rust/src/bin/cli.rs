@@ -261,7 +261,7 @@ impl Commands {
         }
         let stored = to_stored(parsed);
         let outcome = match if uploaded {
-            self.imports.upload(&mut record, stored).await
+            self.imports.upload(&mut record, stored, None).await
         } else {
             self.imports.import(&mut record, stored, force).await
         } {

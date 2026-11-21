@@ -20,7 +20,7 @@ use super::server::{bad_request, json_response, not_found, one_error, Shared};
 use crate::lists::catalogue::{find_source, max_upload_bytes, missing_upload_files, FeedStatus};
 use crate::lists::parse::ParsedSubject;
 use crate::lists::parsers::parser_for;
-use crate::store::imports::{to_stored, Imports};
+use crate::store::imports::{to_stored, Imports, Progress};
 use crate::store::queries::{self, Subject};
 
 /// The most any upload may send, all its files together (each list's own limit, catalogue::max_upload_bytes, is lower
@@ -42,18 +42,38 @@ pub fn routes() -> Router<Shared> {
     Router::new()
         .route("/api/v1/admin/lists/{code}/upload", post(upload).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)))
         .route("/api/v1/admin/imports/{id}/changes", get(changes))
+        .route("/api/v1/admin/uploads", get(upload_states))
         .route("/api/v1/admin/uploads/{id}", get(upload_state))
 }
 
-/// What became of an upload answered 202 (still writing): by its id, in this replica's memory, the latest
-/// KEPT_UPLOADS of them. "Writing" until its write ends; then its result ("HeldForReview" with the import's id,
-/// "Unchanged") or "Failed".
+/// An upload once its files are read: by its id, in this replica's memory, the latest KEPT_UPLOADS of them. "Writing"
+/// until its write ends, with how far it has got; then its result ("HeldForReview" with the import's id, "Unchanged")
+/// or "Failed".
 #[derive(Clone)]
 struct UploadState {
     code: &'static str,
     state: &'static str,
     import_id: Option<i32>,
     record_count: usize,
+    started_at: chrono::DateTime<chrono::Utc>,
+    progress: std::sync::Arc<Progress>,
+}
+
+impl UploadState {
+    fn json(&self, id: &str) -> serde_json::Value {
+        let (stage, written, rows) = self.progress.snapshot();
+        json!({
+            "uploadId": id,
+            "code": self.code,
+            "result": self.state,
+            "importId": self.import_id,
+            "recordCount": self.record_count,
+            "startedAt": self.started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            "stage": stage,
+            "rowsWritten": written,
+            "rows": rows,
+        })
+    }
 }
 
 const KEPT_UPLOADS: usize = 20;
@@ -92,12 +112,20 @@ async fn upload_state(State(s): State<Shared>, headers: HeaderMap, Path(id): Pat
     if let Err(r) = refuse(&s, &headers, false).await {
         return r;
     }
-    let found = UPLOADS.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, state)| state.clone());
+    let found = UPLOADS.lock().unwrap().iter().find(|(i, _)| *i == id).map(|(_, state)| state.json(&id));
     let Some(state) = found else { return not_found() };
-    json_response(
-        StatusCode::OK,
-        &json!({ "uploadId": id, "code": state.code, "result": state.state, "importId": state.import_id, "recordCount": state.record_count }),
-    )
+    json_response(StatusCode::OK, &state)
+}
+
+/// GET this replica's uploads, the latest first: one being written (result "Writing", with its stage and rows written)
+/// and those that ended lately. Admin only. The admin page shows one being written, after a reload too, and offers no
+/// upload meanwhile (one at a time).
+async fn upload_states(State(s): State<Shared>, headers: HeaderMap) -> Response {
+    if let Err(r) = refuse(&s, &headers, false).await {
+        return r;
+    }
+    let uploads: Vec<serde_json::Value> = UPLOADS.lock().unwrap().iter().rev().map(|(id, state)| state.json(id)).collect();
+    json_response(StatusCode::OK, &json!({ "uploads": uploads }))
 }
 
 /// POST the list's file as the request's body (any content type), or its files as multipart/form-data (each part a
@@ -200,14 +228,24 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
     let record_count = subjects.len();
     let upload_id = new_upload_id();
     let task_upload_id = upload_id.clone();
-    let state = move |state: &'static str, import_id: Option<i32>| UploadState { code: source.code, state, import_id, record_count };
+    let progress = std::sync::Arc::new(Progress::default());
+    progress.set_stage("Starting");
+    let (started_at, task_progress) = (chrono::Utc::now(), progress.clone());
+    let state = move |state: &'static str, import_id: Option<i32>| UploadState {
+        code: source.code,
+        state,
+        import_id,
+        record_count,
+        started_at,
+        progress: progress.clone(),
+    };
     set_upload_state(&upload_id, state("Writing", None));
     let written = tokio::spawn(async move {
         let _place = _uploading;
         let imports = Imports { db: shared.db.clone() };
         let outcome = async {
             let mut record = imports.ensure_source(source.code, source.name, Some(source.homepage), Some(source.max_age_hours)).await?;
-            imports.upload(&mut record, to_stored(subjects)).await
+            imports.upload(&mut record, to_stored(subjects), Some(&task_progress)).await
         }
         .await;
         let outcome = match outcome {
@@ -224,7 +262,9 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
             &format!("List {} uploaded by {user_name}: {} ({} records)", source.code, outcome.result.as_str(), outcome.record_count),
             &[],
         );
+        task_progress.set_stage("Reloading the lists");
         let reloaded = shared.loader.refresh().await.is_ok();
+        task_progress.set_stage("Done");
         // Its result once the lists are reloaded (the held update is then in /api/v1/sources), or once the reload has
         // failed (the next check for changes shows it within seconds).
         set_upload_state(&task_upload_id, state(outcome.result.as_str(), outcome.import_id));
@@ -402,7 +442,15 @@ mod tests {
     /// An upload's state moves from Writing to its result by its id; the latest KEPT_UPLOADS are kept, the oldest go.
     #[test]
     fn an_uploads_state_is_kept_by_its_id_and_the_oldest_go() {
-        let state = |state: &'static str, import_id: Option<i32>| UploadState { code: "au-dfat", state, import_id, record_count: 3 };
+        let progress = std::sync::Arc::new(Progress::default());
+        let state = |state: &'static str, import_id: Option<i32>| UploadState {
+            code: "au-dfat",
+            state,
+            import_id,
+            record_count: 3,
+            started_at: chrono::Utc::now(),
+            progress: progress.clone(),
+        };
         let first = new_upload_id();
         assert!(first.starts_with(PROCESS_TAG.as_str()) && PROCESS_TAG.len() == 16, "{first}");
         set_upload_state(&first, state("Writing", None));

@@ -91,6 +91,46 @@ pub struct Imports {
     pub db: Database,
 }
 
+/// How far an import's write has got (an upload's, for the admin page): its stage, and rows written of the rows to
+/// write (entries, names, addresses, identifiers together).
+#[derive(Default)]
+pub struct Progress {
+    stage: std::sync::Mutex<&'static str>,
+    done: std::sync::atomic::AtomicUsize,
+    total: std::sync::atomic::AtomicUsize,
+}
+
+impl Progress {
+    pub fn set_stage(&self, stage: &'static str) {
+        *self.stage.lock().unwrap() = stage;
+    }
+
+    fn rows(&self, total: usize) {
+        self.total.store(total, std::sync::atomic::Ordering::Relaxed);
+        self.done.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn written(&self, rows: usize) {
+        self.done.fetch_add(rows, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The stage, the rows written and the rows to write.
+    pub fn snapshot(&self) -> (&'static str, usize, usize) {
+        (
+            *self.stage.lock().unwrap(),
+            self.done.load(std::sync::atomic::Ordering::Relaxed),
+            self.total.load(std::sync::atomic::Ordering::Relaxed),
+        )
+    }
+}
+
+/// Sets the stage, where there's progress to report.
+fn stage(progress: Option<&Progress>, stage: &'static str) {
+    if let Some(p) = progress {
+        p.set_stage(stage);
+    }
+}
+
 fn now() -> Time {
     chrono::Utc::now()
 }
@@ -149,13 +189,13 @@ impl Imports {
 
     /// Imports subjects as the source's new list (force: past the drop guard, and even when unchanged).
     pub async fn import(&self, source: &mut SourceRecord, subjects: Vec<Subject>, force: bool) -> DbResult<ImportOutcome> {
-        self.locked(source, Some(subjects), None, if force { Mode::Forced } else { Mode::Feed }).await
+        self.locked(source, Some(subjects), None, if force { Mode::Forced } else { Mode::Feed }, None).await
     }
 
     /// A file an administrator uploaded: written in full and held for review (unless it's the active list again, which
     /// changes nothing). Confirming it makes it the list; LastCheckedAt then says when it was uploaded.
-    pub async fn upload(&self, source: &mut SourceRecord, subjects: Vec<Subject>) -> DbResult<ImportOutcome> {
-        self.locked(source, Some(subjects), None, Mode::Upload).await
+    pub async fn upload(&self, source: &mut SourceRecord, subjects: Vec<Subject>, progress: Option<&Progress>) -> DbResult<ImportOutcome> {
+        self.locked(source, Some(subjects), None, Mode::Upload, progress).await
     }
 
     /// A manual change: change gets the active list under the source's lock, and its result becomes the list.
@@ -164,7 +204,7 @@ impl Imports {
         source: &mut SourceRecord,
         change: impl FnOnce(Vec<Subject>) -> Vec<Subject> + Send,
     ) -> DbResult<ImportOutcome> {
-        self.locked(source, None, Some(Box::new(change)), Mode::Manual).await
+        self.locked(source, None, Some(Box::new(change)), Mode::Manual, None).await
     }
 
     /// Records a refresh that failed before it could import.
@@ -187,10 +227,11 @@ impl Imports {
         subjects: Option<Vec<Subject>>,
         change: Option<Box<dyn FnOnce(Vec<Subject>) -> Vec<Subject> + Send + '_>>,
         mode: Mode,
+        progress: Option<&Progress>,
     ) -> DbResult<ImportOutcome> {
         let mut conn = self.db.connect().await?;
         acquire_lock(&mut conn, &source.code).await?;
-        let result = self.locked_work(&mut conn, source, subjects, change, mode).await;
+        let result = self.locked_work(&mut conn, source, subjects, change, mode, progress).await;
         release_lock(&mut conn, &source.code).await;
         result
     }
@@ -203,7 +244,9 @@ impl Imports {
         subjects: Option<Vec<Subject>>,
         change: Option<Box<dyn FnOnce(Vec<Subject>) -> Vec<Subject> + Send + '_>>,
         mode: Mode,
+        progress: Option<&Progress>,
     ) -> DbResult<ImportOutcome> {
+        stage(progress, "Comparing with the list in use");
         *source = find_source(conn, "Id = @P1", &source.id).await?.ok_or("The source went away.")?;
         // An import of this source still Running is one that was cut off (its process stopped, or its request was
         // dropped mid-write): under the source's lock nothing else writes it. It failed; its records go with the old
@@ -306,7 +349,8 @@ impl Imports {
         let import_id = int(&inserted[0], 0);
         let previous_active = source.active_import_id;
         let work = async {
-            write_subjects(conn, source.id, import_id, &records).await?;
+            write_subjects(conn, source.id, import_id, &records, progress).await?;
+            stage(progress, "Counting what changed");
             count_changes(conn, import_id, active.as_ref().map(|a| a.id)).await;
             if let Some(drop) = &drop {
                 let completed = now().fixed_offset();
@@ -344,6 +388,7 @@ impl Imports {
                 return Err(e);
             }
         }
+        stage(progress, "Removing older versions' entries");
         delete_old_imports(conn, source.id).await?;
         Ok(match drop {
             Some(drop) => ImportOutcome {
@@ -643,7 +688,13 @@ fn rows_per_statement(columns: usize) -> usize {
 }
 
 /// Inserts rows in multi-row statements (the reference bulk-copies; the rows end up the same).
-async fn insert_rows(conn: &mut Connection, table: &str, columns: &[&str], values: &[Vec<Box<dyn ToSql + '_>>]) -> DbResult<()> {
+async fn insert_rows(
+    conn: &mut Connection,
+    table: &str,
+    columns: &[&str],
+    values: &[Vec<Box<dyn ToSql + '_>>],
+    progress: Option<&Progress>,
+) -> DbResult<()> {
     for chunk in values.chunks(rows_per_statement(columns.len())) {
         let mut sql = format!("INSERT INTO {table} ({}) VALUES ", columns.join(", "));
         let mut params: Vec<&dyn ToSql> = Vec::with_capacity(chunk.len() * columns.len());
@@ -662,11 +713,25 @@ async fn insert_rows(conn: &mut Connection, table: &str, columns: &[&str], value
             sql.push(')');
         }
         execute(conn, &sql, &params).await?;
+        if let Some(p) = progress {
+            p.written(chunk.len());
+        }
     }
     Ok(())
 }
 
-async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, records: &[Subject]) -> DbResult<()> {
+async fn write_subjects(
+    conn: &mut Connection,
+    source_id: i32,
+    import_id: i32,
+    records: &[Subject],
+    progress: Option<&Progress>,
+) -> DbResult<()> {
+    if let Some(p) = progress {
+        let child_rows: usize = records.iter().map(|r| r.names.len() + r.addresses.len() + r.identifiers.len()).sum();
+        p.rows(records.len() + child_rows);
+    }
+    stage(progress, "Writing entries");
     let subject_rows: Vec<Vec<Box<dyn ToSql>>> = records
         .iter()
         .map(|r| {
@@ -689,6 +754,7 @@ async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, r
         "Subjects",
         &["ImportId", "SourceId", "ExternalId", "Type", "PrimaryName", "Programmes", "ListedOn", "Remarks", "SourceUrl", "BirthDates"],
         &subject_rows,
+        progress,
     )
     .await?;
     let ids: std::collections::HashMap<String, i32> = rows(conn, "SELECT Id, ExternalId FROM Subjects WHERE ImportId = @P1", &[&import_id])
@@ -716,9 +782,12 @@ async fn write_subjects(conn: &mut Connection, source_id: i32, import_id: i32, r
             ]);
         }
     }
-    insert_rows(conn, "SubjectNames", &["SubjectId", "FullName", "IsWeak", "Script"], &names).await?;
-    insert_rows(conn, "SubjectAddresses", &["SubjectId", "Raw", "CountryCode"], &addresses).await?;
-    insert_rows(conn, "SubjectIdentifiers", &["SubjectId", "Kind", "Value", "Country"], &identifiers).await
+    stage(progress, "Writing names");
+    insert_rows(conn, "SubjectNames", &["SubjectId", "FullName", "IsWeak", "Script"], &names, progress).await?;
+    stage(progress, "Writing addresses");
+    insert_rows(conn, "SubjectAddresses", &["SubjectId", "Raw", "CountryCode"], &addresses, progress).await?;
+    stage(progress, "Writing identifiers");
+    insert_rows(conn, "SubjectIdentifiers", &["SubjectId", "Kind", "Value", "Country"], &identifiers, progress).await
 }
 
 /// Subjects.BirthDates: the dates sorted (as the content hash takes them, so a list that only reorders them changes
