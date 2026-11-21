@@ -275,6 +275,28 @@ pub async fn held_import(conn: &mut Connection, import_id: i32) -> DbResult<Opti
     }))
 }
 
+/// A held import with its records and those of the list it was compared with (none for a first version), read in one
+/// snapshot so a review meanwhile can't leave half of either; None unless it's held with its records.
+pub async fn held_changes(conn: &mut Connection, import_id: i32) -> DbResult<Option<(HeldImport, Vec<Subject>, Vec<Subject>)>> {
+    simple(conn, "SET TRANSACTION ISOLATION LEVEL SNAPSHOT; BEGIN TRANSACTION").await?;
+    let result = async {
+        let Some(held) = held_import(conn, import_id).await? else { return Ok(None) };
+        if held.status != "PendingReview" || !held.has_data {
+            return Ok(None);
+        }
+        let after = read_subjects(conn, import_id).await?;
+        let before = match held.based_on {
+            Some(based_on) => read_subjects(conn, based_on).await?,
+            None => Vec::new(),
+        };
+        Ok(Some((held, before, after)))
+    }
+    .await;
+    let end = if result.is_ok() { "COMMIT" } else { "IF @@TRANCOUNT > 0 ROLLBACK" };
+    simple(conn, &format!("{end}; SET TRANSACTION ISOLATION LEVEL READ COMMITTED")).await?;
+    result
+}
+
 pub(crate) async fn read_subjects(conn: &mut Connection, import_id: i32) -> DbResult<Vec<Subject>> {
     let subject_rows = rows(
         conn,

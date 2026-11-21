@@ -360,7 +360,14 @@ impl Loader {
                 }
             }
             match existing {
+                // Nothing searchable served before: the new version's details, without an index (Not checked until
+                // it's built), so a list whose first upload was just confirmed is never left out of screenings.
                 None => lists.push(Arc::new(target.clone())),
+                Some(existing) if existing.index.is_none() => {
+                    let mut copy = target.clone();
+                    copy.switched_off = switched_off;
+                    lists.push(Arc::new(copy));
+                }
                 Some(existing) => {
                     let mut copy = (**existing).clone();
                     copy.switched_off = switched_off;

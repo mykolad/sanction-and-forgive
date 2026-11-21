@@ -65,6 +65,18 @@ const fn source(
 /// uploaded, but Overdue.
 pub const UPLOADED: i32 = 365 * 24;
 
+/// The kinds of party an uploaded list's files must have between them, one file each: a list published as several
+/// files is uploaded whole, so none of its parties drop out because a file was left behind. The names of the kinds
+/// missing from `subjects`.
+pub fn missing_upload_kinds(code: &str, subjects: &[crate::lists::parse::ParsedSubject]) -> Vec<&'static str> {
+    use crate::lists::parse::SubjectType;
+    let required: &[(SubjectType, &str)] = match code {
+        "ua-nsdc" => &[(SubjectType::Individual, "people"), (SubjectType::Entity, "companies"), (SubjectType::Vessel, "vessels")],
+        _ => &[],
+    };
+    required.iter().filter(|(kind, _)| !subjects.iter().any(|s| s.kind == *kind)).map(|(_, name)| *name).collect()
+}
+
 /// A list an administrator uploads (FeedStatus::Upload): no address to download, a year's allowed age.
 const fn uploaded(
     code: &'static str,

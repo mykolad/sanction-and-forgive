@@ -6,7 +6,7 @@ use std::io::BufReader;
 use std::time::{Duration, Instant};
 
 use regex::Regex;
-use sanction_and_forgive::lists::catalogue::{find_source, FeedStatus, ListSource, EU_PUBLIC_TOKEN, SOURCES};
+use sanction_and_forgive::lists::catalogue::{find_source, missing_upload_kinds, FeedStatus, ListSource, EU_PUBLIC_TOKEN, SOURCES};
 use sanction_and_forgive::lists::manual::{read_manual_csv, DownloadRetry, Downloader};
 use sanction_and_forgive::lists::parse::{FormatError, NameScript, ParseError, ParsedSubject, SubjectType};
 use sanction_and_forgive::lists::parsers::parser_for;
@@ -251,6 +251,12 @@ impl Commands {
             Ok(parsed) => parsed,
             Err(e) => return self.fail(source, Some(&record), e.as_ref()).await,
         };
+        let missing = missing_upload_kinds(source.code, &parsed);
+        if uploaded && !missing.is_empty() {
+            // One file at a time here: a list published as several files is uploaded whole on the admin page.
+            println!("{}: its files are uploaded together on the admin page; this one lacks {}.", source.code, missing.join(", "));
+            return false;
+        }
         let stored = to_stored(parsed);
         let outcome = match if uploaded {
             self.imports.upload(&mut record, stored).await

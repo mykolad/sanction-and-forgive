@@ -72,19 +72,23 @@ async function loadHeld() {
 
   const loaded = body.lists.filter((list) => list.state !== "NotImported");
   switches.replaceChildren(...(loaded.length ? loaded.map(switchRow) : [el("p", { class: "muted" }, "No lists are loaded.")]));
+  // Uploads and a held update's changes are the "uploads" feature's: only where the implementation lists it.
+  const features = await loadFeatures();
   const held = body.lists.filter((list) => list.held);
-  box.replaceChildren(...(held.length ? held.map(heldCard) : [el("p", { class: "muted" }, "No updates are held for review.")]));
-  showUploads(body.lists.filter((list) => list.status === "Upload"));
+  box.replaceChildren(...(held.length ? held.map((list) => heldCard(list, features)) : [el("p", { class: "muted" }, "No updates are held for review.")]));
+  showUploads(body.lists.filter((list) => list.status === "Upload"), features);
+}
+
+async function loadFeatures() {
+  try {
+    return (await (await fetch("/api/v1/status", { headers: { Accept: "application/json" } })).json()).features || [];
+  } catch {
+    return []; // Without the status, what needs a feature stays hidden.
+  }
 }
 
 // Lists an administrator uploads (the "uploads" feature): one row each, with the publisher's page and a file to send.
-async function showUploads(lists) {
-  let features = [];
-  try {
-    features = (await (await fetch("/api/v1/status", { headers: { Accept: "application/json" } })).json()).features || [];
-  } catch {
-    // Without the status, the section stays hidden.
-  }
+function showUploads(lists, features) {
   const section = $("uploads-section");
   section.hidden = !features.includes("uploads") || !lists.length;
   if (section.hidden) return;
@@ -222,7 +226,7 @@ async function switchList(actions, status, list, off, reason) {
   }
 }
 
-function heldCard(list) {
+function heldCard(list, features) {
   const status = el("p", { class: "review-status", "aria-live": "polite" });
   const actions = el("div", { class: "actions" });
   const uploaded = list.status === "Upload";
@@ -238,7 +242,7 @@ function heldCard(list) {
       ? el("p", {}, `Against the list it was compared with (the list in use when it was downloaded): ${list.held.added.toLocaleString()} entries added, ${list.held.removed.toLocaleString()} removed, ${list.held.changed.toLocaleString()} changed.`)
       : null,
     el("p", {}, link(list.homepage, "The publisher's page"), list.fileUrl ? " · " : "", link(list.fileUrl, "the file"), " · ", link(`/lists?list=${encodeURIComponent(list.code)}`, "browse the list searched now")),
-    me?.isAdmin ? el("p", {}, el("button", { type: "button", class: "secondary", onclick: () => showChanges(list, changes) }, "See the changes")) : null,
+    me?.isAdmin && features.includes("uploads") ? el("p", {}, el("button", { type: "button", class: "secondary", onclick: () => showChanges(list, changes) }, "See the changes")) : null,
     changes,
     actions,
     status);

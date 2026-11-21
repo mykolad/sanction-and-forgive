@@ -17,8 +17,8 @@ use serde_json::json;
 
 use super::admin::{path_id, refuse, server_error};
 use super::server::{bad_request, json_response, not_found, one_error, Shared};
-use crate::lists::catalogue::{find_source, FeedStatus};
-use crate::lists::parse::{ParsedSubject, SubjectType};
+use crate::lists::catalogue::{find_source, missing_upload_kinds, FeedStatus};
+use crate::lists::parse::ParsedSubject;
 use crate::lists::parsers::parser_for;
 use crate::store::imports::{to_stored, Imports};
 use crate::store::queries::{self, Subject};
@@ -26,15 +26,6 @@ use crate::store::queries::{self, Subject};
 /// The most an upload may send, all its files together: Ukraine's three exports are about 110 MB (their sanctions'
 /// text), Australia's file 1.3 MB. Each file is parsed as it arrives and dropped, so only one is held at a time.
 pub const MAX_UPLOAD_BYTES: usize = 256 << 20;
-
-/// The kinds of party a list's upload must have, one file each: a list published as several files is uploaded whole,
-/// so none of its parties drop out because a file was left behind.
-fn required_kinds(code: &str) -> &'static [(SubjectType, &'static str)] {
-    match code {
-        "ua-nsdc" => &[(SubjectType::Individual, "people"), (SubjectType::Entity, "companies"), (SubjectType::Vessel, "vessels")],
-        _ => &[],
-    }
-}
 
 /// At most this many entries of each kind (added, removed, changed) in a review; the counts are always whole.
 pub const MAX_CHANGES_SHOWN: usize = 500;
@@ -108,8 +99,7 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
     if files == 0 {
         return bad_request(one_error("File", "Choose the list's file."));
     }
-    let missing: Vec<&str> =
-        required_kinds(source.code).iter().filter(|(kind, _)| !subjects.iter().any(|s| s.kind == *kind)).map(|(_, name)| *name).collect();
+    let missing = missing_upload_kinds(source.code, &subjects);
     if !missing.is_empty() {
         let message = format!("Upload all of {}'s files together; missing: {}.", source.name, missing.join(", "));
         return bad_request(one_error("File", &message));
@@ -233,16 +223,7 @@ async fn changes(State(s): State<Shared>, headers: HeaderMap, Path(id): Path<Str
     let Some(id) = path_id(&id) else { return not_found() };
     let read = async {
         let mut conn = s.db.connect().await?;
-        let Some(held) = queries::held_import(&mut conn, id).await? else { return Ok(None) };
-        if held.status != "PendingReview" || !held.has_data {
-            return Ok(None);
-        }
-        let after = queries::read_subjects(&mut conn, id).await?;
-        let before = match held.based_on {
-            Some(based_on) => queries::read_subjects(&mut conn, based_on).await?,
-            None => Vec::new(),
-        };
-        Ok::<_, crate::store::db::DbError>(Some((held, before, after)))
+        queries::held_changes(&mut conn, id).await
     }
     .await;
     let (held, before, after) = match read {
