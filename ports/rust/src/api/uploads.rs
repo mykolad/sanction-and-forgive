@@ -99,7 +99,7 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
             files += 1;
             // Its header row, kept to check every file of the list was sent.
             let end = bytes.iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| i + 1).min(64 << 10);
-            file_kinds.push(bytes.slice(..end));
+            file_kinds.push(Bytes::copy_from_slice(&bytes[..end]));
             match parse(bytes).await {
                 Ok(parsed) => subjects.extend(parsed),
                 Err(r) => return r,
@@ -112,7 +112,7 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
         if !bytes.is_empty() {
             files = 1;
             let end = bytes.iter().position(|b| *b == b'\n').map_or(bytes.len(), |i| i + 1).min(64 << 10);
-            file_kinds.push(bytes.slice(..end));
+            file_kinds.push(Bytes::copy_from_slice(&bytes[..end]));
             match parse(bytes).await {
                 Ok(parsed) => subjects = parsed,
                 Err(r) => return r,

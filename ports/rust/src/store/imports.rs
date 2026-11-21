@@ -128,12 +128,14 @@ struct ReviewStamp {
 impl Imports {
     pub async fn ensure_source(&self, code: &str, name: &str, url: Option<&str>, max_age_hours: Option<i32>) -> DbResult<SourceRecord> {
         let mut conn = self.db.connect().await?;
-        // One statement, the code's key range locked: two first imports at once (an upload and the CLI) both find the
-        // one row, never a duplicate key.
+        // One transaction, the code's key range locked until the insert: two first imports at once (an upload and the
+        // CLI, or two replicas) both find the one row, never a duplicate key.
         execute(
             &mut conn,
-            "UPDATE Sources WITH (UPDLOCK, SERIALIZABLE) SET Name = @P2, Url = @P3, MaxAgeHours = @P4 WHERE Code = @P1; \
-             IF @@ROWCOUNT = 0 INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4)",
+            "SET XACT_ABORT ON; BEGIN TRANSACTION; \
+             UPDATE Sources WITH (UPDLOCK, SERIALIZABLE) SET Name = @P2, Url = @P3, MaxAgeHours = @P4 WHERE Code = @P1; \
+             IF @@ROWCOUNT = 0 INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4); \
+             COMMIT",
             &[&code, &name, &url, &max_age_hours],
         )
         .await?;
