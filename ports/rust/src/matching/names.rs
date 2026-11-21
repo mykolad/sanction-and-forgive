@@ -69,6 +69,11 @@ impl NameParser<'_> {
 
     /// Two adjacent words read as one (NameForm::joined), or empty.
     fn joined(&self, a: &Token, b: &Token) -> String {
+        // Two Chinese words side by side are a person's name split in two (the tokenizer joins any others): read as
+        // one in pinyin, as the name was (#93).
+        if let Some(reading) = super::text::chinese_pair_reading(&a.text, &b.text) {
+            return reading;
+        }
         let readable = |t: &Token| !t.is_number && !t.folds.is_empty() && t.len() > 1;
         if !readable(a) || !readable(b) {
             return String::new();
@@ -177,7 +182,11 @@ impl NameParser<'_> {
             {
                 continue;
             }
-            form.core.push(raw.token.clone());
+            // A Chinese name written as one word: its surname and given name, each a word (#93).
+            match &raw.person_parts {
+                Some(parts) => form.core.extend(parts.iter().cloned()),
+                None => form.core.push(raw.token.clone()),
+            }
         }
         form
     }

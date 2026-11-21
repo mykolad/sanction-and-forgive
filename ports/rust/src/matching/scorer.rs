@@ -482,6 +482,13 @@ impl<'a> NameScorer<'a> {
         let starts = |names: &[String], prefixes: &[String]| {
             names.iter().any(|name| prefixes.iter().any(|prefix| !prefix.is_empty() && name.starts_with(prefix.as_str())))
         };
+        // A Chinese word by its pinyin (#93): E Bo's initial E for 鄂 (e), as W. for 伟 (wei); only an initial in Latin
+        // script, never another Chinese word.
+        if let Some(readings) = &candidate.pinyin {
+            if is_latin_word(initial) && starts(readings, &initial.folds) {
+                return true;
+            }
+        }
         if candidate.len() == 1 {
             return intersects(&initial.folds, &candidate.folds) || intersects(&initial.forms, &candidate.forms);
         }
