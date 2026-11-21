@@ -411,9 +411,10 @@ registration `infra/admin-sign-in.ps1` sets up. Every implementation does the sa
     413 above), and one upload is read at a time (409 while another is), each file parsed as it arrives. 200 `{code,
     result, importId, recordCount, previousCount, message, reloaded}`: `HeldForReview` (every upload: written in full,
     held until reviewed) or `Unchanged` (the list in use again: nothing to review, and its date moves, the list being
-    current as uploaded); 202 `{code, result: "Writing", recordCount}` when the write takes longer than 30 s (a large
-    list on the small database takes minutes, past the ingress's 240 s): it goes on, holding the upload's place, and
-    the update appears under `held` in `/api/v1/sources` when written; 400 a file its parser refuses (the reason, never an entry's text), a missing one, or files
+    current as uploaded); 202 `{uploadId, code, result: "Writing", recordCount}` when the write takes longer than 30 s (a
+    large list on the small database takes minutes, past the ingress's 240 s): it goes on, holding the upload's place;
+    `GET /api/v1/admin/uploads/{uploadId}` (admin) says what became of it, `result` `Writing`, `HeldForReview` (with
+    `importId`), `Unchanged` or `Failed` (kept in the replica's memory, its latest 20; 404 for one it doesn't know); 400 a file its parser refuses (the reason, never an entry's text), a missing one, or files
     with no entries (an upload never empties a list); 404 a list that isn't uploaded.
     Who uploaded is logged, never shown publicly.
   - `GET /api/v1/admin/imports/{id}/changes`: what a held update changes against the list it was compared with (the

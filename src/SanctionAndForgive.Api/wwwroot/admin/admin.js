@@ -115,21 +115,36 @@ function uploadRow(list) {
     status);
 }
 
-// Looks for a list's held update every 20 s, for up to 20 minutes, while its upload is written.
-function waitForHeld(code, status) {
+// Asks what became of an upload still being written (its id from the 202 answer) every 20 s, for up to 20 minutes.
+function waitForUpload(uploadId, status) {
   let tries = 0;
   const look = async () => {
     tries += 1;
+    let body = null;
     try {
-      const body = await (await fetch("/api/v1/sources", { headers: { Accept: "application/json" } })).json();
-      const list = body.lists.find((l) => l.code === code);
-      if (list && list.held) {
-        status.textContent = "Written: held for review below.";
+      const response = await fetch(`/api/v1/admin/uploads/${encodeURIComponent(uploadId)}`, { headers: { Accept: "application/json" } });
+      if (response.status === 404) {
+        status.textContent = "The service no longer knows this upload (it restarted): look for it under the updates held for review, or in the list's history on the status page.";
         loadHeld();
         return;
       }
+      if (response.ok) body = await response.json();
     } catch {
-      // Looked for again below.
+      // Asked again below.
+    }
+    if (body && body.result === "HeldForReview") {
+      status.textContent = "Written: held for review below.";
+      loadHeld();
+      return;
+    }
+    if (body && body.result === "Unchanged") {
+      status.textContent = "The same as the list in use: its date is updated, nothing to review.";
+      loadHeld();
+      return;
+    }
+    if (body && body.result === "Failed") {
+      status.textContent = "Writing it failed. Try again in a moment.";
+      return;
     }
     if (tries < 60) setTimeout(look, 20000);
     else status.textContent = "Not written yet after 20 minutes: see the list's history on the status page.";
@@ -158,7 +173,7 @@ async function upload(list, input, button, status) {
     if (response.status === 202) {
       // Read, and still being written (a large list takes minutes on the small database): it appears below when done.
       status.textContent = `Read: ${body.recordCount.toLocaleString()} entries, being written. It appears under the updates held for review when it's done, in a few minutes for a large list.`;
-      waitForHeld(list.code, status);
+      waitForUpload(body.uploadId, status);
     } else if (response.ok) {
       status.textContent = body.result === "Unchanged"
         ? "The same as the list in use: its date is updated, nothing to review."
