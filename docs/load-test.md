@@ -76,6 +76,20 @@ their words 56 MB, the subjects as listed (shown in explanations) 28.5 MB, looku
 9.3 MB. Ukraine shares few words with the other lists (its names are in Ukrainian; theirs in Russian or English), so
 sharing saves it 3 MB of 97; production's lists 25 MB of 273.
 
+On Azure (2026-11-21, production's 12 lists, Rust on two 0.25 vCPU / 0.5 GiB replicas, fresh replicas, rate limit
+off, the usual k6 steps; one run each, 18:04 and 18:33 UTC):
+
+| | Sustained | p95 there | Next step | CPU per replica (highest minute) | Memory per replica: run | idle |
+|---|---|---|---|---|---|---|
+| Before (`rust-12c4846`) | **64**/s | 238 ms | 80/s: p95 2.2 s, 3.2% busy | 0.17-0.21 | 330-452 MiB | 436-445 MiB |
+| After (`rust-c976761`) | **80**/s | 718 ms | 96/s: p95 2.1 s, 1.0% busy | 0.21-0.22 | 201-461 MiB | 363-374 MiB |
+
+One run each, and the same configuration has varied by a step before (80, 96, 96 with six lists, above), so the
+higher step is within the noise; the local bench's 5% is the better measure of speed. Idle, each replica holds about
+70 MiB less (the two revisions side by side, the older one up for hours); under load the peaks are alike, the
+allocator keeping what the requests used. With twice the lists of 2026-11-12, the same replicas sustain 64-80 a
+second rather than 96.
+
 ### Batches of 50,000, and the 2 s wait (2026-11-13 and 14)
 
 The owner asked (2026-11-12) how long a batch takes on every implementation and both sizes: `tests/load/stream.py` with
