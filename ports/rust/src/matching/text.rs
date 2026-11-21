@@ -1127,6 +1127,42 @@ fn simple_lower(c: char) -> char {
 mod tests {
     use super::*;
 
+    /// Every interning tokenizer (each index's build) gets the one shared token for a word, a Korean reading one per role
+    /// apart from the plain word; it stays while anything holds it, and goes at the release after the last holder.
+    #[test]
+    fn listed_words_are_shared_by_every_index_and_let_go_when_none_holds_them() {
+        use super::super::korean::Role;
+        let data = super::super::data::data();
+        // Words of this test's own: no other test holds them, whatever runs alongside.
+        let (mut first, mut second) = (Tokenizer::interning(data), Tokenizer::interning(data));
+        let plain = first.get("zyxqvortelmb");
+        assert!(Arc::ptr_eq(&plain, &second.get("zyxqvortelmb")));
+        assert!(!Arc::ptr_eq(&Tokenizer::new(data).get("zyxqvortelmb"), &plain), "a query's words aren't interned");
+        let roles = [Role::Surname, Role::GivenStart, Role::GivenRest];
+        let korean: Vec<TokenRef> = roles.iter().map(|&role| first.get_korean("qyong", role)).collect();
+        for (&role, token) in roles.iter().zip(&korean) {
+            assert!(Arc::ptr_eq(token, &second.get_korean("qyong", role)), "{role:?}");
+            assert!(!Arc::ptr_eq(token, &second.get("qyong")), "a Korean reading isn't the plain word");
+        }
+        assert!(!Arc::ptr_eq(&korean[0], &korean[1]) && !Arc::ptr_eq(&korean[1], &korean[2]));
+
+        // Kept while one holder remains, however often the unused words are let go.
+        drop(first);
+        drop(second);
+        release_unused_words();
+        assert!(Arc::ptr_eq(&plain, &Tokenizer::interning(data).get("zyxqvortelmb")));
+        for (&role, token) in roles.iter().zip(&korean) {
+            assert!(Arc::ptr_eq(token, &Tokenizer::interning(data).get_korean("qyong", role)));
+        }
+
+        // Gone once nothing holds them.
+        let weak: Vec<std::sync::Weak<Token>> = std::iter::once(&plain).chain(&korean).map(Arc::downgrade).collect();
+        drop(plain);
+        drop(korean);
+        release_unused_words();
+        assert!(weak.iter().all(|w| w.upgrade().is_none()));
+    }
+
     /// The reference reads UTF-16 units: a character beyond the Basic Multilingual Plane is two surrogates, neither a
     /// letter, so it separates words (Copilot's point on #37), and a mark there isn't stripped.
     #[test]
