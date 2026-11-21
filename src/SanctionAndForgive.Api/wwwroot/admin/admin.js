@@ -115,6 +115,45 @@ function uploadRow(list) {
     status);
 }
 
+// Asks what became of an upload still being written (its id from the 202 answer) every 20 s, for up to 20 minutes.
+function waitForUpload(uploadId, status) {
+  let tries = 0;
+  const look = async () => {
+    tries += 1;
+    let body = null;
+    try {
+      const response = await fetch(`/api/v1/admin/uploads/${encodeURIComponent(uploadId)}`, { headers: { Accept: "application/json" } });
+      if (response.status === 404) {
+        status.textContent = "The service no longer knows this upload (it restarted): look for it under the updates held for review, or in the list's history on the status page.";
+        loadHeld();
+        return;
+      }
+      if (response.ok) body = await response.json();
+    } catch {
+      // Asked again below.
+    }
+    if (body && body.result === "HeldForReview") {
+      status.textContent = "Written: held for review below.";
+      // Once more shortly, in case the lists' reload after it failed and the next check for changes brings it.
+      loadHeld();
+      setTimeout(loadHeld, 5000);
+      return;
+    }
+    if (body && body.result === "Unchanged") {
+      status.textContent = "The same as the list in use: its date is updated, nothing to review.";
+      loadHeld();
+      return;
+    }
+    if (body && body.result === "Failed") {
+      status.textContent = "Writing it failed. Try again in a moment.";
+      return;
+    }
+    if (tries < 60) setTimeout(look, 20000);
+    else status.textContent = "Not written yet after 20 minutes: see the list's history on the status page.";
+  };
+  setTimeout(look, 20000);
+}
+
 async function upload(list, input, button, status) {
   const files = [...(input.files || [])];
   if (!files.length) {
@@ -133,13 +172,21 @@ async function upload(list, input, button, status) {
       body: form,
     });
     const body = await response.json().catch(() => null);
-    if (response.ok) {
+    if (response.status === 202) {
+      // Read, and still being written (a large list takes minutes on the small database): it appears below when done.
+      status.textContent = `Read: ${body.recordCount.toLocaleString()} entries, being written. It appears under the updates held for review when it's done, in a few minutes for a large list.`;
+      waitForUpload(body.uploadId, status);
+    } else if (response.ok) {
       status.textContent = body.result === "Unchanged"
         ? "The same as the list in use: its date is updated, nothing to review."
         : `Held for review below: ${body.recordCount.toLocaleString()} entries. See what it changes, then confirm or reject it.`;
       setTimeout(loadHeld, 1500);
-    } else if (response.status === 400 && body && body.errors) {
+    } else if (body && body.errors) {
+      // The server's reason: a file it can't read, a missing one, too large, or another upload being read.
       status.textContent = Object.values(body.errors).flat().join(" ");
+    } else if (response.status === 504) {
+      status.textContent = "The service took longer than the connection waits. The upload may still finish: look for it under the updates held for review in a minute.";
+      setTimeout(loadHeld, 60000);
     } else if (response.status === 413) {
       status.textContent = "The file is too large for a list.";
     } else if (response.status === 401 || response.status === 403) {
