@@ -97,11 +97,15 @@ public sealed class UploadsTests
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
     }
 
-    /// <summary>The list removed whole (its records, imports and source), so later tests see the lists as they were. In
-    /// two steps, each seen before the next: removed at once, the database would be as it was before the test, and a
-    /// replica whose change check saw nothing in between (every step here reloads by itself) would see no change.</summary>
+    /// <summary>The list removed whole (its records, imports and source), so later tests see the lists as they were. First
+    /// a change the API is seen to take (a last check it has never had), then the removal: removed at once, the database
+    /// would be as it was before the test, and a replica whose change check saw nothing in between (every step here
+    /// reloads by itself) would see no change.</summary>
     private static async Task RemoveAsync(string code)
     {
+        await SqlAsync(code, "UPDATE Sources SET LastCheckedAt = '2001-02-03T04:05:06' WHERE Code = @code;");
+        await Suite.WaitForListsAsync(lists => !lists.TryGetValue(code, out var list)
+            || (list.TryGetProperty("lastCheckedAt", out var checkedAt) && checkedAt.ValueKind == JsonValueKind.String && checkedAt.GetString()!.StartsWith("2001-02-03", StringComparison.Ordinal)));
         await SqlAsync(
             code,
             """
@@ -110,9 +114,8 @@ public sealed class UploadsTests
             DELETE FROM Subjects WHERE ImportId IN (SELECT Id FROM Imports WHERE SourceId = @id);
             UPDATE Imports SET BasedOnImportId = NULL WHERE SourceId = @id;
             DELETE FROM Imports WHERE SourceId = @id;
+            DELETE FROM Sources WHERE Id = @id;
             """);
-        await Suite.WaitForListsAsync(lists => !lists.TryGetValue(code, out var list) || list.GetProperty("state").GetString() != "Current");
-        await SqlAsync(code, "DELETE FROM Sources WHERE Code = @code;");
         await Suite.WaitForListsAsync(lists => !lists.TryGetValue(code, out var list) || list.GetProperty("state").GetString() == "NotImported");
     }
 
