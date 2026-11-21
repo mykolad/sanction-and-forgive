@@ -397,6 +397,8 @@ impl Loader {
             }
         }
         self.catalog.replace(lists);
+        // The replaced indexes are gone (unless a screening still holds one): their words that no list uses any more go.
+        crate::matching::release_unused_words();
         if !not_built.is_empty() {
             return Err(format!(
                 "Not built: {}; everything else is loaded, and the list's previous version serves until it's built",

@@ -31,6 +31,7 @@ pub use screener::{
     AllowList, AllowListEntry, Cell, Entry, EntryKind, ListedHit, OverallOutcome, Party, PartyTag, ScreenedList, Screener,
     ScreeningRequest, ScreeningResult, ROLES,
 };
+pub use text::release_unused_words;
 
 #[cfg(test)]
 mod tests {
