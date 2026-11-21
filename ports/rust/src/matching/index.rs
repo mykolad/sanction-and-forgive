@@ -209,6 +209,7 @@ fn address_keys(address: &AddressForm) -> Vec<String> {
 impl ListIndex {
     /// One list's index: its people, companies and parties of unknown kind, and its vessels in an index of their own.
     pub fn build(subjects: Vec<ListedSubject>) -> ListIndex {
+        super::text::release_unused_words();
         let (vessels, others): (Vec<ListedSubject>, Vec<ListedSubject>) = subjects.into_iter().partition(|s| s.kind == SubjectKind::Vessel);
         let mut index = ListIndex::build_part(others);
         if !vessels.is_empty() {

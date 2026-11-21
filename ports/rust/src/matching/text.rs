@@ -10,7 +10,8 @@ use unicode_normalization::UnicodeNormalization;
 
 use super::data::MatcherData;
 
-/// One normalised word with every Latin reading of it. Tokens are interned per index (compared by pointer).
+/// One normalised word with every Latin reading of it. Tokens are interned for every index at once (SHARED_WORDS), and
+/// compared by pointer.
 #[derive(Debug)]
 pub struct Token {
     pub text: String,
@@ -912,6 +913,35 @@ pub(crate) fn create_token(tables: &[TransliterationTable], text: &str) -> Token
     }
 }
 
+/// Every listed word once for all lists: a word's token comes from the dictionaries alone, never from its list, so a
+/// word in five lists (Газпром, Ivanov) is one token in memory, not five. An interning tokenizer (an index's build)
+/// takes its words from here; release_unused_words lets go of the words no index holds any more. Keyed by the word
+/// (a Korean reading by its role and word), whose text the token is made from.
+static SHARED_WORDS: std::sync::LazyLock<std::sync::Mutex<SharedWords>> = std::sync::LazyLock::new(Default::default);
+
+#[derive(Default)]
+struct SharedWords {
+    plain: HashMap<String, TokenRef>,
+    korean: HashMap<String, TokenRef>,
+}
+
+/// The shared token for key, made (outside the lock: builds needn't wait for each other's words) if there's none yet.
+fn shared_word(key: &str, make: impl FnOnce() -> Token, store: impl Fn(&mut SharedWords) -> &mut HashMap<String, TokenRef>) -> TokenRef {
+    if let Some(token) = store(&mut SHARED_WORDS.lock().unwrap()).get(key) {
+        return token.clone();
+    }
+    let made = Arc::new(make());
+    store(&mut SHARED_WORDS.lock().unwrap()).entry(key.to_string()).or_insert(made).clone()
+}
+
+/// Lets go of the shared words that only the store holds (no index, nor a build under way, uses them): after lists are
+/// replaced, and before each build.
+pub fn release_unused_words() {
+    let mut words = SHARED_WORDS.lock().unwrap();
+    words.plain.retain(|_, token| Arc::strong_count(token) > 1);
+    words.korean.retain(|_, token| Arc::strong_count(token) > 1);
+}
+
 /// Section 5.1: normalise, replace multi-word legal forms, join runs of single letters (keeping the letters for
 /// initials), then transliterate. With a cache, tokens are interned.
 pub struct Tokenizer<'a> {
@@ -982,9 +1012,15 @@ impl<'a> Tokenizer<'a> {
         if let Some(token) = self.cache.as_ref().and_then(|cache| cache.get(&key)) {
             return token.clone();
         }
-        let mut token = self.data.token(text);
-        token.korean = Some(super::korean::readings(text, role).into_boxed_slice());
-        let token = Arc::new(token);
+        let make = || {
+            let mut token = self.data.token(text);
+            token.korean = Some(super::korean::readings(text, role).into_boxed_slice());
+            token
+        };
+        let token = match self.cache {
+            None => Arc::new(make()),
+            Some(_) => shared_word(&key, make, |words| &mut words.korean),
+        };
         if let Some(cache) = &mut self.cache {
             cache.insert(key, token.clone());
         }
@@ -998,7 +1034,7 @@ impl<'a> Tokenizer<'a> {
                 if let Some(token) = cache.get(text) {
                     return token.clone();
                 }
-                let token = Arc::new(self.data.token(text));
+                let token = shared_word(text, || self.data.token(text), |words| &mut words.plain);
                 cache.insert(text.to_string(), token.clone());
                 token
             }

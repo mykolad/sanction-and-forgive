@@ -56,6 +56,26 @@ records a second. The rate limit can stay on (a stream is one request). A stream
 
 ## Results
 
+### Rust: one copy of each word for every list (2026-11-21)
+
+Each list's index kept its own copy of every word with its readings (a Cyrillic word: one Latin reading per
+transliteration table and a look-alike one, each with its fold key), so a name in five lists was five copies. Since
+then the indexes share them (`matching/text.rs`, `SHARED_WORDS`; a word no index holds is let go after each reload).
+Measured locally with the bench on the feeds of 2026-11-21 (production's 12 lists), and with Australia and Ukraine's
+uploaded lists added; three runs of each, alternating; every result identical before and after:
+
+| Lists | | Peak private memory | Mean / p95 per screening | Build |
+|---|---|---|---|---|
+| Production's 12 | before | 335-338 MB | 2.43 / 6.81 ms | 4.6-4.8 s |
+| | after | 308-309 MB | 2.30 / 6.37 ms | 4.5-4.6 s |
+| With Australia and Ukraine | before | 554 MB | 3.57 / 9.70 ms | 8.7-8.8 s |
+| | after | 516 MB | 3.40 / 9.19 ms | 8.5-8.7 s |
+
+Where the indexes' memory goes (bytes allocated, Ukraine's list of 23,555 subjects): names read for matching with
+their words 56 MB, the subjects as listed (shown in explanations) 28.5 MB, lookup tables 21 MB, parsed addresses
+9.3 MB. Ukraine shares few words with the other lists (its names are in Ukrainian; theirs in Russian or English), so
+sharing saves it 3 MB of 97; production's lists 25 MB of 273.
+
 ### Batches of 50,000, and the 2 s wait (2026-11-13 and 14)
 
 The owner asked (2026-11-12) how long a batch takes on every implementation and both sizes: `tests/load/stream.py` with
