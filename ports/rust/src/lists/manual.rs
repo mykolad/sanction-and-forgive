@@ -92,9 +92,23 @@ pub fn read_manual_csv(text: &str) -> Result<Vec<ParsedSubject>, ParseError> {
 
 pub(crate) fn csv_rows(text: &str) -> Result<Vec<Vec<String>>, ParseError> {
     let mut rows: Vec<Vec<String>> = Vec::new();
+    delimited_rows(text, ',', |row| {
+        rows.push(row);
+        Ok(())
+    })?;
+    Ok(rows)
+}
+
+/// Each row of delimited text, in turn (quoted fields with "" for a quote, CR LF or LF, a leading byte order mark
+/// dropped): a large file's rows needn't all be held at once.
+pub(crate) fn delimited_rows(
+    text: &str,
+    delimiter: char,
+    mut each: impl FnMut(Vec<String>) -> Result<(), ParseError>,
+) -> Result<(), ParseError> {
     let mut row: Vec<String> = Vec::new();
     let mut field = String::new();
-    let (mut quoted, mut any) = (false, false);
+    let (mut quoted, mut any, mut first) = (false, false, true);
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         any = true;
@@ -113,15 +127,16 @@ pub(crate) fn csv_rows(text: &str) -> Result<Vec<Vec<String>>, ParseError> {
         }
         match c {
             '"' if field.is_empty() => quoted = true,
-            ',' => row.push(std::mem::take(&mut field)),
+            c if c == delimiter => row.push(std::mem::take(&mut field)),
             '\r' => {}
             '\n' => {
                 row.push(std::mem::take(&mut field));
-                rows.push(std::mem::take(&mut row));
+                each(std::mem::take(&mut row))?;
                 any = false;
+                first = false;
             }
             // A byte order mark: the reference's reader detects and drops it.
-            '\u{FEFF}' if rows.is_empty() && row.is_empty() && field.is_empty() => {}
+            '\u{FEFF}' if first && row.is_empty() && field.is_empty() => {}
             _ => field.push(c),
         }
     }
@@ -130,9 +145,9 @@ pub(crate) fn csv_rows(text: &str) -> Result<Vec<Vec<String>>, ParseError> {
     }
     if any || !field.is_empty() || !row.is_empty() {
         row.push(field);
-        rows.push(row);
+        each(row)?;
     }
-    Ok(rows)
+    Ok(())
 }
 
 /// After a passing fault, wait each delay in turn, never starting an attempt past the budget.

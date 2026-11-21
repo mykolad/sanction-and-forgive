@@ -100,6 +100,19 @@ impl Catalog {
         self.snapshot.read().unwrap().lists.clone()
     }
 
+    /// The lists screenings search and name: every list but one an administrator uploads that has no confirmed upload
+    /// yet (FeedStatus::Upload): a first upload held for review mustn't make every result Incomplete. The status page
+    /// still shows it (lists()), with its held update.
+    pub fn screened_lists(&self) -> Vec<Arc<LoadedList>> {
+        self.lists()
+            .into_iter()
+            .filter(|l| {
+                l.active_import_id.is_some()
+                    || crate::lists::catalogue::find_source(&l.code).is_none_or(|s| s.status != crate::lists::catalogue::FeedStatus::Upload)
+            })
+            .collect()
+    }
+
     pub fn replace(&self, lists: Vec<Arc<LoadedList>>) {
         *self.snapshot.write().unwrap() = Arc::new(Snapshot { lists, ready: true });
     }
@@ -347,7 +360,14 @@ impl Loader {
                 }
             }
             match existing {
+                // Nothing searchable served before: the new version's details, without an index (Not checked until
+                // it's built), so a list whose first upload was just confirmed is never left out of screenings.
                 None => lists.push(Arc::new(target.clone())),
+                Some(existing) if existing.index.is_none() => {
+                    let mut copy = target.clone();
+                    copy.switched_off = switched_off;
+                    lists.push(Arc::new(copy));
+                }
                 Some(existing) => {
                     let mut copy = (**existing).clone();
                     copy.switched_off = switched_off;

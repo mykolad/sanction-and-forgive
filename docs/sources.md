@@ -17,8 +17,8 @@ below), never aircraft.
 | `us-export` | US Consolidated Screening List: BIS and State only | JSON, 34.2 MB | 6,213 (0 / 0 / 6,213) | 11,576 (0, 0, 0) | 8,966 | Active |
 | `ch-seco` | Switzerland SECO | XML, 43.1 MB | 6,766 (3,889 / 2,877 / 0) | 20,443 (656, 5,481, 939) | 3,702 | **TermsUnclear** |
 | `ca-sema` | Canada autonomous sanctions (SEMA) | XML, 2.9 MB | 4,972 (3,522 / 1,450 / 0) | 8,808 (0, 2,856, 259) | 0 | **TermsUnclear** |
-| `au-dfat` | Australia consolidated list | XLSX | not fetched | | | **NeedsAccess** |
-| `ua-nsdc` | Ukraine NSDC State Register of Sanctions | JSON API | not fetched | | | **NeedsAccess** |
+| `au-dfat` | Australia consolidated list | XLSX, 1.3 MB, uploaded | 4,021 (2,581 / 1,081 / 0; 359 vessels) | 11,421 (464, 109, 460) | 1,431 | **Upload** |
+| `ua-nsdc` | Ukraine NSDC State Register of Sanctions | three TSV exports, 110 MB, uploaded | 23,555 (13,631 / 8,988 / 0; 936 vessels) | 93,017 (0, 45,590, 124) | 13,541 | **Upload** |
 | `ua-sfms` | Ukraine SFMS terrorism list | XML, 1.8 MB | 1,014 (724 / 290 / 0) | 3,893 (627, 99, 0) | 771 | Active |
 | `fr-tresor` | France national asset-freeze register (DG Trésor), from 2026-11-16 | JSON API, 15.0 MB | 8,187 (5,462 / 2,725 / 0) | 20,311 (134, 4,758, 438) | 3,491 | Active |
 | `nl-terrorism` | Netherlands national terrorism list (Ministry of Foreign Affairs), from 2026-11-16 | ODS, 14 KB | 117 (114 / 3 / 0) | 120 (0, 0, 0) | 0 | Active |
@@ -51,11 +51,26 @@ largest list, so the total is likely to land inside that range once it's added.
 - **Canada:** no id of its own (country / schedule / item instead), no addresses. Aliases are one comma-separated
   string with language labels (`Belarusian: …, Russian: …`). 736 ship records are left out (the Rust port keeps them, #69).
 - **SFMS:** mostly UN listings, with Ukrainian programme names. `type-entry` 1 = entity, 2 = person.
-- **Australia:** `dfat.gov.au` resets the connection for an honestly identified non-browser client (the probe's
-  user agent names the app). We don't disguise the client. The file's URL and format are unverified.
-- **NSDC:** the API (`https://api-drs.nsdc.gov.ua/`, OpenAPI at `/swagger-json`, version 1.8.5) needs an API key
-  (`x-cota-public-api-key` header or `cotaApiKey` query) for every data endpoint. `GET /v2/subjects?subjectType=…`
-  returns the full list. Registration is at `https://drs.nsdc.gov.ua/`, which refuses automated fetches.
+- **Australia (`au-dfat`, uploaded):** `dfat.gov.au` resets the connection for an honestly identified non-browser
+  client, and we don't disguise the client, so an administrator downloads the Consolidated List (XLSX) from
+  [its page](https://www.dfat.gov.au/international-relations/security/sanctions/consolidated-list) and uploads it on the
+  admin page (owner's decision, 2026-11-21; read 2026-11-21). One sheet, `Consolidated List`: a row per name, a party's
+  rows sharing their `Reference`'s number (`2`, `2a`, `2b`), one its `Primary Name`; `Type` (Individual, Entity,
+  Vessel), `Alias Strength` (Weak ones kept weak), `Original Script` names, `Address`, `Date of Birth` (an Excel date,
+  years, `dd/mm/yyyy`, `Approximately 1963`, several with commas), `IMO Number`, `Committees` (the programme),
+  `Additional Information` (passport and national identification numbers read from it), `Listing Information`
+  ("Listed on 25 January 2001", the listing date). The list offers updates by email (#128).
+- **NSDC (`ua-nsdc`, uploaded):** the API (`https://api-drs.nsdc.gov.ua/`) needs an API key, and the register's site
+  (`https://drs.nsdc.gov.ua/`) answers an automated client with a browser check, so an administrator downloads the
+  three subjects' exports ("Завантаження суб'єктів": people, companies, vessels) and uploads them together (owner's
+  decision, 2026-11-21). Tab-separated UTF-8, quoted fields; a row per subject with `status` `active`, its `sid` the
+  id, `name`, `translit_name`, `aliases` (semicolons); people's `birthdate` (ISO dates or years, commas), companies'
+  and vessels' `country`; `identity_docs`, `reg_id` and `tax_id` as `kind:value[country](note)` items with
+  semicolons (a vessel's IMO number in `reg_id`; a long kind named in its brackets: "основний державний
+  реєстраційний номер"); `additional_info` as `label:value` items, its `Місце розташування` / `Місце реєстрації` /
+  `Місце проживання` the addresses; the decree (programme and listing date) and the sanctions' term. Most of each
+  file is `active_sanctions`, the measures' text, which isn't kept. The register's other tab exports sanction
+  actions (applied, changed, cancelled), a log rather than the list: not used.
 
 - **France (`fr-tresor`, 2026-11-16):** `GET https://gels-avoirs.dgtresor.gouv.fr/ApiPublic/api/v1/publication/derniere-publication-fichier-json`
   (an XML twin, a JSON schema and a Swagger page are listed on [data.gouv.fr](https://www.data.gouv.fr/datasets/registre-national-des-gels)).
@@ -297,8 +312,8 @@ resell the lists.
 | **UN** | **Unclear.** The UN's general site terms allow "personal, non-commercial use, without any right to … redistribute … or create derivative works". The list page itself couldn't be read. | | [UN terms of use](https://www.un.org/en/about-us/terms-of-use) |
 | **SECO** | **Unclear.** The federal administration's terms: "Any reproduction requires the prior written consent of the copyright holder." | | [admin.ch terms](https://www.admin.ch/gov/en/start/terms-and-conditions.html). Contact: sanctions@seco.admin.ch |
 | **Canada** | **Unclear.** "You may not reproduce materials on this site … for the purposes of commercial redistribution without prior written permission." Non-commercial reproduction is allowed. | | [canada.ca terms](https://www.canada.ca/en/transparency/terms.html) |
-| Australia | Unknown: the site couldn't be reached. DFAT content is often CC BY 4.0. | | |
-| NSDC | Unknown: the site refuses automated fetches. | | |
+| Australia | Unverified: the site refuses an automated client. DFAT content is often CC BY 4.0. Uploaded by the owner's decision (2026-11-21). | | |
+| NSDC | Unverified: the site refuses an automated client. Uploaded by the owner's decision (2026-11-21). | | |
 | SFMS | Unknown: the site refuses automated fetches. The file downloads. | | |
 | France | Yes: Licence Ouverte 2.0 (Etalab), the dataset's licence on data.gouv.fr (read 2026-11-16). | Name the source and its date. The website's footer: "France: Registre national des gels, Direction générale du Trésor, reused under the Licence Ouverte 2.0." | [Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence/) |
 | Netherlands | Yes: government.nl declares CC0 1.0 for its content (read 2026-11-16). | None required. | [government.nl copyright](https://www.government.nl/copyright) |

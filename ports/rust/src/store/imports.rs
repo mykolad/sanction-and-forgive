@@ -67,7 +67,12 @@ enum Mode {
     Feed,
     Forced,
     Manual,
+    /// A file an administrator uploaded (FeedStatus::Upload): always held for review, never applied at once.
+    Upload,
 }
+
+/// Why every uploaded update is held: shown with it on the admin page and in the history, never who uploaded it.
+pub const UPLOAD_HELD: &str = "Uploaded by an administrator: held for review";
 
 /// A source as the import rules need it.
 #[derive(Debug, Clone)]
@@ -123,24 +128,17 @@ struct ReviewStamp {
 impl Imports {
     pub async fn ensure_source(&self, code: &str, name: &str, url: Option<&str>, max_age_hours: Option<i32>) -> DbResult<SourceRecord> {
         let mut conn = self.db.connect().await?;
-        match find_source(&mut conn, "Code = @P1", &code).await? {
-            None => {
-                execute(
-                    &mut conn,
-                    "INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4)",
-                    &[&code, &name, &url, &max_age_hours],
-                )
-                .await?
-            }
-            Some(existing) => {
-                execute(
-                    &mut conn,
-                    "UPDATE Sources SET Name = @P1, Url = @P2, MaxAgeHours = @P3 WHERE Id = @P4",
-                    &[&name, &url, &max_age_hours, &existing.id],
-                )
-                .await?
-            }
-        };
+        // One transaction, the code's key range locked until the insert: two first imports at once (an upload and the
+        // CLI, or two replicas) both find the one row, never a duplicate key.
+        execute(
+            &mut conn,
+            "SET XACT_ABORT ON; BEGIN TRANSACTION; \
+             UPDATE Sources WITH (UPDLOCK, SERIALIZABLE) SET Name = @P2, Url = @P3, MaxAgeHours = @P4 WHERE Code = @P1; \
+             IF @@ROWCOUNT = 0 INSERT INTO Sources (Code, Name, Url, MaxAgeHours) VALUES (@P1, @P2, @P3, @P4); \
+             COMMIT",
+            &[&code, &name, &url, &max_age_hours],
+        )
+        .await?;
         Ok(find_source(&mut conn, "Code = @P1", &code).await?.expect("just written"))
     }
 
@@ -154,8 +152,18 @@ impl Imports {
         self.locked(source, Some(subjects), None, if force { Mode::Forced } else { Mode::Feed }).await
     }
 
+    /// A file an administrator uploaded: written in full and held for review (unless it's the active list again, which
+    /// changes nothing). Confirming it makes it the list; LastCheckedAt then says when it was uploaded.
+    pub async fn upload(&self, source: &mut SourceRecord, subjects: Vec<Subject>) -> DbResult<ImportOutcome> {
+        self.locked(source, Some(subjects), None, Mode::Upload).await
+    }
+
     /// A manual change: change gets the active list under the source's lock, and its result becomes the list.
-    pub async fn change(&self, source: &mut SourceRecord, change: impl FnOnce(Vec<Subject>) -> Vec<Subject>) -> DbResult<ImportOutcome> {
+    pub async fn change(
+        &self,
+        source: &mut SourceRecord,
+        change: impl FnOnce(Vec<Subject>) -> Vec<Subject> + Send,
+    ) -> DbResult<ImportOutcome> {
         self.locked(source, None, Some(Box::new(change)), Mode::Manual).await
     }
 
@@ -177,7 +185,7 @@ impl Imports {
         &self,
         source: &mut SourceRecord,
         subjects: Option<Vec<Subject>>,
-        change: Option<Box<dyn FnOnce(Vec<Subject>) -> Vec<Subject> + '_>>,
+        change: Option<Box<dyn FnOnce(Vec<Subject>) -> Vec<Subject> + Send + '_>>,
         mode: Mode,
     ) -> DbResult<ImportOutcome> {
         let mut conn = self.db.connect().await?;
@@ -193,7 +201,7 @@ impl Imports {
         conn: &mut Connection,
         source: &mut SourceRecord,
         subjects: Option<Vec<Subject>>,
-        change: Option<Box<dyn FnOnce(Vec<Subject>) -> Vec<Subject> + '_>>,
+        change: Option<Box<dyn FnOnce(Vec<Subject>) -> Vec<Subject> + Send + '_>>,
         mode: Mode,
     ) -> DbResult<ImportOutcome> {
         *source = find_source(conn, "Id = @P1", &source.id).await?.ok_or("The source went away.")?;
@@ -226,7 +234,8 @@ impl Imports {
 
         if mode != Mode::Forced && active.as_ref().is_some_and(|a| a.content_hash.as_deref() == Some(hash.as_str())) {
             let active = active.unwrap();
-            if mode == Mode::Feed {
+            // The same file again is a check: the list was current when downloaded (uploaded) now.
+            if mode == Mode::Feed || mode == Mode::Upload {
                 in_transaction(conn, async |conn| {
                     execute(conn, "UPDATE Sources SET LastCheckedAt = @P1 WHERE Id = @P2", &[&started.fixed_offset(), &source.id]).await?;
                     supersede_held(conn, source.id, None, "superseded: the feed returned to the active list").await
@@ -260,6 +269,7 @@ impl Imports {
         }
 
         let drop = match &active {
+            _ if mode == Mode::Upload => Some(UPLOAD_HELD.to_string()),
             Some(a) if mode == Mode::Feed && (records.len() as f64) < a.record_count as f64 * (1.0 - MAX_DROP) => {
                 // The reference formats MaxDrop with P0 in the invariant culture: "20 %".
                 Some(format!("Records dropped from {} to {}, more than 20 %: held for review", a.record_count, records.len()))
@@ -885,4 +895,33 @@ pub fn truncate(value: &str, length: usize) -> String {
 #[allow(dead_code)]
 fn date(value: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
+}
+
+/// Parsed records as stored.
+pub fn to_stored(parsed: Vec<crate::lists::parse::ParsedSubject>) -> Vec<Subject> {
+    parsed
+        .into_iter()
+        .map(|p| Subject {
+            id: 0,
+            external_id: p.external_id,
+            kind: p.kind as u8,
+            primary_name: p.primary_name,
+            programmes: p.programmes,
+            listed_on: p.listed_on,
+            remarks: p.remarks,
+            source_url: p.source_url,
+            names: p
+                .names
+                .into_iter()
+                .map(|n| SubjectName { full_name: n.full_name, is_weak: n.is_weak, script: n.script as u8 })
+                .collect(),
+            addresses: p.addresses.into_iter().map(|a| SubjectAddress { raw: a.raw, country_code: a.country_code }).collect(),
+            identifiers: p
+                .identifiers
+                .into_iter()
+                .map(|i| SubjectIdentifier { kind: i.kind, value: i.value, country: i.country })
+                .collect(),
+            birth_dates: p.birth_dates,
+        })
+        .collect()
 }

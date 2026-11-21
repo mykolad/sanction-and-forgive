@@ -735,7 +735,7 @@ impl ScreeningService {
     /// The single endpoint's answer.
     pub fn screen(&self, body: &ScreeningRequestBody) -> ScreeningResponse {
         let (lists, allow_list, destinations, now) =
-            (self.catalog.lists(), self.catalog.allow_list(), self.catalog.destinations(), self.now());
+            (self.catalog.screened_lists(), self.catalog.allow_list(), self.catalog.destinations(), self.now());
         let (result, rows) = self.run(body, &lists, &allow_list, &destinations, now);
         ScreeningResponse {
             reference: body.reference().to_string(),

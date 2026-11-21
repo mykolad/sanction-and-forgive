@@ -68,3 +68,6 @@ HANDOVER.md
 
 # The load test's inputs: generated from the active lists (load-inputs).
 tests/load/inputs.csv
+
+# Lists downloaded by hand for uploading (manual uploads): never committed.
+/lists/

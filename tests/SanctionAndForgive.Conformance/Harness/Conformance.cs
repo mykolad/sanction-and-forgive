@@ -399,6 +399,22 @@ public static class Suite
     public static Task<HttpResponseMessage> AdminAsync(HttpMethod method, string path, object? body) =>
         SendAsync(method, path, body, Principal(AdminName, admin: true), fromThisSite: true);
 
+    /// <summary>An administrator's upload, from the admin page: each file a part of one multipart form.</summary>
+    public static async Task<HttpResponseMessage> AdminUploadAsync(string path, params (string Name, byte[] Content)[] files)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative));
+        var form = new MultipartFormDataContent();
+        foreach (var (name, content) in files)
+        {
+            form.Add(new ByteArrayContent(content), "file", name);
+        }
+
+        request.Content = form;
+        request.Headers.Add("Cookie", $"saf-admin={Principal(AdminName, admin: true)}");
+        request.Headers.Add("X-Requested-By", "sanction-and-forgive-admin");
+        return await Http.SendAsync(request);
+    }
+
     public static async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body, string? principal, bool fromThisSite)
     {
         using var request = new HttpRequestMessage(method, new Uri(path, UriKind.Relative));

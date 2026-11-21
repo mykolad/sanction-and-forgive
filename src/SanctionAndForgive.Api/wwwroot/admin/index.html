@@ -39,9 +39,18 @@
       <div id="switches" aria-live="polite"></div>
     </section>
 
+    <!-- Offered only when the API's status lists the "uploads" feature (admin.js). -->
+    <section class="panel" id="uploads-section" aria-labelledby="uploads-title" hidden>
+      <h2 id="uploads-title">Upload a list</h2>
+      <p class="section-note">Some publishers' sites refuse automated downloads. Download the list's file in your browser from
+        its publisher's page, then upload it here. Every upload is held for review below: see what it changes, then confirm or
+        reject it. The file isn't kept, only its entries. An upload of the same file as the list in use only updates its date.</p>
+      <div id="uploads" aria-live="polite"></div>
+    </section>
+
     <section class="panel" aria-labelledby="held-title">
       <h2 id="held-title">Updates held for review</h2>
-      <p class="section-note">An update with more than 20% fewer records than the list it would replace is kept but not searched.
+      <p class="section-note">An uploaded list, and an update with more than 20% fewer records than the list it would replace, is kept but not searched.
         Compare it with the publisher's site: a real change (many entries delisted) is confirmed; a broken or partial file is
         rejected. Until then the current list keeps serving, past its allowed age too (with a warning on every result).</p>
       <div id="held" aria-live="polite"></div>

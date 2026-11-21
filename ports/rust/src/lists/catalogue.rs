@@ -5,6 +5,9 @@ pub enum FeedStatus {
     Active,
     TermsUnclear,
     NeedsAccess,
+    /// Uploaded by an administrator from the publisher's file (the admin page): never downloaded by the app, every
+    /// upload held for review (Rust first).
+    Upload,
 }
 
 impl FeedStatus {
@@ -13,6 +16,7 @@ impl FeedStatus {
             FeedStatus::Active => "Active",
             FeedStatus::TermsUnclear => "TermsUnclear",
             FeedStatus::NeedsAccess => "NeedsAccess",
+            FeedStatus::Upload => "Upload",
         }
     }
 }
@@ -55,6 +59,47 @@ const fn source(
     note: &'static str,
 ) -> ListSource {
     ListSource { code, name, url, max_age_hours: DAILY, status, homepage, terms_url, note, link_pattern: "" }
+}
+
+/// An uploaded list's allowed age: a year (owner's decision, 2026-11-21). Past it, the list is searched as last
+/// uploaded, but Overdue.
+pub const UPLOADED: i32 = 365 * 24;
+
+/// The files a list published as several must be uploaded with, one per kind of party, so none of its parties drop out
+/// because a file was left behind: the names of the kinds none of `files` is (each file's kind from its header, so a
+/// file whose entries are all gone still counts).
+pub fn missing_upload_files(code: &str, files: &[&[u8]]) -> Vec<&'static str> {
+    use crate::lists::parse::SubjectType;
+    type KindOf = fn(&[u8]) -> Option<SubjectType>;
+    let (required, kind_of): (&[(SubjectType, &str)], KindOf) = match code {
+        "ua-nsdc" => (
+            &[(SubjectType::Individual, "people"), (SubjectType::Entity, "companies"), (SubjectType::Vessel, "vessels")],
+            crate::lists::nsdc::file_kind,
+        ),
+        _ => return Vec::new(),
+    };
+    let kinds: Vec<SubjectType> = files.iter().filter_map(|file| kind_of(file)).collect();
+    required.iter().filter(|(kind, _)| !kinds.contains(kind)).map(|(_, name)| *name).collect()
+}
+
+/// The most an upload of the list may send, its files together: far above the list's real size (Australia's file is
+/// 1.3 MB; Ukraine's three exports about 110 MB, most of it their sanctions' text), so a replica's memory holds it.
+pub fn max_upload_bytes(code: &str) -> u64 {
+    match code {
+        "ua-nsdc" => 256 << 20,
+        _ => 16 << 20,
+    }
+}
+
+/// A list an administrator uploads (FeedStatus::Upload): no address to download, a year's allowed age.
+const fn uploaded(
+    code: &'static str,
+    name: &'static str,
+    homepage: &'static str,
+    terms_url: &'static str,
+    note: &'static str,
+) -> ListSource {
+    ListSource { code, name, url: "", max_age_hours: UPLOADED, status: FeedStatus::Upload, homepage, terms_url, note, link_pattern: "" }
 }
 
 /// The catalogue, in the reference's order.
@@ -131,23 +176,19 @@ pub static SOURCES: [ListSource; 17] = [
         "https://www.canada.ca/en/transparency/terms.html",
         "Canada's terms allow non-commercial reproduction only; commercial redistribution needs written permission. Waiting for a decision.",
     ),
-    source(
+    uploaded(
         "au-dfat",
         "Australia consolidated list",
-        "",
-        FeedStatus::NeedsAccess,
         "https://www.dfat.gov.au/international-relations/security/sanctions/consolidated-list",
         "",
-        "The publisher's site refuses automated downloads from a client that identifies itself honestly, so its file and format couldn't be checked, and there is no parser for it yet.",
+        "Uploaded by an administrator: the publisher's site refuses automated downloads from a client that identifies itself honestly. The Consolidated List (XLSX) is downloaded in a browser and uploaded on the admin page.",
     ),
-    source(
+    uploaded(
         "ua-nsdc",
         "Ukraine NSDC State Register of Sanctions",
-        "https://api-drs.nsdc.gov.ua/v2/subjects",
-        FeedStatus::NeedsAccess,
         "https://drs.nsdc.gov.ua/",
         "",
-        "The register's API needs a key, which takes a registration. Waiting for one.",
+        "Uploaded by an administrator: the register's API needs a key, and its site's exports aren't open to an automated client. Its subjects' exports (people, companies, vessels) are downloaded in a browser and uploaded together on the admin page.",
     ),
     source(
         "fr-tresor",

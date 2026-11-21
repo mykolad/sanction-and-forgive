@@ -251,6 +251,52 @@ pub async fn active_subjects(conn: &mut Connection, code: &str, import_id: i32) 
     result
 }
 
+/// A held import as its review reads it: the source's code, its status, whether it has its records, and the import it
+/// was compared with (the active one when it was written).
+pub struct HeldImport {
+    pub code: String,
+    pub status: String,
+    pub has_data: bool,
+    pub based_on: Option<i32>,
+}
+
+pub async fn held_import(conn: &mut Connection, import_id: i32) -> DbResult<Option<HeldImport>> {
+    let found = rows(
+        conn,
+        "SELECT s.Code, i.Status, i.HasData, i.BasedOnImportId FROM Imports i JOIN Sources s ON s.Id = i.SourceId WHERE i.Id = @P1",
+        &[&import_id],
+    )
+    .await?;
+    Ok(found.first().map(|r| HeldImport {
+        code: text(r, 0),
+        status: text(r, 1),
+        has_data: r.get::<bool, _>(2).unwrap_or_default(),
+        based_on: optional_int(r, 3),
+    }))
+}
+
+/// A held import with its records and those of the list it was compared with (none for a first version), read in one
+/// snapshot so a review meanwhile can't leave half of either; None unless it's held with its records.
+pub async fn held_changes(conn: &mut Connection, import_id: i32) -> DbResult<Option<(HeldImport, Vec<Subject>, Vec<Subject>)>> {
+    simple(conn, "SET TRANSACTION ISOLATION LEVEL SNAPSHOT; BEGIN TRANSACTION").await?;
+    let result = async {
+        let Some(held) = held_import(conn, import_id).await? else { return Ok(None) };
+        if held.status != "PendingReview" || !held.has_data {
+            return Ok(None);
+        }
+        let after = read_subjects(conn, import_id).await?;
+        let before = match held.based_on {
+            Some(based_on) => read_subjects(conn, based_on).await?,
+            None => Vec::new(),
+        };
+        Ok(Some((held, before, after)))
+    }
+    .await;
+    let end = if result.is_ok() { "COMMIT" } else { "IF @@TRANCOUNT > 0 ROLLBACK" };
+    simple(conn, &format!("{end}; SET TRANSACTION ISOLATION LEVEL READ COMMITTED")).await?;
+    result
+}
+
 pub(crate) async fn read_subjects(conn: &mut Connection, import_id: i32) -> DbResult<Vec<Subject>> {
     let subject_rows = rows(
         conn,
