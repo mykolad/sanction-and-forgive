@@ -102,9 +102,11 @@ function destinationRow(row, status) {
     el("td", { class: indent },
       el("strong", {}, row.name), ` ${row.kind.toLowerCase()}${row.country ? `, ${row.country}` : ""}${row.needsRegion ? ", only with its region" : ""}`,
       row.otherNames.length ? el("span", { class: "entry-input" }, `Also: ${row.otherNames.join(", ")}`) : null,
-      row.legalSource ? el("span", { class: "entry-input" }, row.legalSource) : null),
+      // A place outside the restricted area isn't restricted: its region's citation, which rows loaded before
+      // 2026-11-22 copied onto it, isn't shown as if it were its own.
+      row.legalSource && row.status !== "Outside" ? el("span", { class: "entry-input" }, row.legalSource) : null),
     el("td", {}, STATUSES[row.status] || row.status),
-    el("td", {}, row.restrictedBy || "—"),
+    el("td", {}, row.status === "Outside" ? "—" : row.restrictedBy || "—"),
     el("td", {}, row.asOf),
     el("td", {}, row.reviewBy),
     buttons);
