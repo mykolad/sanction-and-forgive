@@ -75,9 +75,6 @@ impl Token {
 pub struct RawToken {
     pub token: TokenRef,
     pub initials: Option<Vec<TokenRef>>,
-    /// A Chinese person's name written as one word (张伟明), read as a person's: its surname and its given name, as
-    /// words of their own (chinese_name_parts, #93). A company's reading keeps the word whole.
-    pub person_parts: Option<Vec<TokenRef>>,
 }
 
 const APOSTROPHES: &str = "'’ʼʻ`′‘";
@@ -276,54 +273,6 @@ pub fn pinyin_name_readings(word: &str) -> (Vec<String>, usize) {
         }
     }
     (out, in_order)
-}
-
-/// Two-character Chinese surnames (复姓), simplified: a name starting with one has its given name after both.
-const COMPOUND_SURNAMES: [&str; 34] = [
-    "欧阳", "司马", "上官", "诸葛", "东方", "皇甫", "尉迟", "公孙", "慕容", "令狐", "长孙", "宇文", "司徒", "夏侯", "轩辕", "端木", "独孤",
-    "南宫", "西门", "呼延", "澹台", "公冶", "宗政", "濮阳", "淳于", "单于", "太叔", "申屠", "钟离", "闾丘", "东郭", "百里", "第五", "万俟",
-];
-
-/// A Chinese person's name written as one word, split into its surname and given name (#93), so each is a word: 张伟明
-/// is Zhang and Weiming, aligned with Zhang Wei Ming (the given name's two words read as one) as with Zhang Weiming. A
-/// name of two or three characters whose first is a common surname (pinyin.json's commonSurnames), or of three or four
-/// whose first two are a compound surname (欧阳娜娜). None for any other word: one in another script, a word read
-/// as a whole from its start (重庆), or a longer one (a company's name).
-pub fn chinese_name_parts(word: &str) -> Option<(String, String)> {
-    let original: Vec<char> = word.chars().collect();
-    if !original.iter().all(|&c| is_han(c)) {
-        return None;
-    }
-    let chars: Vec<char> = simplified(word).chars().collect();
-    if chars.len() != original.len() || PINYIN.words.iter().any(|(w, _)| chars.starts_with(w)) {
-        return None;
-    }
-    let compound = COMPOUND_SURNAMES.iter().any(|surname| chars.iter().take(2).copied().eq(surname.chars()));
-    let at = if compound && (3..=4).contains(&chars.len()) {
-        2
-    } else if !compound && (2..=3).contains(&chars.len()) && PINYIN.common_surnames.contains(&chars[0]) {
-        1
-    } else {
-        return None;
-    };
-    Some((original[..at].iter().collect(), original[at..].iter().collect()))
-}
-
-/// Two Chinese words read as one in pinyin, the first as a surname reads where it is one (曾 Zeng): a name split by
-/// chinese_name_parts, 张 and 伟, reads as Zhangwei, the whole name's reading. None unless both are wholly Chinese
-/// characters with readings.
-pub fn chinese_pair_reading(first: &str, second: &str) -> Option<String> {
-    if !first.chars().chain(second.chars()).all(is_han) {
-        return None;
-    }
-    let simple: Vec<char> = simplified(first).chars().collect();
-    let surname = match simple.as_slice() {
-        [c] => PINYIN.surnames.get(c).cloned(),
-        _ => None,
-    };
-    let first = surname.or_else(|| pinyin_readings(first).into_iter().next())?;
-    let (second, _) = pinyin_name_readings(second);
-    Some(format!("{first}{}", second.first()?))
 }
 
 /// A word in Latin script (not a transliteration of another script's word, which reads in Latin letters too).
@@ -1041,12 +990,7 @@ impl<'a> Tokenizer<'a> {
                     Some(role) => self.get_korean(&words[i], role),
                     None => self.get(&words[i]),
                 };
-                // Only a name written as one word: one the tokenizer joined from words written apart (高彬 倪, the given
-                // name first) keeps the writer's division, read whole as before.
-                let person_parts = chinese_name_parts(&words[i])
-                    .filter(|_| value.contains(words[i].as_str()))
-                    .map(|(surname, given)| vec![self.get(&surname), self.get(&given)]);
-                tokens.push(RawToken { token, initials: None, person_parts });
+                tokens.push(RawToken { token, initials: None });
                 i += 1;
                 continue;
             }
@@ -1056,7 +1000,7 @@ impl<'a> Tokenizer<'a> {
             }
             let run = &words[start..=i];
             let initials: Vec<TokenRef> = run.iter().map(|letter| self.get(letter)).collect();
-            tokens.push(RawToken { token: self.get(&run.concat()), initials: Some(initials), person_parts: None });
+            tokens.push(RawToken { token: self.get(&run.concat()), initials: Some(initials) });
             i += 1;
         }
         tokens

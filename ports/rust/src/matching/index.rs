@@ -268,15 +268,8 @@ impl ListIndex {
             }
             // Two adjacent words read as one, by fold key (finding is loose, scoring exact), kept apart from the
             // vocabulary (the fuzzy lookups don't see them).
-            for k in alias.form.joined.iter().filter(|k| !k.is_empty()) {
+            for k in alias.form.joined.iter().chain(&alias.form.joined3).filter(|k| !k.is_empty()) {
                 by_joined.post(&fold_key(k), a);
-            }
-            // A Chinese name split in two (its surname, its given name) under the whole name's pinyin too, as the one
-            // word was before the split: Zhangwei finds 张伟 exactly (#93).
-            for (pair, k) in alias.form.core.windows(2).zip(&alias.form.joined) {
-                if !k.is_empty() && pair.iter().all(|t| t.pinyin.is_some()) {
-                    by_pinyin.post(k, a);
-                }
             }
         }
         let mut by_address = OrderedPostings::default();
@@ -517,24 +510,23 @@ impl ListIndex {
                 joined.push(key);
             }
         }
-        // Two words in Latin script read as one find a Chinese word that reads so (#93): Zhang Wei, 张伟.
+        // Two words in Latin script read as one find a Chinese word that reads so (#93): Zhang Wei, 张伟; and three
+        // (NameForm::joined3, only ever Latin): Zhang Wei Ming, 张伟明.
         let mut read: Vec<&str> = Vec::new();
         for form in [query.entity, query.person] {
-            for (pair, k) in form.core.windows(2).zip(&form.joined) {
-                if !k.is_empty() && pair.iter().all(|t| is_latin_word(t)) && !read.contains(&k.as_str()) {
+            for k in form.joined3.iter().filter(|k| !k.is_empty()) {
+                if !read.contains(&k.as_str()) {
                     let list = postings(&self.aliases_by_pinyin, k);
                     vote(list, 3, true);
                     exact.extend_from_slice(list);
                     read.push(k);
                 }
-                // A Chinese name split in two (its surname, its given name) reads as the whole name did, finding the
-                // aliases that read exactly so, as one word or as two, past a common surname's crowd (高彬: Gaobin).
-                if !k.is_empty() && pair.iter().all(|t| t.pinyin.is_some()) && !read.contains(&k.as_str()) {
-                    for (list, joined) in [(postings(by_fold, &fold_key(k)), false), (postings(by_joined, &fold_key(k)), true)] {
-                        let found: Vec<u32> = list.iter().copied().filter(|&alias| self.reads_exactly(alias, k)).collect();
-                        vote(&found, 3, joined);
-                        exact.extend_from_slice(&found);
-                    }
+            }
+            for (pair, k) in form.core.windows(2).zip(&form.joined) {
+                if !k.is_empty() && pair.iter().all(|t| is_latin_word(t)) && !read.contains(&k.as_str()) {
+                    let list = postings(&self.aliases_by_pinyin, k);
+                    vote(list, 3, true);
+                    exact.extend_from_slice(list);
                     read.push(k);
                 }
             }
@@ -568,6 +560,7 @@ impl ListIndex {
         let form = &self.aliases[alias as usize].form;
         form.core.iter().any(|t| latin_reads_as(t, reading))
             || form.core.windows(2).zip(&form.joined).any(|(pair, k)| k == reading && pair.iter().all(|t| is_latin_word(t)))
+            || form.joined3.iter().any(|k| k == reading)
     }
 
     /// The subjects a name entry finds, best first (then by name): the best one, whatever its percentage, and every

@@ -19,6 +19,10 @@ pub struct NameForm {
     /// can't be read as one: a number, a single letter, a word with no Latin reading, or two that read as a legal form,
     /// a generic word or a stop word (L TD isn't a word).
     pub joined: Vec<String>,
+    /// For each three adjacent core words in Latin script, the three read as one (their first readings run together),
+    /// or empty: a Chinese name's pinyin written a syllable a word (Zhang Wei Ming for 张伟明, #93). Joined only where
+    /// the other name has a Chinese word that reads exactly so (scorer::eligible_joins).
+    pub joined3: Vec<String>,
 }
 
 impl NameForm {
@@ -64,16 +68,22 @@ impl NameParser<'_> {
 
     fn with_joined(&self, mut form: NameForm) -> NameForm {
         form.joined = form.core.windows(2).map(|pair| self.joined(&pair[0], &pair[1])).collect();
+        form.joined3 = form
+            .core
+            .windows(3)
+            .map(|three| {
+                if three.iter().all(|t| super::text::is_latin_word(t) && !t.forms.is_empty()) {
+                    three.iter().map(|t| t.forms[0].as_str()).collect()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
         form
     }
 
     /// Two adjacent words read as one (NameForm::joined), or empty.
     fn joined(&self, a: &Token, b: &Token) -> String {
-        // Two Chinese words side by side are a person's name split in two (the tokenizer joins any others): read as
-        // one in pinyin, as the name was (#93).
-        if let Some(reading) = super::text::chinese_pair_reading(&a.text, &b.text) {
-            return reading;
-        }
         let readable = |t: &Token| !t.is_number && !t.folds.is_empty() && t.len() > 1;
         if !readable(a) || !readable(b) {
             return String::new();
@@ -182,11 +192,7 @@ impl NameParser<'_> {
             {
                 continue;
             }
-            // A Chinese name written as one word: its surname and given name, each a word (#93).
-            match &raw.person_parts {
-                Some(parts) => form.core.extend(parts.iter().cloned()),
-                None => form.core.push(raw.token.clone()),
-            }
+            form.core.push(raw.token.clone());
         }
         form
     }

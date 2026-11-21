@@ -492,8 +492,8 @@ mod tests {
         assert_eq!(crate::matching::text::pinyin_readings("重庆々"), ["chongqingqing"]);
         let (outcome, percent) = screen("张 Wei", "Zhang Wei Ming", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Review), "张 Wei / Zhang Wei Ming: {percent:?}");
-        // A Chinese name written as one word is its surname and its given name (#93): the given name's two syllables
-        // written as two words, or as one, either way round, or given name first; a compound surname stays whole.
+        // A Chinese name's pinyin written a syllable a word (#93): three words in Latin script read as one, either way
+        // round, a compound surname's too; the Chinese word stays whole, so its other readings and spacing still match.
         for (query, listed) in [
             ("张伟明", "Zhang Wei Ming"),
             ("Zhang Wei Ming", "张伟明"),
@@ -503,23 +503,20 @@ mod tests {
             ("Zhangweiming", "张伟明"),
             ("欧阳娜娜", "Ouyang Na Na"),
             ("曾国藩", "Zeng Guo Fan"),
+            ("Weizhang", "张伟"),
+            ("Cengguofan", "曾国藩"),
+            ("张 伟明", "张伟明"),
+            ("张伟明", "张 伟明"),
+            ("高彬 倪", "Gaobin NI"),
         ] {
             let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
             assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
         }
-        // A name the writer spaced keeps that division (UK's 高彬 倪, the given name first); a company's name is never
-        // split; and an initial stands for a Chinese given name's pinyin as for a Latin one.
-        let (outcome, percent) = screen("高彬 倪", "Gaobin NI", SubjectKind::Individual);
-        assert_eq!(outcome, Some(Outcome::Match), "高彬 倪 / Gaobin NI: {percent:?}");
-        assert_eq!(crate::matching::text::chinese_name_parts("张伟明"), Some(("张".to_string(), "伟明".to_string())));
-        assert_eq!(crate::matching::text::chinese_name_parts("欧阳娜娜"), Some(("欧阳".to_string(), "娜娜".to_string())));
-        for word in ["重庆", "华为技术", "Zhang", "张"] {
-            assert_eq!(crate::matching::text::chinese_name_parts(word), None, "{word}");
+        // Never three words in another script, nor a given name read the other way round.
+        for (query, listed) in [("李娜", "Лина"), ("Wang Nali", "王李娜"), ("Ли Вэй Мин", "李伟明")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
         }
-        let (outcome, percent) = screen("华为", "Hua Wei", SubjectKind::Entity);
-        assert_eq!(outcome, Some(Outcome::Match), "华为 / Hua Wei: {percent:?}");
-        let (outcome, percent) = screen("Zhang E.", "张娥", SubjectKind::Individual);
-        assert_eq!(outcome, Some(Outcome::Review), "Zhang E. / 张娥: {percent:?}");
         // Never two Chinese names that only sound alike, a transliteration, or a reading alike only after folding; a
         // place's name isn't read given name first, and one character is a short name on either side.
         for (query, listed, kind) in [
