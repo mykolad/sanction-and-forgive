@@ -27,6 +27,11 @@ use crate::store::queries::{self, Subject};
 /// or equal). Each file is parsed as it arrives and dropped, so only one is held at a time.
 pub const MAX_UPLOAD_BYTES: usize = 256 << 20;
 
+/// How long an upload's answer waits for its write: a large list on the small database takes minutes (Ukraine's,
+/// 23,555 subjects, about seven), longer than the ingress waits for an answer (240 s), so past this the answer is 202
+/// and the update appears under the held ones when it's written.
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// One upload at a time per replica: each holds a file and its parsed entries in memory beside the lists in use.
 static UPLOADING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 
@@ -131,25 +136,41 @@ async fn upload(State(s): State<Shared>, headers: HeaderMap, Path(code): Path<St
     if subjects.is_empty() {
         return bad_request(one_error("File", &format!("The file has no entries: {} is never emptied by an upload.", source.name)));
     }
-    let imports = Imports { db: s.db.clone() };
-    let outcome = async {
-        let mut record = imports.ensure_source(source.code, source.name, Some(source.homepage), Some(source.max_age_hours)).await?;
-        imports.upload(&mut record, to_stored(subjects)).await
-    }
-    .await;
-    let outcome = match outcome {
-        Ok(outcome) => outcome,
-        Err(e) => {
-            s.loader.logger.error("Uploading a list failed", &[("code", source.code.into()), ("error", e.to_string().into())]);
-            return server_error();
+    // Written and reloaded in a task of its own, holding the upload's place: a request cut off meanwhile (the ingress
+    // waits 240 s; a large list on a small database can take longer) never leaves the write half done, and the update
+    // appears under the held ones when it's written.
+    let shared = s.clone();
+    let user_name = user.name.clone();
+    let record_count = subjects.len();
+    let written = tokio::spawn(async move {
+        let _place = _uploading;
+        let imports = Imports { db: shared.db.clone() };
+        let outcome = async {
+            let mut record = imports.ensure_source(source.code, source.name, Some(source.homepage), Some(source.max_age_hours)).await?;
+            imports.upload(&mut record, to_stored(subjects)).await
         }
+        .await;
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                shared.loader.logger.error("Uploading a list failed", &[("code", source.code.into()), ("error", e.to_string().into())]);
+                return None;
+            }
+        };
+        // Who uploaded is logged, never shown publicly.
+        shared.loader.logger.info(
+            &format!("List {} uploaded by {user_name}: {} ({} records)", source.code, outcome.result.as_str(), outcome.record_count),
+            &[],
+        );
+        let reloaded = shared.loader.refresh().await.is_ok();
+        Some((outcome, reloaded))
+    });
+    let mut written = written;
+    let Ok(finished) = tokio::time::timeout(ANSWER_WAIT, &mut written).await else {
+        // Still writing: the task goes on (dropping its handle doesn't stop it), its place held until it ends.
+        return json_response(StatusCode::ACCEPTED, &json!({ "code": source.code, "result": "Writing", "recordCount": record_count }));
     };
-    // Who uploaded is logged, never shown publicly.
-    s.loader.logger.info(
-        &format!("List {} uploaded by {}: {} ({} records)", source.code, user.name, outcome.result.as_str(), outcome.record_count),
-        &[],
-    );
-    let reloaded = s.loader.refresh().await.is_ok();
+    let Ok(Some((outcome, reloaded))) = finished else { return server_error() };
     json_response(
         StatusCode::OK,
         &json!({
