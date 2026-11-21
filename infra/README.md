@@ -8,7 +8,7 @@ reproducible from an empty group. Nothing here belongs to or touches lazydad.
 | `bootstrap.bicep` | Subscription | The owner, once | Resource group; `sanction-and-forgive-github-cd` (the identity GitHub Actions deploys as), trusted from this repository's `production` environment only, Contributor on the group only |
 | `platform.bicep` | Resource group | The deploy workflow (first time: by hand) | Log Analytics (30 days, daily cap 0.5 GB), Container Apps environment `sanction-and-forgive-cae`, app identity `sanction-and-forgive-app`, SQL server `sanction-and-forgive-sql` (Entra-only), database `sanction-and-forgive-db` (Basic, 5 DTU, 2 GB), the Azure services firewall rule; alerts to the subscription's Owner role: database storage above 80%, a failed or rejected import, more than 5% of an hour's screenings Incomplete, and a $20 monthly budget (80% spent, 100% forecast); the operations workbook (`operations-workbook.json`, #81) |
 | `operations-workbook.json` | (in `platform.bicep`) | With the platform | The workbook "Sanction & Forgive: operations" (portal: Monitor, Workbooks): screenings by outcome and caller, the share of Incomplete results, lists not checked, overdue or switched off, possible matches by list, destination notices, versions, all from the audit lines; requests by status code (503, 429) from the platform's metrics. The app's name, its id and the workspace's are filled in by `platform.bicep`. |
-| `app.bicep` | Resource group | The deploy workflow | Container App `sanction-and-forgive` (Rust, two replicas of 0.25 vCPU / 0.5 GiB since 2026-11-12, min = max = 2, port 8080, liveness `/healthz`, readiness `/readyz`, public ingress unless `allowedCidrs`) and the job `sanction-and-forgive-import` (daily 03:30 UTC, `import --source all`, 0.5 vCPU / 1 GiB, up to an hour), both from `ghcr.io/mykolad/sanction-and-forgive:<sha>` as identity `sanction-and-forgive-app` |
+| `app.bicep` | Resource group | The deploy workflow | Container App `sanction-and-forgive` (Rust, one replica of 0.5 vCPU / 1 GiB since 2026-11-21, min = max = 1, port 8080, liveness `/healthz`, readiness `/readyz`, public ingress unless `allowedCidrs`) and the job `sanction-and-forgive-import` (daily 03:30 UTC, `import --source all`, 0.5 vCPU / 1 GiB, up to an hour), both from `ghcr.io/mykolad/sanction-and-forgive:<sha>` as identity `sanction-and-forgive-app` |
 | `sql/grant-identities.sql` | Database | The owner, once (or after re-creating the database) | Database users for the app and deploy identities: what Bicep can't do |
 | `admin-sign-in.ps1` | Tenant | The owner, once | The admin sign-in's Entra app registration (role `Lists.Admin`, assignment required, assigned to the owner); the app then signs administrators in itself |
 
@@ -98,8 +98,8 @@ az containerapp job execution list -g sanction-and-forgive-rg -n sanction-and-fo
 ```
 
 **Load tests** (Phase 5): deploy with the rate limit off, then deploy again without it. `app.bicepparam` also reads
-`APP_IMPLEMENTATION` (`dotnet`, `go` or `rust`; a port's image tag `<implementation>-<sha>` must exist), `APP_CPU`, `APP_MEMORY` and `APP_REPLICAS` (rust, 0.25,
-0.5Gi and 2 by default) for a run at another size:
+`APP_IMPLEMENTATION` (`dotnet`, `go` or `rust`; a port's image tag `<implementation>-<sha>` must exist), `APP_CPU`, `APP_MEMORY` and `APP_REPLICAS` (rust, 0.5,
+1Gi and 1 by default) for a run at another size:
 
 ```powershell
 $env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'

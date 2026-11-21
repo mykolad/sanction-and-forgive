@@ -141,7 +141,7 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
   `LastCheckedAt`, count, `ListIndex`), swapped whole. `ListLoader.RefreshAsync` reads `Sources` and rebuilds only the
   lists whose active import changed (one at a time); `ListRefreshService` runs it at startup in the background and
   every `Lists:RefreshMinutes` (15), and sooner whenever `ListLoader.ChangesSql` moved: every replica reads it every
-  `Lists:ChangeCheckSeconds` (2; owner's decision 2026-11-12, production runs two replicas), so an administrator's change
+  `Lists:ChangeCheckSeconds` (2; owner's decision 2026-11-12, when production ran two replicas; one since 2026-11-21), so an administrator's change
   on one replica, and a new version of a list, reach every replica within seconds. One swap per refresh, every source in it, so a list is never missing from the
   rows; the first swap makes the API ready. If SQL is down, the catalog keeps serving and lists become overdue.
 - **Fail closed:** `LoadedList.IsSearched`: it has an index; otherwise the screener gets none and the cell is
@@ -385,7 +385,7 @@ be public).
 - **Deploy** (`.github/workflows/deploy.yml`, after Build and Test on master): image + migration bundle, then in
   environment `production`: platform what-if and deploy, firewall open, migrations, firewall closed, app, smoke tests.
   `app.bicepparam` reads `IMAGE_TAG` and `RATE_LIMIT_PER_MINUTE` (120; 0 for a load test only), and
-  `APP_IMPLEMENTATION`, `APP_CPU`, `APP_MEMORY`, `APP_REPLICAS` (rust, 0.25, 0.5Gi, 2 by default: production since 2026-11-12, owner's decision). Run by hand, the
+  `APP_IMPLEMENTATION`, `APP_CPU`, `APP_MEMORY`, `APP_REPLICAS` (rust, 0.5, 1Gi, 1 by default: production since 2026-11-21, owner's decision, room for Ukraine's uploaded list; 0.25, 0.5Gi, 2 from 2026-11-12). Run by hand, the
   workflow's input `implementation` deploys `rust` (the default, and always after a push), `dotnet` or `go`: a port's image is the same
   package's tag `<implementation>-<sha>`, and `app.bicep` gives the import job the CLI's command for each.
 - **Alerts** (all to the subscription's Owner role through the action group): database storage above 80%, an import

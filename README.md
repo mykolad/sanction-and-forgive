@@ -16,7 +16,8 @@ Work in progress. Developer guide: [CLAUDE.md](CLAUDE.md). Infrastructure: [infr
 ## Performance
 
 The same application exists three times, in .NET (the reference), Go and Rust ([conformance](docs/conformance.md)
-checks they answer alike). Production runs the Rust one on two replicas of 0.25 vCPU / 0.5 GiB. Measured on Azure with
+checks they answer alike). Production runs the Rust one on one replica of 0.5 vCPU / 1 GiB (two of 0.25 vCPU / 0.5 GiB until 2026-11-21, the
+same price). Measured on Azure with
 six lists (about 37,000 listed parties), details in [docs/load-test.md](docs/load-test.md):
 
 | | Single screenings sustained (two 0.25 vCPU / one 0.5 vCPU) | A batch of 50,000 (two 0.25 vCPU / one 0.5 vCPU) |
