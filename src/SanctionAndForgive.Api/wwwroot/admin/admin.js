@@ -101,8 +101,17 @@ const UPLOAD_FILES = {
   "ua-nsdc": "Download its three subjects' exports (people, companies and vessels) and choose all three together.",
 };
 
-// Each upload row by its list's code (its button and status line), for followUploads.
+// Each upload row by its list's code (its button and status line), for followUploads; and each row's last message,
+// kept when the rows are made again (the held updates reloaded after an upload ends).
 const uploadRows = new Map();
+const uploadMessages = new Map();
+
+function setUploadStatus(code, text) {
+  if (text) uploadMessages.set(code, text);
+  else uploadMessages.delete(code);
+  const row = uploadRows.get(code);
+  if (row) row.status.textContent = text;
+}
 
 function uploadRow(list) {
   const status = el("p", { class: "review-status", "aria-live": "polite" });
@@ -110,6 +119,7 @@ function uploadRow(list) {
   const button = el("button", { type: "button", class: "primary", disabled: !me?.isAdmin }, "Upload");
   button.addEventListener("click", () => upload(list, input, button, status));
   uploadRows.set(list.code, { button, status });
+  status.textContent = uploadMessages.get(list.code) || "";
   const asOf = list.state === "NotImported" || !list.version ? "No upload confirmed yet." : `In use: ${list.recordCount.toLocaleString()} entries, uploaded ${utc(list.lastCheckedAt)}.`;
   return el("article", { class: "held-card" },
     el("h3", {}, list.name),
@@ -133,30 +143,34 @@ async function followUploads() {
   following = true;
   try {
     for (;;) {
-      let uploads = [];
+      // A check that fails says nothing about the uploads: nothing changes, and it's tried again shortly.
+      let uploads = null;
       try {
         const response = await fetch("/api/v1/admin/uploads", { headers: { Accept: "application/json" } });
         if (response.ok) uploads = (await response.json()).uploads || [];
       } catch {
-        // Asked again below.
+        // Tried again below.
+      }
+      if (uploads === null) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        continue;
       }
       const writing = uploads.find((u) => u.result === "Writing");
       for (const [code, row] of uploadRows) {
         row.button.disabled = !!writing || sending > 0;
         if (writing && writing.code === code) {
-          row.status.textContent = progressText(writing);
+          setUploadStatus(code, progressText(writing));
         } else if (writing && !row.status.textContent) {
-          row.status.textContent = OTHER_UPLOAD;
+          setUploadStatus(code, OTHER_UPLOAD);
         } else if (!writing && row.status.textContent === OTHER_UPLOAD) {
-          row.status.textContent = "";
+          setUploadStatus(code, "");
         }
       }
       for (const [id, code] of [...followed]) {
         const ended = uploads.find((u) => u.uploadId === id && u.result !== "Writing");
-        const row = uploadRows.get(code);
         if (!ended && uploads.some((u) => u.uploadId === id)) continue;
         followed.delete(id);
-        if (row) row.status.textContent = endedText(ended);
+        setUploadStatus(code, endedText(ended));
         loadHeld();
         setTimeout(loadHeld, 5000);
       }
