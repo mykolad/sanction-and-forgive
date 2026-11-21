@@ -22,7 +22,7 @@ param implementation string = 'dotnet'
 param minReplicas int = 1
 param maxReplicas int = 1
 
-@description('vCPU per replica, as a string (Bicep has no decimals). app.bicepparam passes 0.25 with 0.5Gi since 2026-11-12 (owner\'s decision: Rust, two replicas, without the sign-in sidecar; docs/load-test.md).')
+@description('vCPU per replica, as a string (Bicep has no decimals). app.bicepparam passes 0.5 with 1Gi, one replica, since 2026-11-21 (owner\'s decision: room for Ukraine\'s uploaded list; 0.25 with 0.5Gi on two replicas from 2026-11-12; docs/load-test.md).')
 param cpu string = '0.5'
 param memory string = '1Gi'
 
