@@ -563,6 +563,8 @@ mod tests {
             ("张伟 Smith", "Zhangwei Ivanov", "Zhangwei Ivanov"),
             ("Zangweiming", "张伟明", "Zhangweiming"),
             ("Gao Bin", "高彬 倪", "Gaobin Ni"),
+            // Three words read as one find only a Chinese word's pinyin: an ordinary query never votes through them.
+            ("Zhangweiming Zhang Wei Ming Ouyang Na Na", "Zhangweiming Ouyangnana", "Zhangweiming Ouyangnana"),
             ("Zangwei Weizang", "张伟", "张伟"),
         ] {
             let mut subjects: Vec<ListedSubject> = (0..2100)
