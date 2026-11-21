@@ -89,9 +89,38 @@ const MAX_EXACT_TOKENS: usize = 12;
 /// At most this many eligible joins are chosen among (2^6 choices at most): a name has a few words.
 const MAX_JOINS: usize = 6;
 
-/// The joins a comparison could make, in a fixed order: (on the listed side, the pair's first word), the listed name's
-/// first. A pair is eligible when the other name has a word that reads exactly as the two (NameForm::joined).
-fn eligible_joins(query: &NameForm, listed: &NameForm) -> Vec<(bool, usize)> {
+/// A join a comparison could make: on the listed side or the query's, at which word, of how many (two, or three for a
+/// Chinese word's pinyin).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Join {
+    listed: bool,
+    at: usize,
+    words: usize,
+}
+
+/// The joins a comparison could make, in a fixed order: pairs (the listed name's first), then three words read as a
+/// Chinese word's pinyin (#93). A pair is eligible when the other name has a word that reads exactly as the two
+/// (NameForm::joined); three words in Latin script when the other has a Chinese word whose pinyin reads exactly so
+/// (NameForm::joined3: Zhang Wei Ming, 张伟明), never a word in another script or a Latin word.
+fn eligible_joins(query: &NameForm, listed: &NameForm) -> Vec<Join> {
+    let mut out: Vec<Join> = eligible_pairs(query, listed).into_iter().map(|(listed, at)| Join { listed, at, words: 2 }).collect();
+    let pinyin = |tokens: &[TokenRef], key: &str| {
+        !key.is_empty() && tokens.iter().any(|t| t.pinyin.as_ref().is_some_and(|p| p.iter().any(|r| r == key)))
+    };
+    out.extend(listed.joined3.iter().enumerate().filter(|(_, k)| pinyin(&query.core, k)).map(|(at, _)| Join {
+        listed: true,
+        at,
+        words: 3,
+    }));
+    out.extend(query.joined3.iter().enumerate().filter(|(_, k)| pinyin(&listed.core, k)).map(|(at, _)| Join {
+        listed: false,
+        at,
+        words: 3,
+    }));
+    out
+}
+
+fn eligible_pairs(query: &NameForm, listed: &NameForm) -> Vec<(bool, usize)> {
     // A word's own reading, or a Chinese word's pinyin (#93) where the two words are in Latin script: 张伟 reads as
     // Zhang Wei's two words read as one, never as two transliterated words'.
     let has = |tokens: &[TokenRef], key: &str, pair: &[TokenRef]| {
@@ -149,21 +178,23 @@ impl<'a> NameScorer<'a> {
             return None;
         }
         let eligible = eligible_joins(query, listed);
+        // The chosen join starting at a word of one side, if any: how many words, and the key they read as.
+        let mask = self.join_mask;
         let chosen = |listed_side: bool, index: usize| {
             eligible
                 .iter()
                 .take(MAX_JOINS)
                 .enumerate()
-                .any(|(bit, &(side, at))| side == listed_side && at == index && self.join_mask & (1 << bit) != 0)
+                .find(|(bit, join)| join.listed == listed_side && join.at == index && mask & (1 << bit) != 0)
+                .map(|(_, join)| join.words)
         };
-        let listed_join: Vec<bool> = (0..listed.joined.len()).map(|j| chosen(true, j)).collect();
-        let query_join: Vec<bool> = (0..query.joined.len()).map(|i| chosen(false, i)).collect();
+        let key = |form: &NameForm, at: usize, words: usize| if words == 3 { form.joined3[at].clone() } else { form.joined[at].clone() };
         let mut listed_core = Vec::with_capacity(listed.core.len());
         let mut j = 0;
         while j < listed.core.len() {
-            if listed_join.get(j) == Some(&true) {
-                listed_core.push(self.compound(&listed.joined[j]));
-                j += 2;
+            if let Some(words) = chosen(true, j) {
+                listed_core.push(self.compound(&key(listed, j, words)));
+                j += words;
             } else {
                 listed_core.push(listed.core[j].clone());
                 j += 1;
@@ -173,9 +204,9 @@ impl<'a> NameScorer<'a> {
         let mut i = 0;
         while i < query.core.len() {
             positions.push(i);
-            if query_join.get(i) == Some(&true) {
-                query_core.push(self.compound(&query.joined[i]));
-                i += 2;
+            if let Some(words) = chosen(false, i) {
+                query_core.push(self.compound(&key(query, i, words)));
+                i += words;
             } else {
                 query_core.push(query.core[i].clone());
                 i += 1;
@@ -219,11 +250,14 @@ impl<'a> NameScorer<'a> {
         if self.try_join {
             let eligible = eligible_joins(query, listed);
             let n = eligible.len().min(MAX_JOINS);
+            // Two joins on one side that share a word can't both be made.
             let overlaps = |mask: u64| {
                 (0..n).any(|a| {
                     mask & (1 << a) != 0
-                        && (0..n)
-                            .any(|b| b != a && mask & (1 << b) != 0 && eligible[a].0 == eligible[b].0 && eligible[a].1 + 1 == eligible[b].1)
+                        && (0..n).any(|b| {
+                            let (x, y) = (eligible[a], eligible[b]);
+                            b != a && mask & (1 << b) != 0 && x.listed == y.listed && x.at < y.at + y.words && y.at < x.at + x.words
+                        })
                 })
             };
             for joins in 1..=n as u32 {

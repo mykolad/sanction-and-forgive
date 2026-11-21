@@ -125,6 +125,9 @@ pub struct ListIndex {
     aliases_by_fold: HashMap<String, Box<[u32]>>,
     /// By the fold key of two adjacent words read as one (NameForm::joined).
     aliases_by_joined: HashMap<String, Box<[u32]>>,
+    /// By the fold key of three adjacent words in Latin script read as one (NameForm::joined3), for a Chinese word's
+    /// pinyin only (#93): an ordinary query never votes through them.
+    aliases_by_joined3: HashMap<String, Box<[u32]>>,
     /// Chinese words by their pinyin readings (#93), for a word or two in Latin script; kept apart from the vocabulary.
     aliases_by_pinyin: HashMap<String, Box<[u32]>>,
     name_vocabulary: FuzzyVocabulary,
@@ -254,6 +257,7 @@ impl ListIndex {
         let mut document_frequency: HashMap<String, usize> = HashMap::default();
         let mut by_fold = OrderedPostings::default();
         let mut by_joined = OrderedPostings::default();
+        let mut by_joined3 = OrderedPostings::default();
         let mut by_pinyin = OrderedPostings::default();
         for (a, alias) in aliases.iter().enumerate() {
             for token in distinct_tokens(alias.form.core.iter().cloned()) {
@@ -271,6 +275,9 @@ impl ListIndex {
             for k in alias.form.joined.iter().filter(|k| !k.is_empty()) {
                 by_joined.post(&fold_key(k), a);
             }
+            for k in alias.form.joined3.iter().filter(|k| !k.is_empty()) {
+                by_joined3.post(&fold_key(k), a);
+            }
         }
         let mut by_address = OrderedPostings::default();
         for (s, list) in addresses.iter().enumerate() {
@@ -286,6 +293,7 @@ impl ListIndex {
         let idf = document_frequency.into_iter().map(|(k, frequency)| (k, (alias_count / frequency.max(1) as f64).ln())).collect();
         let (fold_keys, aliases_by_fold) = by_fold.packed();
         let (_, aliases_by_joined) = by_joined.packed();
+        let (_, aliases_by_joined3) = by_joined3.packed();
         let (_, aliases_by_pinyin) = by_pinyin.packed();
         let (address_keys, subjects_by_address_key) = by_address.packed();
         let address_vocabulary: Vec<String> = address_keys.into_iter().filter(|k| !k.starts_with('#')).collect();
@@ -310,6 +318,7 @@ impl ListIndex {
             idf,
             aliases_by_fold,
             aliases_by_joined,
+            aliases_by_joined3,
             aliases_by_pinyin,
             name_vocabulary: FuzzyVocabulary::new(&fold_keys),
             subjects_by_address_key,
@@ -454,12 +463,44 @@ impl ListIndex {
             // A Chinese word's pinyin finds the aliases in Latin script that read exactly so, as one word or as two (found
             // by fold key, voted for only when exact: Zang Wei gets no vote from 张伟); a word in Latin script finds the
             // Chinese words that read as it (#93).
+            // Each alias once for the word, however many of its readings find it (written order, given name first, a
+            // surname's own reading): found as written if any reading finds it so, else through a join.
+            let (mut as_written, mut through_join): (Vec<u32>, Vec<u32>) = (Vec::new(), Vec::new());
             for reading in token.pinyin.iter().flatten() {
-                for (list, joined) in [(postings(by_fold, &fold_key(reading)), false), (postings(by_joined, &fold_key(reading)), true)] {
-                    let found: Vec<u32> = list.iter().copied().filter(|&alias| self.reads_exactly(alias, reading)).collect();
-                    vote(&found, 3, joined);
-                    exact.extend_from_slice(&found);
+                let key = fold_key(reading);
+                for (list, words) in
+                    [(postings(by_fold, &key), 1), (postings(by_joined, &key), 2), (postings(&self.aliases_by_joined3, &key), 3)]
+                {
+                    let joined = words > 1;
+                    let found = list.iter().copied().filter(|&alias| self.reads_exactly(alias, reading, words));
+                    if joined {
+                        through_join.extend(found)
+                    } else {
+                        as_written.extend(found)
+                    }
                 }
+            }
+            if !as_written.is_empty() || !through_join.is_empty() {
+                // In the order first found, each once.
+                let mut written: HashSet<u32> = HashSet::default();
+                as_written.retain(|alias| written.insert(*alias));
+                let (mut once, mut joined_too): (HashSet<u32>, Vec<u32>) = (HashSet::default(), Vec::new());
+                through_join.retain(|alias| {
+                    if !once.insert(*alias) {
+                        return false;
+                    }
+                    if written.contains(alias) {
+                        joined_too.push(*alias);
+                        return false;
+                    }
+                    true
+                });
+                vote(&as_written, 3, false);
+                vote(&through_join, 3, true);
+                // Found both ways: counted once as written, still joinable for the scorer.
+                vote(&joined_too, 0, true);
+                exact.extend_from_slice(&as_written);
+                exact.extend_from_slice(&through_join);
             }
             if is_latin_word(token) {
                 for spelling in latin_spellings(token) {
@@ -510,9 +551,18 @@ impl ListIndex {
                 joined.push(key);
             }
         }
-        // Two words in Latin script read as one find a Chinese word that reads so (#93): Zhang Wei, 张伟.
+        // Two words in Latin script read as one find a Chinese word that reads so (#93): Zhang Wei, 张伟; and three
+        // (NameForm::joined3, only ever Latin): Zhang Wei Ming, 张伟明.
         let mut read: Vec<&str> = Vec::new();
         for form in [query.entity, query.person] {
+            for k in form.joined3.iter().filter(|k| !k.is_empty()) {
+                if !read.contains(&k.as_str()) {
+                    let list = postings(&self.aliases_by_pinyin, k);
+                    vote(list, 3, true);
+                    exact.extend_from_slice(list);
+                    read.push(k);
+                }
+            }
             for (pair, k) in form.core.windows(2).zip(&form.joined) {
                 if !k.is_empty() && pair.iter().all(|t| is_latin_word(t)) && !read.contains(&k.as_str()) {
                     let list = postings(&self.aliases_by_pinyin, k);
@@ -545,12 +595,17 @@ impl ListIndex {
         (ids, joinable)
     }
 
-    /// Whether an alias reads exactly as a Chinese word's pinyin reading (#93): a word in Latin script spelled so, or
-    /// two adjacent ones read as one.
-    fn reads_exactly(&self, alias: u32, reading: &str) -> bool {
+    /// Whether an alias reads exactly as a Chinese word's pinyin reading (#93), as the postings that found it do: a word
+    /// in Latin script spelled so (words 1, found by fold key), two adjacent ones read as one (2) or three (3). Each
+    /// only by its own kind, so an alias found by a word alike only after folding never counts as exact through a
+    /// run of words elsewhere in it.
+    fn reads_exactly(&self, alias: u32, reading: &str, words: usize) -> bool {
         let form = &self.aliases[alias as usize].form;
-        form.core.iter().any(|t| latin_reads_as(t, reading))
-            || form.core.windows(2).zip(&form.joined).any(|(pair, k)| k == reading && pair.iter().all(|t| is_latin_word(t)))
+        match words {
+            1 => form.core.iter().any(|t| latin_reads_as(t, reading)),
+            2 => form.core.windows(2).zip(&form.joined).any(|(pair, k)| k == reading && pair.iter().all(|t| is_latin_word(t))),
+            _ => form.joined3.iter().any(|k| k == reading),
+        }
     }
 
     /// The subjects a name entry finds, best first (then by name): the best one, whatever its percentage, and every

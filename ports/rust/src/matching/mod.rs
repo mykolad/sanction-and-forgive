@@ -492,6 +492,31 @@ mod tests {
         assert_eq!(crate::matching::text::pinyin_readings("重庆々"), ["chongqingqing"]);
         let (outcome, percent) = screen("张 Wei", "Zhang Wei Ming", SubjectKind::Individual);
         assert_eq!(outcome, Some(Outcome::Review), "张 Wei / Zhang Wei Ming: {percent:?}");
+        // A Chinese name's pinyin written a syllable a word (#93): three words in Latin script read as one, either way
+        // round, a compound surname's too; the Chinese word stays whole, so its other readings and spacing still match.
+        for (query, listed) in [
+            ("张伟明", "Zhang Wei Ming"),
+            ("Zhang Wei Ming", "张伟明"),
+            ("张伟明", "Wei Ming ZHANG"),
+            ("Wei Ming Zhang", "张伟明"),
+            ("张伟明", "Weiming ZHANG"),
+            ("Zhangweiming", "张伟明"),
+            ("欧阳娜娜", "Ouyang Na Na"),
+            ("曾国藩", "Zeng Guo Fan"),
+            ("Weizhang", "张伟"),
+            ("Cengguofan", "曾国藩"),
+            ("张 伟明", "张伟明"),
+            ("张伟明", "张 伟明"),
+            ("高彬 倪", "Gaobin NI"),
+        ] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_eq!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
+        // Never three words in another script, nor a given name read the other way round.
+        for (query, listed) in [("李娜", "Лина"), ("Wang Nali", "王李娜"), ("Ли Вэй Мин", "李伟明")] {
+            let (outcome, percent) = screen(query, listed, SubjectKind::Individual);
+            assert_ne!(outcome, Some(Outcome::Match), "{query} / {listed}: {percent:?}");
+        }
         // Never two Chinese names that only sound alike, a transliteration, or a reading alike only after folding; a
         // place's name isn't read given name first, and one character is a short name on either side.
         for (query, listed, kind) in [
@@ -536,6 +561,19 @@ mod tests {
             ("Zangwei Weizang", "Zhang Wei", "张伟"),
             ("Zangwei", "张伟", "Zhangwei"),
             ("张伟 Smith", "Zhangwei Ivanov", "Zhangwei Ivanov"),
+            ("Zangweiming", "张伟明", "Zhangweiming"),
+            ("Gao Bin", "高彬 倪", "Gaobin Ni"),
+            // Three words read as one find only a Chinese word's pinyin: an ordinary query never votes through them.
+            ("Zhangweiming Zhang Wei Ming Ouyang Na Na", "Zhangweiming Ouyangnana", "Zhangweiming Ouyangnana"),
+            // Three words in Latin script find the Chinese name they read as past a crowd of partial Latin names, and
+            // the Chinese name finds the three words past names alike only after folding.
+            ("Zhang Wei Ming Smith", "张伟明", "Zhang Wei Ming"),
+            ("Zang Wei Ming", "Zhang Wei Ming", "张伟明"),
+            // A Chinese word votes once for an alias however many of its readings find it: both orders of the name in
+            // one alias don't outvote the exact one.
+            ("Zhang Wei Ming Wei Ming Zhang Smith", "Zhangweiming Smith", "张伟明 Smith"),
+            // An alias found by a word alike only after folding isn't exact through three words elsewhere in it.
+            ("Zangweiming Zhang Wei Ming", "Zhangweiming", "张伟明"),
             ("Zangwei Weizang", "张伟", "张伟"),
         ] {
             let mut subjects: Vec<ListedSubject> = (0..2100)

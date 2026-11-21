@@ -19,6 +19,10 @@ pub struct NameForm {
     /// can't be read as one: a number, a single letter, a word with no Latin reading, or two that read as a legal form,
     /// a generic word or a stop word (L TD isn't a word).
     pub joined: Vec<String>,
+    /// For each three adjacent core words in Latin script, the three read as one (their first readings run together),
+    /// or empty: a Chinese name's pinyin written a syllable a word (Zhang Wei Ming for 张伟明, #93). Joined only where
+    /// the other name has a Chinese word that reads exactly so (scorer::eligible_joins).
+    pub joined3: Vec<String>,
 }
 
 impl NameForm {
@@ -64,6 +68,17 @@ impl NameParser<'_> {
 
     fn with_joined(&self, mut form: NameForm) -> NameForm {
         form.joined = form.core.windows(2).map(|pair| self.joined(&pair[0], &pair[1])).collect();
+        form.joined3 = form
+            .core
+            .windows(3)
+            .map(|three| {
+                if three.iter().all(|t| super::text::is_latin_word(t) && !t.forms.is_empty()) {
+                    three.iter().map(|t| t.forms[0].as_str()).collect()
+                } else {
+                    String::new()
+                }
+            })
+            .collect();
         form
     }
 
