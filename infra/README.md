@@ -99,13 +99,14 @@ az containerapp job execution list -g sanction-and-forgive-rg -n sanction-and-fo
 
 **Load tests** (Phase 5): deploy with the rate limit off, then deploy again without it. `app.bicepparam` also reads
 `APP_IMPLEMENTATION` (`dotnet`, `go` or `rust`; a port's image tag `<implementation>-<sha>` must exist), `APP_CPU`, `APP_MEMORY` and `APP_REPLICAS` (rust, 0.5,
-1Gi and 1 by default) for a run at another size:
+1Gi and 1 by default) for a run at another size, and `SCREENING_MAX_CONCURRENT` (single screenings a replica runs at
+once, 8 by default; the app's own default is 4):
 
 ```powershell
 $env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'
 # $env:APP_IMPLEMENTATION = 'go'; $env:APP_CPU = '0.5'; $env:APP_MEMORY = '1Gi'; $env:APP_REPLICAS = '1'
 az deployment group create -g sanction-and-forgive-rg -n app --parameters infra/app.bicepparam
-Remove-Item Env:RATE_LIMIT_PER_MINUTE, Env:APP_IMPLEMENTATION, Env:APP_CPU, Env:APP_MEMORY, Env:APP_REPLICAS -ErrorAction Ignore   # then the same create again
+Remove-Item Env:RATE_LIMIT_PER_MINUTE, Env:APP_IMPLEMENTATION, Env:APP_CPU, Env:APP_MEMORY, Env:APP_REPLICAS, Env:SCREENING_MAX_CONCURRENT -ErrorAction Ignore   # then the same create again
 ```
 
 **What-if on a deployed environment** lists a few changes that aren't changes, a what-if limitation: values read from

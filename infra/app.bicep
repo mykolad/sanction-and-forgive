@@ -29,6 +29,9 @@ param memory string = '1Gi'
 @description('Screenings per minute per client IP; 0 turns the limit off (load tests only).')
 param rateLimitPerMinute int = 120
 
+@description('Single screenings a replica runs at once (Screening:MaxConcurrent; the app\'s own default is 4). 8 since 2026-11-22 (owner\'s decision: one 0.5 vCPU replica with every list sustained 64 a second with 8, 48 with 4; docs/load-test.md).')
+param screeningMaxConcurrent int = 8
+
 @description('Client IP ranges (CIDR) allowed through the ingress; empty means open. The real ones stay out of the repo.')
 param allowedCidrs array = []
 
@@ -120,6 +123,10 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'RateLimiting__PerMinute'
               value: string(rateLimitPerMinute)
+            }
+            {
+              name: 'Screening__MaxConcurrent'
+              value: string(screeningMaxConcurrent)
             }
             {
               // The admin sign-in, in the app (owner's decision 2026-11-11, docs/api.md): the app registration and

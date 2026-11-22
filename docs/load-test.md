@@ -74,6 +74,18 @@ candidates its words find, not every name). The run ended where requests began t
 (`Screening:MaxConcurrent` 4) while the replica's CPU showed 0.31 of its 0.5 in its busiest minute: the place limit,
 not the CPU, may be what ends it now; a run with more places would tell. Memory leaves about 350 MiB of the 1 GiB.
 
+**8 at once** (2026-11-22, 15:35-16:01 UTC): the same run with `Screening__MaxConcurrent=8` set on the revision
+(0000147, `rust-d2934f4`, the same code), everything else alike:
+
+| Single screenings at once | Sustained | p95 there (p50) | Next step | CPU (highest minute) | Memory, highest |
+|---|---|---|---|---|---|
+| 4 (the app's default) | **48**/s | 38 ms (19 ms) | 64/s: p95 2.01 s, 0.24% busy | 0.31 | 678 MiB |
+| 8 | **64**/s | 82 ms (20 ms) | 80/s: p95 2.2 s, 6.6% busy | 0.40 | 698 MiB |
+
+The place limit was what ended the first run: with 8 a third more is sustained, the CPU near its 0.5 at the next
+step, and memory barely moves. Production runs 8 since (owner's decision, `app.bicep`'s `screeningMaxConcurrent`;
+the app's own default stays 4).
+
 ### Rust: one copy of each word for every list (2026-11-21)
 
 Each list's index kept its own copy of every word with its readings (a Cyrillic word: one Latin reading per
