@@ -324,6 +324,42 @@
       "held": null,
       "history": "*",
       "historyCount": "*"
+    },
+    {
+      "code": "pl-mswia",
+      "name": "Poland national sanctions list (MSWiA)",
+      "state": "NotImported",
+      "status": "Upload",
+      "reason": "Uploaded by an administrator: the ministry's table (XLSX) is downloaded in a browser from the list's page and uploaded on the admin page. People and entities under Poland's own measures (an asset freeze, or for some people an entry ban only, which a hit says).",
+      "recordCount": null,
+      "version": null,
+      "lastCheckedAt": null,
+      "updatedAt": null,
+      "maxAgeHours": 8760,
+      "homepage": "https://www.gov.pl/web/mswia/lista-osob-i-podmiotow-objetych-sankcjami",
+      "fileUrl": null,
+      "termsUrl": "https://www.gov.pl/web/gov/warunki-korzystania",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
+    },
+    {
+      "code": "lv-fid",
+      "name": "Latvia: assets frozen in Latvia (FIU)",
+      "state": "NotImported",
+      "status": "Active",
+      "reason": "Not imported yet.",
+      "recordCount": null,
+      "version": null,
+      "lastCheckedAt": null,
+      "updatedAt": null,
+      "maxAgeHours": 72,
+      "homepage": "https://sankcijas.fid.gov.lv/lv/iesaldetie-aktivi/sankciju-subjekti",
+      "fileUrl": null,
+      "termsUrl": "https://data.gov.lv/dati/dataset/sankciju-subjektu-lidzekli-un-saimnieciskie-resursi-kas-iesaldeti-latvija",
+      "held": null,
+      "history": "*",
+      "historyCount": "*"
     }
   ]
 }

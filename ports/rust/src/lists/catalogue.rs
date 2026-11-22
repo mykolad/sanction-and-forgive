@@ -103,7 +103,7 @@ const fn uploaded(
 }
 
 /// The catalogue, in the reference's order.
-pub static SOURCES: [ListSource; 17] = [
+pub static SOURCES: [ListSource; 19] = [
     source(
         "eu",
         "EU consolidated financial sanctions",
@@ -251,6 +251,24 @@ pub static SOURCES: [ListSource; 17] = [
         "",
     ),
     source("ua-sfms", "Ukraine SFMS terrorism list", "https://fiu.gov.ua/assets/userfiles/Terror/BlackListFull.xml", FeedStatus::Active, "https://fiu.gov.ua/", "", ""),
+    // Rust only (owner's decision, 2026-11-22): Poland's national list, uploaded; Latvia's frozen assets, imported daily
+    // from the open data portal (CC0).
+    uploaded(
+        "pl-mswia",
+        "Poland national sanctions list (MSWiA)",
+        "https://www.gov.pl/web/mswia/lista-osob-i-podmiotow-objetych-sankcjami",
+        "https://www.gov.pl/web/gov/warunki-korzystania",
+        "Uploaded by an administrator: the ministry's table (XLSX) is downloaded in a browser from the list's page and uploaded on the admin page. People and entities under Poland's own measures (an asset freeze, or for some people an entry ban only, which a hit says).",
+    ),
+    source(
+        "lv-fid",
+        "Latvia: assets frozen in Latvia (FIU)",
+        "https://data.gov.lv/dati/dataset/de595e8e-218f-4f43-8722-c6b9c66e94b1/resource/00f557d4-3096-4d8f-b0bb-c52f90ad50fb/download/sankciju_subjekti_tabula.xlsx",
+        FeedStatus::Active,
+        "https://sankcijas.fid.gov.lv/lv/iesaldetie-aktivi/sankciju-subjekti",
+        "https://data.gov.lv/dati/dataset/sankciju-subjektu-lidzekli-un-saimnieciskie-resursi-kas-iesaldeti-latvija",
+        "",
+    ),
 ];
 
 /// The feeds that list ships, whose parsers keep them (#69): one of these whose import has no ship was imported

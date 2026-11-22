@@ -59,9 +59,10 @@ tools/lists.ps1           The script the owner runs to manage lists
 - `ListSources.All` is the catalogue: code, name, URL, `MaxAgeHours` (72 for the daily feeds), `FeedStatus`, parser.
   Only `Active` feeds are imported automatically. A feed published under a dated name (jp-mof) has the publisher's
   page as its URL and a `LinkPattern`: `FeedDownloader.DownloadAsync(ListSource, …)` takes the newest matching link. `TermsUnclear` (un, ch-seco, ca-sema) wait for the owner's
-  decision. `Upload` (au-dfat, ua-nsdc; Rust only, owner's decision 2026-11-21) is a list whose site refuses
+  decision. `Upload` (au-dfat, ua-nsdc, pl-mswia; Rust only, owner's decisions 2026-11-21 and -22) is a list whose site refuses
   automated downloads: an administrator uploads its file on the admin page, every upload held for review with its
-  changes shown (`api/uploads.rs`), Overdue a year after the last upload, never screened before a first one is confirmed. The EU URL's `{token}` comes from
+  changes shown (`api/uploads.rs`), Overdue a year after the last upload, never screened before a first one is confirmed. `lv-fid` (Latvia's
+  frozen assets, the open data portal, CC0) is `Active` in the Rust catalogue only (`lists/national.rs`, with Poland's parser). The EU URL's `{token}` comes from
   `LISTS_EU_TOKEN` (the public token by default).
 - One `IListParser` per format reduces a file to `ParsedSubject`s: external id, `SubjectType` (`Unknown` when the
   source doesn't say: US export records), primary name, every name with its script and weak flag, addresses as one

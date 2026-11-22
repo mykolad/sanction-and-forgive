@@ -26,6 +26,8 @@ below), never aircraft.
 | `jp-mof` | Japan asset-freeze list (Ministry of Finance), from 2026-11-16 | CSV, 3.2 MB | 2,897 (2,028 / 869 / 0) | 15,034 (345, 0, 6,648) | 1,707 | Active |
 | `us-uflpa` | US UFLPA Entity List (DHS), from 2026-11-16 | HTML page, 138 KB | 192 (0 / 192 / 0) | 325 (0, 0, 0) | 0 | Active |
 | `be-terrorism` | Belgium national terrorism list (FPS Finance), from 2026-11-17 | XLSX, 46 KB | 137 (137 / 0 / 0) | 137 (0, 0, 0) | 0 | Active |
+| `pl-mswia` | Poland national sanctions list (MSWiA), from 2026-11-22 (Rust) | XLSX, 200 KB, uploaded | 555 (435 / 120 / 0) | 596 (0, 20, 1) | 78 | **Upload** |
+| `lv-fid` | Latvia: assets frozen in Latvia (FIU), from 2026-11-22 (Rust) | XLSX, 33 KB, open data portal | 187 (21 / 166 / 0) | 187 (0, 0, 0) | 166 | Active |
 | **All fetched** | | 246 MB | **50,107** | **147,997** (7,062 weak, 20,175 Cyrillic) | 44,519 | |
 
 The handover estimated 60-90k subjects. Without Australia and NSDC there are about 50k. NSDC is probably the
@@ -285,11 +287,41 @@ the same spelling matches in every script; Arabic vowel marks, tatweel and lette
 Chinese or Korean name, a space inside one, traditional characters for simplified ones, and a Latin spelling of a name
 listed only in another script don't.
 
+## Poland and Latvia (2026-11-22, Rust)
+
+Owner's decision, 2026-11-22: Poland's list uploaded, Latvia's imported automatically.
+
+- **Poland (`pl-mswia`, uploaded):** the Ministry of the Interior and Administration's list of people and entities
+  under Poland's own sanctions (the Act of 13 April 2022), a table (XLSX) on
+  [the list's page](https://www.gov.pl/web/mswia/lista-osob-i-podmiotow-objetych-sankcjami), downloaded in a browser
+  (gov.pl refused this machine's connections on 2026-11-16) and uploaded. Two sheets, `osoby` (people) and
+  `podmioty` (entities), and notes under each table (`[1] W rozumieniu…`, left out): the name, other names in
+  brackets (other spellings, Cyrillic or Arabic names, a company's current or former name: `obecnie:`,
+  `poprzednio:`, `w zapisie także „…” lub „…”`), identifying data (`urodzony 5 października 1973 r.`, PESEL, KRS, NIP,
+  REGON, the registered office after `siedziba:`), the grounds, the measures, the date listed (an Excel date) and the
+  date removed (a removed party is left out). On 2026-11-03: 437 people (2 removed) and 132 entities (12 removed);
+  31 of the people listed are under an entry ban only (`wpis do wykazu cudzoziemców, których pobyt … jest
+  niepożądany`), not an asset freeze: kept (owner's decision), the programme saying so. No identifier column, so a
+  party's id is its kind and name.
+- **Latvia (`lv-fid`, daily):** the Financial Intelligence Unit's table of parties whose assets are frozen in Latvia
+  (`sankciju_subjekti_tabula.xlsx`), on the [open data portal](https://data.gov.lv/dati/dataset/sankciju-subjektu-lidzekli-un-saimnieciskie-resursi-kas-iesaldeti-latvija)
+  under CC0 1.0 at a stable resource address (the same table as on
+  [the FIU's page](https://sankcijas.fid.gov.lv/lv/iesaldetie-aktivi/sankciju-subjekti); an honest client gets it, read
+  2026-11-22). Mostly companies owned or controlled by EU-listed people, so an ownership and control list (#79): a
+  row per frozen party and listed person, numbered columns (1) the party, (2) its date of birth or registration
+  number, (3) nationality or country of registration (in Latvian, read to ISO codes), (4) what's frozen, (5) why
+  (`kontrole` control, `īpašumtiesības` ownership, `iekļauta sankciju sarakstā` listed itself), (6) the listed
+  person, (7) since when, (8) the EU regulation (269/2014, 208/2014, 765/2006), (10) when the FIU first published it.
+  A party's rows are one party (its registration number, or a person's name and date of birth, is its id); a hit's
+  remarks say why and for whom ("Controlled by a listed person: Petr Olegovich AVEN (listed from 28.02.2022)"). On
+  2026-11-20: 188 rows, 187 parties (21 people, 166 companies; Russia 43, Cyprus 33, Latvia 30, BVI 20).
+
 ## Feeds looked at and not imported (#89, 2026-11-17)
 
 - **Latvia (FIU, `sankcijas.fid.gov.lv`):** the national list downloads as XML or ZIP from the FIU's search page through
-  a form (a POST with the page's token to `/lejupieladet-sarakstu/lv`), not from a link. Not catalogued: the owner
-  decides whether to fetch it that way or to add it as a manual source from a downloaded file.
+  a form (a POST with the page's token to `/lejupieladet-sarakstu/lv`), not from a link. Not catalogued. The FIU's
+  other table, of assets frozen in Latvia, is on the open data portal and imported as `lv-fid` (below, "Poland and
+  Latvia").
 - **Lithuania (FNTT):** the list of entities treated as owned or controlled by sanctioned persons answers an honest
   client with 403. `NeedsAccess` if catalogued.
 - **Canada's listed terrorist entities (Public Safety Canada):** an Atom feed, `https://www.publicsafety.gc.ca/cnt/_xml/lstd-ntts-eng.xml`,
@@ -320,6 +352,8 @@ resell the lists.
 | New Zealand | Yes: MFAT's site content is Crown copyright, licensed under CC BY 4.0 (read 2026-11-16). | Credit the Ministry. The website's footer: "New Zealand: Russia Sanctions Register, Ministry of Foreign Affairs and Trade, licensed under CC BY 4.0." | [MFAT copyright](https://www.mfat.govt.nz/en/copyright) |
 | Japan | Yes: the Ministry of Finance's content is under the Public Data License 1.0 (PDL1.0) unless marked otherwise (its copyright page, read 2026-11-16). | Name the source; say if it was edited. The website's footer: "Japan: 資産凍結等対象者一覧 (list of parties subject to asset freezes), Ministry of Finance (財務省), used under the Public Data License 1.0; names and addresses are read for matching, not changed." | [MOF copyright and links](https://www.mof.go.jp/about_mof/notice/index.html), [PDL 1.0](https://www.digital.go.jp/resources/open_data/public_data_license_v1.0) |
 | US UFLPA | Yes: a work of the US federal government, not subject to copyright in the US (17 U.S.C. 105). | None required. | [USA.gov: government works](https://www.usa.gov/government-copyright) |
+| Poland | Probably yes: the gov.pl portal's footer puts its text content under CC BY-SA 4.0 (read 2026-11-22); the list's page says nothing else. | Name the source and the licence. The website's footer: "Poland: list of persons and entities under sanctions, Ministry of the Interior and Administration (MSWiA), licensed under CC BY-SA 4.0; names and addresses are read for matching, not changed." | [gov.pl terms of use](https://www.gov.pl/web/gov/warunki-korzystania), [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/) |
+| Latvia (frozen assets) | Yes: CC0 1.0 on the open data portal ("bez atkalizmantošanas ierobežojumiem", without reuse restrictions; read 2026-11-22). | None. | [data.gov.lv dataset](https://data.gov.lv/dati/dataset/sankciju-subjektu-lidzekli-un-saimnieciskie-resursi-kas-iesaldeti-latvija) |
 | Belgium | Yes: the federal government's information is "free of rights and may be used for private, association, scientific and commercial purposes" (CC0), read 2026-11-17. Multimedia content in downloadable documents (photos, brochures) needs approval; the list is data. | None required; naming the source and its date is recommended. | [FPS Finance terms of use](https://fin.belgium.be/en/terms-use) |
 
 The UN's listings are also on the EU and UK lists, which implement them. Leaving out the UN row loses its own as-of

@@ -30,6 +30,8 @@ pub fn parser_for(code: &str) -> Option<Parser> {
         "be-terrorism" => super::spreadsheets::parse_belgium,
         "au-dfat" => super::spreadsheets::parse_australia,
         "ua-nsdc" => super::nsdc::parse_nsdc,
+        "pl-mswia" => super::national::parse_poland,
+        "lv-fid" => super::national::parse_latvia,
         "jp-mof" => super::japan::parse_japan,
         "us-uflpa" => super::uflpa::parse_uflpa,
         _ => return None,
