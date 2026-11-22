@@ -56,6 +56,22 @@ records a second. The rate limit can stay on (a stream is one request). A stream
 
 ## Results
 
+### Every list, one 0.5 vCPU / 1 GiB replica (2026-11-22)
+
+Production as it is since #132 and #137: Rust, one replica of 0.5 vCPU / 1 GiB, and 16 lists searched (the 12 of
+2026-11-21, Australia, Ukraine and Poland uploaded, and Latvia's frozen assets), about 87,000 parties. The usual k6
+steps on a fresh replica (revision 0000143, `rust-1e11f99`), rate limit off, the same 2,000 inputs; 14:24-14:49 UTC.
+
+| | Sustained | p95 there (p50) | Next step | CPU (highest minute) | Memory: idle | under load |
+|---|---|---|---|---|---|---|
+| 16 lists, 1 x 0.5 vCPU / 1 GiB | **48**/s | 38 ms (19 ms) | 64/s: p95 2.01 s, 0.24% busy | 0.31 | 652 MiB | 617-678 MiB |
+
+Ukraine's list alone is about as large as the other 15 together in names, so a screening does about twice the work
+of 2026-11-21's (64-80 a second on two 0.25 vCPU replicas with 12 lists) and of 2026-11-12's (96 with six lists).
+The run ended where requests began to wait their 2 s for a place (`Screening:MaxConcurrent` 4) while the replica's
+CPU showed 0.31 of its 0.5 in its busiest minute: the place limit, not the CPU, may be what ends it now; a run with
+more places would tell. Memory leaves about 350 MiB of the 1 GiB.
+
 ### Rust: one copy of each word for every list (2026-11-21)
 
 Each list's index kept its own copy of every word with its readings (a Cyrillic word: one Latin reading per
