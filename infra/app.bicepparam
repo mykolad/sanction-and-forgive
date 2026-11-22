@@ -22,5 +22,9 @@ param maxReplicas = int(readEnvironmentVariable('APP_REPLICAS', '1'))
 // A load test deploys with RATE_LIMIT_PER_MINUTE=0, then deploys again without it (spec section 7).
 param rateLimitPerMinute = int(readEnvironmentVariable('RATE_LIMIT_PER_MINUTE', '120'))
 
+// Single screenings a replica runs at once: 8 (owner's decision, 2026-11-22, docs/load-test.md); a load test may set
+// SCREENING_MAX_CONCURRENT for its run, then deploys again without it.
+param screeningMaxConcurrent = int(readEnvironmentVariable('SCREENING_MAX_CONCURRENT', '8'))
+
 // The admin sign-in's app registration (repository variable ADMIN_CLIENT_ID, from infra/admin-sign-in.ps1); unset: off.
 param adminClientId = readEnvironmentVariable('ADMIN_CLIENT_ID', '')

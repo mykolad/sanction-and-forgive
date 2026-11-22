@@ -99,7 +99,8 @@ az containerapp job execution list -g sanction-and-forgive-rg -n sanction-and-fo
 
 **Load tests** (Phase 5): deploy with the rate limit off, then deploy again without it. `app.bicepparam` also reads
 `APP_IMPLEMENTATION` (`dotnet`, `go` or `rust`; a port's image tag `<implementation>-<sha>` must exist), `APP_CPU`, `APP_MEMORY` and `APP_REPLICAS` (rust, 0.5,
-1Gi and 1 by default) for a run at another size:
+1Gi and 1 by default) for a run at another size, and `SCREENING_MAX_CONCURRENT` (single screenings a replica runs at
+once, 8 by default; the app's own default is 4):
 
 ```powershell
 $env:IMAGE_TAG = '<the running sha>'; $env:RATE_LIMIT_PER_MINUTE = '0'

@@ -195,7 +195,7 @@ Spec section 7. **A screening never touches the database** (`ApiTests` counts co
 - **Rate limit:** per client IP on screenings, `RateLimiting:PerMinute` (120, 0 = off). The IP is the
   `X-Forwarded-For` entry the ingress appended (forward limit 1), so clients can't choose their partition.
 - **Busy** (`Screening/ScreeningGate.cs`, owner's decisions 2026-11-11 and -12): single screenings at once
-  (`Screening:MaxConcurrent`, 4), waiting for a place at most `Screening:MaxWaitSeconds` (2), and at most
+  (`Screening:MaxConcurrent`, 4; production 8 since 2026-11-22, owner's decision, from `app.bicep`), waiting for a place at most `Screening:MaxWaitSeconds` (2), and at most
   `Screening:MaxWaiting` (256) waiting at all; one that would wait longer, or one more, gets 503 `{"state":"busy"}`
   with `Retry-After: 1`, and the website says so. The time is the limit in practice (a count of 32 refused during
   short pauses, docs/load-test.md). Streams aren't counted (one at a time
