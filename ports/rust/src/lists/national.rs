@@ -24,8 +24,7 @@ fn column(header: &[String], name: &str) -> Option<usize> {
 pub fn parse_poland(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, ParseError> {
     let mut data = Vec::new();
     input.read_to_end(&mut data)?;
-    let mut out = Vec::new();
-    let mut ids: Vec<String> = Vec::new();
+    let mut out: Vec<ParsedSubject> = Vec::new();
     for (sheet, kind, name_header) in
         [("osoby", SubjectType::Individual, "Nazwisko i imię"), ("podmioty", SubjectType::Entity, "Nazwa podmiotu")]
     {
@@ -64,11 +63,8 @@ pub fn parse_poland(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
                 continue;
             }
             let (primary, others) = polish_names(&full_name);
-            let mut id = format!("{}:{}", if kind == SubjectType::Individual { "P" } else { "E" }, primary.to_uppercase());
-            if ids.contains(&id) {
-                id = format!("{id} ({})", listed_on.format("%Y-%m-%d"));
-            }
-            ids.push(id.clone());
+            // Its kind and name; one shared with another party gets its identifying data (below).
+            let id = format!("{}:{}", if kind == SubjectType::Individual { "P" } else { "E" }, primary.to_uppercase());
             let mut b = Builder::new(&id, kind);
             b.source_url = Some(POLAND_PAGE.to_string());
             b.listed_on = Some(listed_on);
@@ -92,6 +88,27 @@ pub fn parse_poland(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
             b.remarks = cell(grounds);
             out.extend(b.build());
         }
+    }
+    // A name several parties share: each one's id gets what tells it apart, whatever the rows' order (its first
+    // identifier, else its date of birth, else the date it was listed); parties still alike are a format error, never
+    // one party.
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for party in &out {
+        *counts.entry(party.external_id.clone()).or_default() += 1;
+    }
+    for party in out.iter_mut().filter(|p| counts[&p.external_id] > 1) {
+        let apart = party
+            .identifiers
+            .first()
+            .map(|i| format!("{} {}", i.kind, i.value))
+            .or_else(|| party.birth_dates.first().cloned())
+            .or_else(|| party.listed_on.map(|d| d.format("%Y-%m-%d").to_string()))
+            .unwrap_or_default();
+        party.external_id = format!("{} ({apart})", party.external_id);
+    }
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    if let Some(alike) = out.iter().find(|p| !seen.insert(p.external_id.as_str())) {
+        return Err(format_error(format!("Two parties of Poland's list share a name and their identifying data: {}.", alike.primary_name)));
     }
     Ok(out)
 }
@@ -352,9 +369,9 @@ pub fn parse_latvia(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
                 b.add_address(Some(country), latvian_country_code(country));
             }
         }
-        b.programmes = Some(join("; ", &p.acts.iter().cloned().map(Some).collect::<Vec<_>>()).unwrap_or_default());
-        let frozen = join("; ", &p.assets.iter().cloned().map(Some).collect::<Vec<_>>()).map(|a| format!("Frozen in Latvia: {a}"));
-        b.remarks = join(". ", &[Some(p.reasons.join("; ")), frozen]);
+        // Why and for whom, then the regulation: the programme is what a hit and the list's browsing show.
+        b.programmes = join("; ", &p.reasons.iter().chain(&p.acts).cloned().map(Some).collect::<Vec<_>>());
+        b.remarks = join("; ", &p.assets.iter().cloned().map(Some).collect::<Vec<_>>()).map(|a| format!("Frozen in Latvia: {a}"));
         b.listed_on = p.first_published;
         out.extend(b.build());
     }
@@ -573,6 +590,38 @@ mod tests {
         let ids: Vec<(&str, &str)> = entity.identifiers.iter().map(|i| (i.kind.as_str(), i.value.as_str())).collect();
         assert_eq!(ids, [("KRS", "0000312056"), ("NIP", "5222894064")]);
 
+        // Parties sharing a name are told apart by their identifying data, whatever their order; parties alike in
+        // every way are a format error, never one party.
+        let header =
+            vec!["Nazwisko i imię", "Dane identyfikacyjne", "Uzasadnienie", "Zastosowane środki", "Data umieszczenia", "Data wykreślenia"];
+        let namesakes = |second_born: &'static str| {
+            workbook(&[
+                (
+                    "osoby",
+                    vec![
+                        header.clone(),
+                        vec!["IMIENNIK Jan", "urodzony 1 stycznia 1970 r.", "", "a. zamrożenie", "44677", ""],
+                        vec!["IMIENNIK Jan", second_born, "", "a. zamrożenie", "44677", ""],
+                    ],
+                ),
+                (
+                    "podmioty",
+                    vec![vec![
+                        "Nazwa podmiotu",
+                        "Dane identyfikacyjne",
+                        "Uzasadnienie",
+                        "Zastosowane środki",
+                        "Data umieszczenia",
+                        "Data wykreślenia",
+                    ]],
+                ),
+            ])
+        };
+        let ids: Vec<String> =
+            parse_poland(&mut namesakes("urodzony 2 lutego 1980 r.").as_slice()).unwrap().into_iter().map(|p| p.external_id).collect();
+        assert_eq!(ids, ["P:IMIENNIK JAN (1970-01-01)", "P:IMIENNIK JAN (1980-02-02)"]);
+        assert!(parse_poland(&mut namesakes("urodzony 1 stycznia 1970 r.").as_slice()).is_err());
+
         // A party listed without a date, and a file without the sheets, are format errors.
         let undated = workbook(&[
             (
@@ -657,10 +706,11 @@ mod tests {
         assert_eq!((company.kind, company.external_id.as_str()), (SubjectType::Entity, "50003698011"));
         assert_eq!((company.identifiers[0].kind.as_str(), company.identifiers[0].value.as_str()), ("Registration number", "50003698011"));
         assert_eq!((company.addresses[0].raw.as_str(), company.addresses[0].country_code.as_deref()), ("Latvija", Some("LV")));
-        let remarks = company.remarks.as_deref().unwrap();
-        assert!(remarks.contains("Owned by a listed person: Ivan FIKTIVNY (listed from 25.02.2022)"), "{remarks}");
-        assert!(remarks.contains("Controlled by a listed person: Petr FIKTIVNY"), "{remarks}");
-        assert!(company.programmes.as_deref().unwrap().contains("208/2014"));
+        // Why and for whom it's frozen, where a hit shows it: the programme.
+        let programme = company.programmes.as_deref().unwrap();
+        assert!(programme.starts_with("Owned by a listed person: Ivan FIKTIVNY (listed from 25.02.2022)"), "{programme}");
+        assert!(programme.contains("Controlled by a listed person: Petr FIKTIVNY") && programme.contains("208/2014"), "{programme}");
+        assert_eq!(company.remarks.as_deref(), Some("Frozen in Latvia: Līdzekļi; kapitāldaļas; Līdzekļi"));
         assert_eq!(company.listed_on, chrono::NaiveDate::from_ymd_opt(2024, 4, 17));
         let person = &parties[1];
         assert_eq!((person.kind, person.birth_dates.as_slice()), (SubjectType::Individual, ["1955-03-16".to_string()].as_slice()));

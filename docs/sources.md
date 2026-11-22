@@ -302,7 +302,8 @@ Owner's decision, 2026-11-22: Poland's list uploaded, Latvia's imported automati
   date removed (a removed party is left out). On 2026-11-03: 437 people (2 removed) and 132 entities (12 removed);
   31 of the people listed are under an entry ban only (`wpis do wykazu cudzoziemców, których pobyt … jest
   niepożądany`), not an asset freeze: kept (owner's decision), the programme saying so. No identifier column, so a
-  party's id is its kind and name.
+  party's id is its kind and name; a name several parties share adds each one's first identifier, else its date of
+  birth, else its listing date (parties alike in every way are a format error, never one party).
 - **Latvia (`lv-fid`, daily):** the Financial Intelligence Unit's table of parties whose assets are frozen in Latvia
   (`sankciju_subjekti_tabula.xlsx`), on the [open data portal](https://data.gov.lv/dati/dataset/sankciju-subjektu-lidzekli-un-saimnieciskie-resursi-kas-iesaldeti-latvija)
   under CC0 1.0 at a stable resource address (the same table as on
@@ -312,8 +313,8 @@ Owner's decision, 2026-11-22: Poland's list uploaded, Latvia's imported automati
   number, (3) nationality or country of registration (in Latvian, read to ISO codes), (4) what's frozen, (5) why
   (`kontrole` control, `īpašumtiesības` ownership, `iekļauta sankciju sarakstā` listed itself), (6) the listed
   person, (7) since when, (8) the EU regulation (269/2014, 208/2014, 765/2006), (10) when the FIU first published it.
-  A party's rows are one party (its registration number, or a person's name and date of birth, is its id); a hit's
-  remarks say why and for whom ("Controlled by a listed person: Petr Olegovich AVEN (listed from 28.02.2022)"). On
+  A party's rows are one party (its registration number, or a person's name and date of birth, is its id); its
+  programme, which a hit and the list's browsing show, says why and for whom, then the regulation ("Controlled by a listed person: Petr Olegovich AVEN (listed from 28.02.2022)"). On
   2026-11-20: 188 rows, 187 parties (21 people, 166 companies; Russia 43, Cyprus 33, Latvia 30, BVI 20).
 
 ## Feeds looked at and not imported (#89, 2026-11-17)
