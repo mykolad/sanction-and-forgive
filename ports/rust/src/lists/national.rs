@@ -107,8 +107,9 @@ pub fn parse_poland(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
         party.external_id = format!("{} ({apart})", party.external_id);
     }
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-    if let Some(alike) = out.iter().find(|p| !seen.insert(p.external_id.as_str())) {
-        return Err(format_error(format!("Two parties of Poland's list share a name and their identifying data: {}.", alike.primary_name)));
+    // The refusal names no party: an upload's refusal never shows an entry's text.
+    if out.iter().any(|p| !seen.insert(p.external_id.as_str())) {
+        return Err(format_error("Two parties of Poland's list share a name and all their identifying data."));
     }
     Ok(out)
 }
@@ -355,7 +356,11 @@ pub fn parse_latvia(input: &mut dyn BufRead) -> Result<Vec<ParsedSubject>, Parse
     }
 
     let mut out = Vec::new();
-    for p in parties {
+    for mut p in parties {
+        // In a fixed order, whatever the rows' order: a file that only reorders them is the same list.
+        p.reasons.sort();
+        p.acts.sort();
+        p.assets.sort();
         let mut b = Builder::new(&p.id, p.kind);
         b.source_url = Some(LATVIA_PAGE.to_string());
         b.add_name(Some(&p.name), false, true);
@@ -658,48 +663,46 @@ mod tests {
             "9. FID pārbaudīts*",
             "10. Datums, kad FID pirmo reizi publicējis informāciju par sankciju subjektu",
         ];
-        let file = workbook(&[(
-            "Dati",
+        let rows = vec![
+            header,
             vec![
-                header,
-                vec![
-                    "\"Fikcija Baltija SIA\"",
-                    "50003698011",
-                    "Latvija",
-                    "Līdzekļi; kapitāldaļas",
-                    "Sankciju sarakstā iekļautas personas īpašumtiesības",
-                    "Ivan FIKTIVNY",
-                    "25.02.2022.",
-                    "269/2014",
-                    "Pārbaudīts",
-                    "17.04.2024.",
-                ],
-                vec![
-                    "\"Fikcija Baltija SIA\"",
-                    "50003698011",
-                    "Latvija",
-                    "Līdzekļi",
-                    "Sankciju sarakstā iekļautas personas kontrole",
-                    "Petr FIKTIVNY",
-                    "28.02.2022.",
-                    "269/2014\n208/2014",
-                    "Nē",
-                    "19.11.2026.",
-                ],
-                vec![
-                    "Ivan FIKTIVNY",
-                    "16.03.1955.",
-                    "Latvija, Krievija",
-                    "Līdzekļi",
-                    "Persona iekļauta sankciju sarakstā",
-                    "Ivan FIKTIVNY",
-                    "28.02.2022.",
-                    "269/2014",
-                    "Pārbaudīts",
-                    "17.04.2024.",
-                ],
+                "\"Fikcija Baltija SIA\"",
+                "50003698011",
+                "Latvija",
+                "Līdzekļi; kapitāldaļas",
+                "Sankciju sarakstā iekļautas personas īpašumtiesības",
+                "Ivan FIKTIVNY",
+                "25.02.2022.",
+                "269/2014",
+                "Pārbaudīts",
+                "17.04.2024.",
             ],
-        )]);
+            vec![
+                "\"Fikcija Baltija SIA\"",
+                "50003698011",
+                "Latvija",
+                "Līdzekļi",
+                "Sankciju sarakstā iekļautas personas kontrole",
+                "Petr FIKTIVNY",
+                "28.02.2022.",
+                "269/2014\n208/2014",
+                "Nē",
+                "19.11.2026.",
+            ],
+            vec![
+                "Ivan FIKTIVNY",
+                "16.03.1955.",
+                "Latvija, Krievija",
+                "Līdzekļi",
+                "Persona iekļauta sankciju sarakstā",
+                "Ivan FIKTIVNY",
+                "28.02.2022.",
+                "269/2014",
+                "Pārbaudīts",
+                "17.04.2024.",
+            ],
+        ];
+        let file = workbook(&[("Dati", rows.clone())]);
         let parties = parse_latvia(&mut file.as_slice()).unwrap();
         assert_eq!(parties.len(), 2);
         let company = &parties[0];
@@ -708,9 +711,17 @@ mod tests {
         assert_eq!((company.addresses[0].raw.as_str(), company.addresses[0].country_code.as_deref()), ("Latvija", Some("LV")));
         // Why and for whom it's frozen, where a hit shows it: the programme.
         let programme = company.programmes.as_deref().unwrap();
-        assert!(programme.starts_with("Owned by a listed person: Ivan FIKTIVNY (listed from 25.02.2022)"), "{programme}");
-        assert!(programme.contains("Controlled by a listed person: Petr FIKTIVNY") && programme.contains("208/2014"), "{programme}");
-        assert_eq!(company.remarks.as_deref(), Some("Frozen in Latvia: Līdzekļi; kapitāldaļas; Līdzekļi"));
+        assert!(programme.starts_with("Controlled by a listed person: Petr FIKTIVNY (listed from 28.02.2022); Owned by a listed person: Ivan FIKTIVNY (listed from 25.02.2022); "), "{programme}");
+        assert!(programme.contains("208/2014"), "{programme}");
+        assert_eq!(company.remarks.as_deref(), Some("Frozen in Latvia: Līdzekļi; Līdzekļi; kapitāldaļas"));
+        // The same rows in another order are the same parties.
+        let mut reordered_rows = rows.clone();
+        reordered_rows.swap(1, 2);
+        let reordered = parse_latvia(&mut workbook(&[("Dati", reordered_rows)]).as_slice()).unwrap();
+        assert_eq!(
+            (reordered[0].programmes.as_deref(), reordered[0].remarks.as_deref()),
+            (company.programmes.as_deref(), company.remarks.as_deref())
+        );
         assert_eq!(company.listed_on, chrono::NaiveDate::from_ymd_opt(2024, 4, 17));
         let person = &parties[1];
         assert_eq!((person.kind, person.birth_dates.as_slice()), (SubjectType::Individual, ["1955-03-16".to_string()].as_slice()));
